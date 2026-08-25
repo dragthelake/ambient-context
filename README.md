@@ -3,6 +3,10 @@
 A macOS menu bar app that keeps a written record of what you work on, for
 your own LLM to read.
 
+<p align="center">
+  <img src="docs/ambient-context.gif" width="520" alt="Ambient Context settings window, with the ASCII eye open while recording" />
+</p>
+
 While the eye in your menu bar is open, Ambient Context reads the text of
 whichever window you have focused (via the macOS accessibility tree, every
 few seconds) and appends it to a plain markdown file: one file per day, in
