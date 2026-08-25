@@ -38,7 +38,24 @@ struct OpenBlock {
     end: DateTime<Local>,
     lines: Vec<String>,
     seen: HashSet<String>,
+    // Skeletons of digit-heavy lines already in the block, so a timer or
+    // counter ticking across polls lands once instead of once per tick.
+    skeletons: HashSet<String>,
     last_text: Vec<String>,
+}
+
+fn admit(line: &str, seen: &mut HashSet<String>, skeletons: &mut HashSet<String>) -> bool {
+    if seen.contains(line) {
+        return false;
+    }
+    if crate::prune::is_digit_heavy(line) {
+        let skeleton = crate::prune::skeleton(line);
+        if !skeletons.insert(skeleton) {
+            return false;
+        }
+    }
+    seen.insert(line.to_string());
+    true
 }
 
 pub struct Segmenter {
@@ -80,7 +97,7 @@ impl Segmenter {
                 open.url = snapshot.url;
             }
             for line in &snapshot.text {
-                if open.seen.insert(line.clone()) {
+                if admit(line, &mut open.seen, &mut open.skeletons) {
                     open.lines.push(line.clone());
                 }
             }
@@ -90,9 +107,10 @@ impl Segmenter {
 
         let finished = self.close(now);
         let mut seen = HashSet::new();
+        let mut skeletons = HashSet::new();
         let mut lines = Vec::new();
         for line in &snapshot.text {
-            if seen.insert(line.clone()) {
+            if admit(line, &mut seen, &mut skeletons) {
                 lines.push(line.clone());
             }
         }
@@ -105,6 +123,7 @@ impl Segmenter {
             end: now,
             lines,
             seen,
+            skeletons,
             last_text: snapshot.text,
         });
         finished
@@ -152,6 +171,17 @@ mod tests {
             text: text.iter().map(|s| s.to_string()).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_ticking_counter_lands_once_per_block() {
+        let mut seg = Segmenter::new(0, 0.3);
+        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:41"]), at(0));
+        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:46"]), at(5));
+        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:51"]), at(10));
+        let block = seg.flush(at(60)).unwrap();
+        let timers: Vec<_> = block.lines.iter().filter(|l| l.contains(':')).collect();
+        assert_eq!(timers, vec!["1:41"], "later ticks share the skeleton");
     }
 
     #[test]

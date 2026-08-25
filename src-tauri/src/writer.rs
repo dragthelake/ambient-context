@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 pub struct DayDedup {
     date: Option<NaiveDate>,
     seen: HashSet<u64>,
+    // Skeletons (digits normalised) of lines where a repeat with different
+    // numbers is a re-capture: the same tweet with its "ago" counter ticked,
+    // the same story row with a new vote count.
+    skeletons: HashSet<u64>,
 }
 
 impl DayDedup {
@@ -19,6 +23,7 @@ impl DayDedup {
         DayDedup {
             date: None,
             seen: HashSet::new(),
+            skeletons: HashSet::new(),
         }
     }
 
@@ -37,6 +42,7 @@ impl DayDedup {
         }
         self.date = Some(date);
         self.seen.clear();
+        self.skeletons.clear();
         if let Ok(existing) = fs::read_to_string(file_path(folder, date)) {
             for line in existing.lines() {
                 if line.is_empty()
@@ -50,6 +56,10 @@ impl DayDedup {
                     continue;
                 }
                 self.seen.insert(Self::hash(line));
+                if crate::prune::is_skeleton_dedupable(line) {
+                    self.skeletons
+                        .insert(Self::hash(&crate::prune::skeleton(line)));
+                }
             }
         }
     }
@@ -62,11 +72,22 @@ impl DayDedup {
         // its lines would recreate it as bare headings.
         if !self.seen.is_empty() && !file_path(folder, date).exists() {
             self.seen.clear();
+            self.skeletons.clear();
         }
         block
             .lines
             .iter()
-            .filter(|line| self.seen.insert(Self::hash(line)))
+            .filter(|line| {
+                if !self.seen.insert(Self::hash(line)) {
+                    return false;
+                }
+                if crate::prune::is_skeleton_dedupable(line) {
+                    return self
+                        .skeletons
+                        .insert(Self::hash(&crate::prune::skeleton(line)));
+                }
+                true
+            })
             .cloned()
             .collect()
     }
@@ -76,6 +97,7 @@ impl DayDedup {
     pub fn reset(&mut self) {
         self.date = None;
         self.seen.clear();
+        self.skeletons.clear();
     }
 }
 
@@ -329,6 +351,27 @@ mod tests {
         let path = file_path(dir_b.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
         assert!(contents.contains("read the issue"));
+    }
+
+    #[test]
+    fn digit_varying_recaptures_write_once_per_day() {
+        let dir = tempdir().unwrap();
+        let mut dedup = DayDedup::new();
+        let tweet_v1 = "Dan Verified account @dan 5 hours ago so 3 things broke today".to_string();
+        let tweet_v2 = "Dan Verified account @dan 6 hours ago so 3 things broke today".to_string();
+
+        let mut first = block_at(9, 14, 41);
+        first.lines = vec![tweet_v1.clone()];
+        append_block(dir.path(), &first, &mut dedup).unwrap();
+
+        let mut second = block_at(10, 0, 20);
+        second.lines = vec![tweet_v2];
+        append_block(dir.path(), &second, &mut dedup).unwrap();
+
+        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
+        let contents = fs::read_to_string(path).unwrap();
+        assert!(contents.contains(&tweet_v1));
+        assert!(!contents.contains("6 hours ago"), "the re-capture is dropped");
     }
 
     #[test]
