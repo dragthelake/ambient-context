@@ -25,22 +25,35 @@ impl TrayState {
     }
 }
 
-/// Rebuilds the icon and the two status lines. Called after every state
-/// change so the menu bar always reflects what is actually happening.
-pub fn refresh(app: &AppHandle, capturing: bool, blocks: usize) {
-    let state = if capturing {
-        TrayState::Capturing
-    } else if reader::macos::permission_status() == reader::Permission::NotGranted {
-        TrayState::NeedsAttention
-    } else {
-        TrayState::Off
-    };
-    let _ = set_state(app, state);
+/// Rebuilds the icon and the toggle label. Called after every state change
+/// so the menu bar always reflects what is actually happening. Marshalled
+/// onto the main thread because the capture thread calls this too, and menu
+/// construction on macOS is main-thread-only.
+pub fn refresh(app: &AppHandle, capturing: bool) {
+    let handle = app.clone();
+    let queued = app.run_on_main_thread(move || {
+        let state = if capturing {
+            TrayState::Capturing
+        } else if reader::macos::permission_status() == reader::Permission::NotGranted {
+            TrayState::NeedsAttention
+        } else {
+            TrayState::Off
+        };
+        let _ = set_state(&handle, state);
 
-    if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        if let Ok(menu) = build_menu(app, capturing, blocks) {
-            let _ = tray.set_menu(Some(menu));
+        if let Some(tray) = handle.tray_by_id(TRAY_ID) {
+            match build_menu(&handle, capturing) {
+                Ok(menu) => {
+                    if let Err(e) = tray.set_menu(Some(menu)) {
+                        eprintln!("[tray] set_menu failed: {e}");
+                    }
+                }
+                Err(e) => eprintln!("[tray] build_menu failed: {e}"),
+            }
         }
+    });
+    if let Err(e) = queued {
+        eprintln!("[tray] run_on_main_thread failed: {e}");
     }
 }
 
@@ -52,15 +65,7 @@ pub fn set_state(app: &AppHandle, state: TrayState) -> tauri::Result<()> {
     Ok(())
 }
 
-fn status_text(capturing: bool, blocks: usize) -> String {
-    if capturing {
-        format!("Capturing \u{00b7} {blocks} blocks today")
-    } else {
-        "Not capturing".to_string()
-    }
-}
-
-fn build_menu(app: &AppHandle, capturing: bool, blocks: usize) -> tauri::Result<Menu<tauri::Wry>> {
+fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry>> {
     let version = MenuItem::with_id(
         app,
         "version",
@@ -68,33 +73,23 @@ fn build_menu(app: &AppHandle, capturing: bool, blocks: usize) -> tauri::Result<
         false,
         None::<&str>,
     )?;
-    let status = MenuItem::with_id(
+    let toggle = MenuItem::with_id(
         app,
-        "status",
-        status_text(capturing, blocks),
-        false,
+        "toggle",
+        if capturing {
+            "Stop Capturing"
+        } else {
+            "Start Capturing"
+        },
+        true,
         None::<&str>,
     )?;
     let open_today = MenuItem::with_id(app, "open_today", "Open Today's File", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
-    let change = MenuItem::with_id(
-        app,
-        "change_folder",
-        "Change Folder\u{2026}",
-        true,
-        None::<&str>,
-    )?;
     let setup = MenuItem::with_id(
         app,
         "setup",
-        "Setup & Permissions\u{2026}",
-        true,
-        None::<&str>,
-    )?;
-    let updates = MenuItem::with_id(
-        app,
-        "updates",
-        "Check for Updates\u{2026}",
+        "Settings\u{2026}",
         true,
         None::<&str>,
     )?;
@@ -104,22 +99,54 @@ fn build_menu(app: &AppHandle, capturing: bool, blocks: usize) -> tauri::Result<
         app,
         &[
             &version,
-            &status,
+            &toggle,
             &PredefinedMenuItem::separator(app)?,
             &open_today,
             &reveal,
-            &change,
             &PredefinedMenuItem::separator(app)?,
             &setup,
-            &updates,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
     )
 }
 
+/// Starts or stops capture. Shared by the left click on the icon, the
+/// Start/Stop Capturing menu item, and the settings page's switch, so they
+/// can never drift apart. Permission missing or no folder chosen: open
+/// setup rather than failing silently.
+pub fn toggle_capture(app: &AppHandle) {
+    if reader::macos::permission_status() == reader::Permission::NotGranted {
+        crate::open_setup_window(app);
+        return;
+    }
+    let config = settings::load(app);
+    if config.folder.is_none() {
+        crate::open_setup_window(app);
+        return;
+    }
+
+    let state = app.state::<capture::CaptureState>().inner().clone();
+    let mut config = config;
+    if state.is_running() {
+        capture::stop(&state);
+        // An explicit stop is remembered: the app will not auto-start
+        // capture again until the user starts it.
+        config.enabled = false;
+        let _ = settings::save(app, &config);
+        // The thread notices within ~100ms and flushes on its way
+        // out, but the icon must empty now, not when it does.
+        refresh(app, false);
+    } else {
+        config.enabled = true;
+        let _ = settings::save(app, &config);
+        capture::start(app.clone(), &state, config);
+        refresh(app, true);
+    }
+}
+
 pub fn build(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app, false, 0)?;
+    let menu = build_menu(app, false)?;
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(TrayState::Off.icon_bytes())?)
@@ -141,8 +168,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                         let _ = std::process::Command::new("open").arg(folder).spawn();
                     }
                 }
-                "change_folder" | "setup" => crate::open_setup_window(app),
-                "updates" => crate::check_for_updates(app),
+                "toggle" => toggle_capture(app),
+                "setup" => crate::open_setup_window(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();
                     capture::stop(&state);
@@ -161,31 +188,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             else {
                 return;
             };
-            let app = tray.app_handle().clone();
-            let state = app.state::<capture::CaptureState>().inner().clone();
-
-            // Permission missing or no folder chosen: open setup rather than
-            // failing silently. This is the only path that opens a window
-            // from a left click.
-            if reader::macos::permission_status() == reader::Permission::NotGranted {
-                crate::open_setup_window(&app);
-                return;
-            }
-            let config = settings::load(&app);
-            if config.folder.is_none() {
-                crate::open_setup_window(&app);
-                return;
-            }
-
-            if state.is_running() {
-                capture::stop(&state);
-                // The thread notices within ~100ms and flushes on its way
-                // out, but the icon must empty now, not when it does.
-                refresh(&app, false, state.blocks_today());
-            } else {
-                capture::start(app.clone(), &state, config);
-                refresh(&app, true, state.blocks_today());
-            }
+            toggle_capture(tray.app_handle());
         })
         .build(app)?;
 

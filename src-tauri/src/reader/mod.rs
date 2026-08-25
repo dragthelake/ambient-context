@@ -3,10 +3,14 @@ pub mod windows;
 
 use serde::Deserialize;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Snapshot {
     pub app: String,
     pub window_title: Option<String>,
+    /// Path of the window's backing file, where the app exposes one.
+    pub document: Option<String>,
+    /// Page URL of the window's main web area, for browsers.
+    pub url: Option<String>,
     pub text: Vec<String>,
 }
 
@@ -53,6 +57,10 @@ pub fn permission_from_code(code: i32) -> Permission {
 struct RawSnapshot {
     app: String,
     window_title: Option<String>,
+    #[serde(default)]
+    document: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
     text: Vec<String>,
 }
 
@@ -67,6 +75,8 @@ pub fn parse_snapshot_json(raw: &str) -> Result<Snapshot, String> {
     Ok(Snapshot {
         app: parsed.app,
         window_title: parsed.window_title,
+        document: parsed.document,
+        url: parsed.url,
         text: parsed.text,
     })
 }

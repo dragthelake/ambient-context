@@ -15,7 +15,3 @@ pub fn request_permission() -> Permission {
 pub fn snapshot() -> Option<Snapshot> {
     None
 }
-
-pub fn enable_frontmost() -> bool {
-    false
-}

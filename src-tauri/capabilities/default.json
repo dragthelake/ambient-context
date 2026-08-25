@@ -5,6 +5,8 @@
   "windows": ["setup"],
   "permissions": [
     "core:default",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
     "dialog:default",
     "updater:default",
     "process:default"

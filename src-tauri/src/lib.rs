@@ -1,4 +1,5 @@
 mod capture;
+mod prune;
 mod reader;
 mod redact;
 mod segment;
@@ -32,8 +33,11 @@ fn current_folder(app: tauri::AppHandle) -> Option<String> {
         .map(|p| p.to_string_lossy().to_string())
 }
 
+// Async so it runs on the async runtime's thread pool rather than the main
+// thread: blocking_pick_folder parks its calling thread while the dialog
+// itself needs the main thread to run.
 #[tauri::command]
-fn choose_folder(app: tauri::AppHandle) -> Option<String> {
+async fn choose_folder(app: tauri::AppHandle) -> Option<String> {
     let picked = app.dialog().file().blocking_pick_folder()?;
     let path = picked.into_path().ok()?;
     let mut config = settings::load(&app);
@@ -49,10 +53,58 @@ fn choose_folder(app: tauri::AppHandle) -> Option<String> {
 fn use_default_folder(app: tauri::AppHandle) -> Option<String> {
     let home = app.path().home_dir().ok()?;
     let path = home.join("Ambient Context");
+    // Create it now, not at first write: Reveal Folder and Open Today's File
+    // are dead until the folder exists, which reads as a broken app.
+    std::fs::create_dir_all(&path).ok()?;
     let mut config = settings::load(&app);
     config.folder = Some(path.clone());
     let _ = settings::save(&app, &config);
     Some(path.to_string_lossy().to_string())
+}
+
+#[derive(Serialize)]
+struct CaptureStatus {
+    running: bool,
+    blocks_today: usize,
+}
+
+#[tauri::command]
+fn capture_status(state: tauri::State<capture::CaptureState>) -> CaptureStatus {
+    CaptureStatus {
+        running: state.is_running(),
+        blocks_today: state.blocks_today(),
+    }
+}
+
+/// Starts capture if the app just became ready and nothing has told it not
+/// to: called by the settings page when the permission grant arrives while
+/// the app is already running, where the launch-time auto-start cannot help.
+#[tauri::command]
+fn start_if_enabled(app: tauri::AppHandle) -> CaptureStatus {
+    let state = app.state::<capture::CaptureState>().inner().clone();
+    let config = settings::load(&app);
+    if !state.is_running()
+        && config.enabled
+        && config.folder.is_some()
+        && reader::macos::permission_status() == reader::Permission::Granted
+    {
+        capture::start(app.clone(), &state, config);
+        tray::refresh(&app, true);
+    }
+    CaptureStatus {
+        running: state.is_running(),
+        blocks_today: state.blocks_today(),
+    }
+}
+
+#[tauri::command]
+fn toggle_capture(app: tauri::AppHandle) -> CaptureStatus {
+    tray::toggle_capture(&app);
+    let state = app.state::<capture::CaptureState>();
+    CaptureStatus {
+        running: state.is_running(),
+        blocks_today: state.blocks_today(),
+    }
 }
 
 #[derive(Serialize)]
@@ -88,9 +140,13 @@ fn census_snapshot() -> Option<CensusSnapshot> {
     })
 }
 
+/// Opens a link in the user's default browser. The webview itself must
+/// never navigate away from the settings page.
 #[tauri::command]
-fn enable_frontmost_accessibility() -> bool {
-    reader::macos::enable_frontmost()
+fn open_link(url: String) {
+    if url.starts_with("https://") {
+        let _ = std::process::Command::new("open").arg(url).spawn();
+    }
 }
 
 pub fn open_setup_window(app: &tauri::AppHandle) {
@@ -99,11 +155,21 @@ pub fn open_setup_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    let _ = WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
-        .title("Ambient Context")
-        .inner_size(520.0, 620.0)
-        .resizable(false)
-        .build();
+    // An Accessory-policy app is not frontmost when a tray menu item fires,
+    // so a freshly built window appears behind whatever has focus and looks
+    // like it needs a second click. Focus it explicitly.
+    // No native chrome: the page draws its own titlebar, which drags the
+    // window and carries the close button.
+    if let Ok(window) =
+        WebviewWindowBuilder::new(app, "setup", WebviewUrl::App("index.html".into()))
+            .title("Settings")
+            .inner_size(520.0, 620.0)
+            .resizable(false)
+            .decorations(false)
+            .build()
+    {
+        let _ = window.set_focus();
+    }
 }
 
 pub fn check_for_updates(app: &tauri::AppHandle) {
@@ -187,8 +253,11 @@ pub fn run() {
             current_folder,
             choose_folder,
             use_default_folder,
+            capture_status,
+            start_if_enabled,
+            toggle_capture,
             census_snapshot,
-            enable_frontmost_accessibility
+            open_link
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -202,9 +271,25 @@ pub fn run() {
                 || config.folder.is_none()
             {
                 open_setup_window(app.handle());
+            } else if config.enabled {
+                // Recording is the default state of a set-up app. Only an
+                // explicit stop (persisted as enabled=false) prevents this.
+                let state = app.state::<capture::CaptureState>().inner().clone();
+                capture::start(app.handle().clone(), &state, config);
+                tray::refresh(app.handle(), true);
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app, event| {
+            // Closing the setup window must not quit a menu bar app. A
+            // window-close exit request carries no code; the Quit menu item
+            // calls app.exit(0), which does, and passes through.
+            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
+                if code.is_none() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

@@ -6,6 +6,10 @@ use tauri::{AppHandle, Manager, Runtime};
 #[serde(default)]
 pub struct Settings {
     pub folder: Option<PathBuf>,
+    /// Whether capture starts by itself once the app is set up. Turned off
+    /// only by the user explicitly stopping, and it stays off across
+    /// launches until they start again.
+    pub enabled: bool,
     pub interval_secs: u64,
     pub min_dwell_secs: i64,
     pub similarity_threshold: f64,
@@ -15,8 +19,12 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             folder: None,
+            enabled: true,
             interval_secs: 5,
-            min_dwell_secs: 30,
+            // Under ten seconds in a window is transit; over it is usually a
+            // real interaction. Day-level dedup keeps the cost of borderline
+            // blocks to a heading.
+            min_dwell_secs: 10,
             similarity_threshold: 0.5,
         }
     }
@@ -62,7 +70,7 @@ mod tests {
     fn defaults_are_five_seconds_and_no_folder() {
         let settings = Settings::default();
         assert_eq!(settings.interval_secs, 5);
-        assert_eq!(settings.min_dwell_secs, 30);
+        assert_eq!(settings.min_dwell_secs, 10);
         assert_eq!(settings.folder, None);
     }
 
@@ -100,6 +108,6 @@ mod tests {
         std::fs::write(&path, r#"{"interval_secs": 20}"#).unwrap();
         let settings = read_from(&path);
         assert_eq!(settings.interval_secs, 20);
-        assert_eq!(settings.min_dwell_secs, 30);
+        assert_eq!(settings.min_dwell_secs, 10);
     }
 }

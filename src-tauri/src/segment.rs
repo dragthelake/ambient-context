@@ -6,6 +6,8 @@ use std::collections::HashSet;
 pub struct Block {
     pub app: String,
     pub title: Option<String>,
+    pub document: Option<String>,
+    pub url: Option<String>,
     pub start: DateTime<Local>,
     pub end: DateTime<Local>,
     pub lines: Vec<String>,
@@ -30,6 +32,8 @@ pub fn jaccard(a: &[String], b: &[String]) -> f64 {
 struct OpenBlock {
     app: String,
     title: Option<String>,
+    document: Option<String>,
+    url: Option<String>,
     start: DateTime<Local>,
     end: DateTime<Local>,
     lines: Vec<String>,
@@ -67,6 +71,14 @@ impl Segmenter {
         if !starts_new {
             let open = self.open.as_mut().expect("checked above");
             open.end = now;
+            // A reference can arrive late: the first reads of a freshly
+            // enabled web area often lack the URL the later ones carry.
+            if open.document.is_none() {
+                open.document = snapshot.document;
+            }
+            if open.url.is_none() {
+                open.url = snapshot.url;
+            }
             for line in &snapshot.text {
                 if open.seen.insert(line.clone()) {
                     open.lines.push(line.clone());
@@ -87,6 +99,8 @@ impl Segmenter {
         self.open = Some(OpenBlock {
             app: snapshot.app,
             title: snapshot.window_title,
+            document: snapshot.document,
+            url: snapshot.url,
             start: now,
             end: now,
             lines,
@@ -113,6 +127,8 @@ impl Segmenter {
         Some(Block {
             app: open.app,
             title: open.title,
+            document: open.document,
+            url: open.url,
             start: open.start,
             end,
             lines: open.lines,
@@ -134,7 +150,19 @@ mod tests {
             app: app.to_string(),
             window_title: Some(title.to_string()),
             text: text.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_reference_arriving_late_is_kept_on_the_block() {
+        let mut seg = Segmenter::new(0, 0.5);
+        seg.push(snap("Safari", "Tauri docs", &["one two"]), at(0));
+        let mut with_url = snap("Safari", "Tauri docs", &["one two"]);
+        with_url.url = Some("https://v2.tauri.app/".to_string());
+        seg.push(with_url, at(5));
+        let block = seg.flush(at(60)).unwrap();
+        assert_eq!(block.url.as_deref(), Some("https://v2.tauri.app/"));
     }
 
     #[test]

@@ -81,6 +81,8 @@ pub fn redact_snapshot(snapshot: Snapshot) -> Option<Snapshot> {
     Some(Snapshot {
         app: snapshot.app,
         window_title: snapshot.window_title.map(|t| redact_line(&t)),
+        document: snapshot.document.map(|d| redact_line(&d)),
+        url: snapshot.url.map(|u| redact_line(&u)),
         text: snapshot.text.iter().map(|l| redact_line(l)).collect(),
     })
 }
@@ -154,6 +156,7 @@ mod tests {
             app: "Safari".to_string(),
             window_title: Some("Bankwest - Private Browsing".to_string()),
             text: vec!["account balance".to_string()],
+            ..Default::default()
         };
         assert!(redact_snapshot(snapshot).is_none());
     }
@@ -164,6 +167,7 @@ mod tests {
             app: "1Password".to_string(),
             window_title: Some("Vault".to_string()),
             text: vec!["secret".to_string()],
+            ..Default::default()
         };
         assert!(redact_snapshot(snapshot).is_none());
     }
@@ -174,8 +178,21 @@ mod tests {
             app: "Terminal".to_string(),
             window_title: Some("export TOKEN=abcdefghijklmnopqrst".to_string()),
             text: vec![],
+            ..Default::default()
         };
         let out = redact_snapshot(snapshot).unwrap();
         assert!(!out.window_title.unwrap().contains("abcdefghijklmnopqrst"));
+    }
+
+    #[test]
+    fn redacts_secrets_inside_urls() {
+        let snapshot = Snapshot {
+            app: "Safari".to_string(),
+            window_title: Some("Dashboard".to_string()),
+            url: Some("https://example.com/cb?token=abcdefghijklmnopqrst".to_string()),
+            ..Default::default()
+        };
+        let out = redact_snapshot(snapshot).unwrap();
+        assert!(!out.url.unwrap().contains("abcdefghijklmnopqrst"));
     }
 }

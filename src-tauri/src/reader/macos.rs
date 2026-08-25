@@ -6,7 +6,6 @@ use swift_rs::{swift, SRString};
 swift!(fn ambient_ax_permission_status() -> i32);
 swift!(fn ambient_ax_request_permission() -> i32);
 swift!(fn ambient_ax_snapshot() -> SRString);
-swift!(fn ambient_ax_enable_frontmost() -> i32);
 
 pub fn permission_status() -> Permission {
     permission_from_code(unsafe { ambient_ax_permission_status() })
@@ -25,8 +24,4 @@ pub fn snapshot() -> Option<Snapshot> {
             None
         }
     }
-}
-
-pub fn enable_frontmost() -> bool {
-    unsafe { ambient_ax_enable_frontmost() == 1 }
 }

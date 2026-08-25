@@ -24,8 +24,12 @@ public func ambientAxRequestPermission() -> Int32 {
     return AXIsProcessTrustedWithOptions(options) ? 1 : 0
 }
 
-private let maxDepth = 6
+// Content in browsers and Electron apps nests 15 to 30 levels deep, so the
+// depth limit exists only to stop runaway recursion, not to bound work; the
+// visit cap is what bounds walk time.
+private let maxDepth = 40
 private let maxElements = 2000
+private let maxVisited = 20000
 
 private func copyAttribute(_ element: AXUIElement, _ attribute: String) -> CFTypeRef? {
     var value: CFTypeRef?
@@ -50,14 +54,26 @@ private func isSecure(_ element: AXUIElement) -> Bool {
 private func collectText(
     from element: AXUIElement,
     into texts: inout [String],
-    depth: Int
+    depth: Int,
+    visited: inout Int,
+    webUrl: inout String?
 ) {
-    if depth > maxDepth || texts.count >= maxElements { return }
+    visited += 1
+    if depth > maxDepth || texts.count >= maxElements || visited > maxVisited { return }
 
     // A secure field and everything inside it is skipped entirely. This is
     // the first of the redaction layers and the only one that can be done
     // before the text is ever read.
     if isSecure(element) { return }
+
+    // The page URL lives on the web area, not the window. First one wins:
+    // the focused window's main web area is reached before any embedded one.
+    if webUrl == nil,
+       let role = copyAttribute(element, kAXRoleAttribute as String) as? String,
+       role == "AXWebArea",
+       let url = copyAttribute(element, "AXURL") {
+        webUrl = (url as? NSURL)?.absoluteString
+    }
 
     for attribute in [kAXValueAttribute as String, kAXTitleAttribute as String] {
         if let value = copyAttribute(element, attribute) as? String {
@@ -70,8 +86,35 @@ private func collectText(
 
     if let children = copyAttribute(element, kAXChildrenAttribute as String) as? [AXUIElement] {
         for child in children {
-            collectText(from: child, into: &texts, depth: depth + 1)
+            collectText(from: child, into: &texts, depth: depth + 1, visited: &visited, webUrl: &webUrl)
         }
+    }
+}
+
+// Chromium builds its accessibility tree only when assistive technology asks
+// for it, so a capture tool must ask. AXManualAccessibility is the attribute
+// Electron added for exactly this per-application switch; Chrome itself only
+// responds to AXEnhancedUserInterface, the VoiceOver signal. Native apps
+// return an error for both, harmlessly. Once per pid, so the poll loop does
+// not spam IPC; a relaunched app gets a new pid and is enabled again.
+private let enabledPidsLock = NSLock()
+private var enabledPids = Set<pid_t>()
+
+private func enableAccessibilityOnce(_ pid: pid_t, _ appElement: AXUIElement, _ appName: String) {
+    enabledPidsLock.lock()
+    let alreadyTried = enabledPids.contains(pid)
+    if !alreadyTried { enabledPids.insert(pid) }
+    enabledPidsLock.unlock()
+    if alreadyTried { return }
+
+    if AXUIElementSetAttributeValue(
+        appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success {
+        FileHandle.standardError.write(Data("[ax] enabled AXManualAccessibility for \(appName)\n".utf8))
+        return
+    }
+    if AXUIElementSetAttributeValue(
+        appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success {
+        FileHandle.standardError.write(Data("[ax] enabled AXEnhancedUserInterface for \(appName)\n".utf8))
     }
 }
 
@@ -104,6 +147,11 @@ public func ambientAxSnapshot() -> SRString {
     // slow target costs a bounded slice of a single tick.
     AXUIElementSetMessagingTimeout(appElement, 0.5)
 
+    // The tree takes a few seconds to build after this first asks, so the
+    // first reads of a freshly enabled app are thin and fill in on later
+    // polls. That is fine for a background loop.
+    enableAccessibilityOnce(frontmost.processIdentifier, appElement, appName)
+
     guard let focused = copyAttribute(appElement, kAXFocusedWindowAttribute as String) else {
         return SRString("ERROR: no focused window")
     }
@@ -111,12 +159,24 @@ public func ambientAxSnapshot() -> SRString {
 
     let title = copyAttribute(window, kAXTitleAttribute as String) as? String
 
+    // The window's backing file, where the app exposes one (Preview, Xcode,
+    // TextEdit and most document apps do). A path is worth more than any
+    // amount of scraped text: the consuming LLM can open the real document.
+    var document = copyAttribute(window, "AXDocument") as? String
+    if document == nil, let docUrl = copyAttribute(window, "AXDocument") {
+        document = (docUrl as? NSURL)?.absoluteString
+    }
+
     var texts: [String] = []
-    collectText(from: window, into: &texts, depth: 0)
+    var visited = 0
+    var webUrl: String? = nil
+    collectText(from: window, into: &texts, depth: 0, visited: &visited, webUrl: &webUrl)
 
     let payload: [String: Any] = [
         "app": appName,
         "window_title": title as Any,
+        "document": document as Any,
+        "url": webUrl as Any,
         "text": texts
     ]
 
@@ -125,19 +185,4 @@ public func ambientAxSnapshot() -> SRString {
         return SRString("ERROR: could not serialise snapshot")
     }
     return SRString(json)
-}
-
-/// Census scaffolding. Enables accessibility in the frontmost application:
-/// AXManualAccessibility for Electron, falling back to AXEnhancedUserInterface
-/// for Chrome itself.
-@_cdecl("ambient_ax_enable_frontmost")
-public func ambientAxEnableFrontmost() -> Int32 {
-    guard let frontmost = NSWorkspace.shared.frontmostApplication else { return 0 }
-    let appElement = AXUIElementCreateApplication(frontmost.processIdentifier)
-    if AXUIElementSetAttributeValue(
-        appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success {
-        return 1
-    }
-    return AXUIElementSetAttributeValue(
-        appElement, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success ? 1 : 0
 }
