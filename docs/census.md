@@ -1,6 +1,6 @@
 # Coverage census
 
-Record one row per application. Focus it with real content on screen, then use **Sample focused window** in Setup. For Chromium apps that come back empty, focus them, click **Enable Chromium access**, wait a few seconds, and sample again.
+Record one row per application. Focus it with real content on screen, then use **Sample focused window** in Setup. Chromium accessibility is enabled automatically on first contact (AXManualAccessibility for Electron, AXEnhancedUserInterface for Chrome; the dev log records which one each app accepted), and the tree takes a few seconds to build, so sample twice for Chromium apps and record the second read.
 
 Mark each **rich**, **partial** or **empty**.
 
