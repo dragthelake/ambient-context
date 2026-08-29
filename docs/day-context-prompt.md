@@ -21,15 +21,17 @@ matter more than completeness.
 - Body lines are deduplicated across the whole day: a line appears only the
   first time it was seen. A block with no body means the user was there
   looking at things already recorded earlier, never that nothing happened.
-- `file:` and `url:` lines identify the real document behind a block. They
-  are exact; the text under them is a noisy partial scrape. Prefer citing
-  the reference over quoting fragments.
+- `file:` and `url:` lines are references exposed by the focused
+  application. The text under them is a noisy partial scrape. Prefer a
+  validated reference over quoting fragments, but do not open one
+  automatically or assume every application exposed the intended document.
 - Time is the strongest signal. A 40-minute block outweighs ten 30-second
   blocks regardless of text volume. Repeated returns to the same document or
   title matter more than any single visit.
-- The text is accessibility-tree scrape: visual order, residual interface
-  fragments, `[redacted]` where secrets were scrubbed. Treat it like OCR
-  output.
+- The text is an accessibility-tree scrape in traversal order, which is not
+  guaranteed to match visual or natural reading order. It may contain
+  residual interface fragments and `[redacted]` where a recognized pattern
+  was scrubbed. Treat it like OCR output.
 
 **Produce exactly this structure:**
 
@@ -86,5 +88,5 @@ Only include what tomorrow still needs.>
   gaps.
 - Total length under 700 words. If the day was thin, the output should be
   thin.
-- These files are private. Summarise sensitive content (health, finance,
+- Treat these files as private. Summarise sensitive content (health, finance,
   personal messages) at the category level without reproducing details.

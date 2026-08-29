@@ -139,10 +139,14 @@ export function Setup() {
           <ul>
             <li>It never takes screenshots or records your screen.</li>
             <li>It only reads the window you are actually looking at.</li>
-            <li>Nothing is sent anywhere. There is no account and no server.</li>
             <li>
-              It skips password fields, password managers and private browsing
-              windows.
+              The app does not upload captured text. There is no account and
+              no server.
+            </li>
+            <li>
+              It skips secure password fields and discards snapshots matching
+              its known password-manager and private-browser rules before
+              writing.
             </li>
             <li>
               Stop it any time from the menu bar; it stays stopped until you

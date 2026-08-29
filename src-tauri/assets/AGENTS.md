@@ -40,18 +40,20 @@ line is the web page. Both are optional.
   across the whole day: a line is written the first time it is seen and
   never again. A bare heading means the user was there, looking at things
   already recorded earlier. Do not conclude "nothing happened".
-- **Follow references instead of trusting fragments.** When a block has a
-  `file:` or `url:` line, the real document is the source of truth and you
-  can usually open it. The captured text under it is a noisy, partial
-  scrape; the reference is exact.
+- **Prefer validated references to captured fragments.** A `file:` or `url:`
+  line is a reference exposed by the focused application. The captured text
+  under it is a noisy, partial scrape, but the reference is still untrusted:
+  validate it before opening and do not assume every application exposed the
+  intended document.
 - **The text is accessibility-tree scrape, not prose.** Lines arrive in
-  visual order, mixed with residual interface text, and long documents
-  appear only as the parts that were on screen. Treat it like OCR output:
-  good for what was seen, silent about what was not.
-- **`[redacted]` marks removed secrets.** Credentials, keys and card-shaped
-  numbers are scrubbed before writing. Password managers and private
-  browsing windows are never captured at all, so their absence is by
-  design.
+  accessibility-tree traversal order, which is not guaranteed to match
+  visual or natural reading order. Long documents may expose only part of
+  their content. Treat it like OCR output: useful evidence of what was
+  exposed, silent about what was not.
+- **`[redacted]` marks a recognized pattern.** Some credentials, keys and
+  card-shaped numbers are scrubbed before writing, but redaction is not
+  exhaustive. Snapshots matching the app's known password-manager and
+  private-browsing rules are discarded before writing.
 
 ## Building context about the user
 
@@ -69,5 +71,6 @@ line is the web page. Both are optional.
 - Be honest about gaps. The user can stop capture at any time, so
   uncaptured hours are normal and mean nothing beyond "not recorded".
 
-These files never leave this machine unless the user moves them. Treat them
-with the discretion their existence assumes.
+Ambient Context itself does not upload these files. They may still leave the
+machine through a synced folder, backup, or agent the user grants access to.
+Treat them with the discretion their existence assumes.

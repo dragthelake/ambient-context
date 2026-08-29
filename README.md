@@ -16,22 +16,35 @@ projects, or write your standup for you.
 
 - **No screenshots, no video.** It reads text through the accessibility
   API, nothing else.
-- **Nothing leaves your machine.** No account, no server, no telemetry, no
-  bundled model. This build makes no network calls at all; the signed
-  release will add a single update check against GitHub.
+- **No built-in upload.** No account, no server, no telemetry, no bundled
+  model. This build's capture pipeline makes no network calls; the signed
+  release will add a single update check against GitHub. A synced output
+  folder or hosted agent is a separate data boundary you control.
 - **Files you own.** Plain markdown in a folder you chose. Move them,
   grep them, delete them.
-- **Redaction before writing.** Password managers and private browsing
-  windows are never captured. Password fields are skipped at the source,
-  and credentials, API keys and card-shaped numbers are scrubbed before
-  anything touches disk.
+- **Redaction before writing.** Recognized password-manager and private-
+  browsing snapshots are discarded before writing. Secure password fields
+  are skipped at the source, and recognized credentials, API keys and
+  card-shaped numbers are scrubbed before anything touches disk.
 - **Built to be read by an LLM.** Lines are deduplicated across the day,
-  interface junk is filtered out, and each block records the document path
-  or URL it was looking at so your agent can open the real thing instead
-  of trusting fragments. The folder carries an `AGENTS.md` explaining the
-  format to whatever reads it.
+  interface junk is filtered out, and blocks record a document path or URL
+  where the focused application exposes one. The folder carries an
+  `AGENTS.md` explaining the format to whatever reads it.
 
 Requires macOS 14+ on Apple Silicon.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — capture lifecycle, component map,
+  data flow and failure behavior
+- [Privacy and security](docs/privacy-and-security.md) — trust boundary,
+  control layers, claims matrix and known gaps
+- [Capture format](docs/capture-format.md) — file contract, deduplication and
+  safe interpretation rules
+- [Coverage census](docs/census.md) — manual application-compatibility and
+  Chromium-cost test protocol
+- [Day-context prompt](docs/day-context-prompt.md) — optional prompt for
+  distilling one captured day
 
 ## Status
 
@@ -48,11 +61,15 @@ Command Line Tools.
 git clone https://github.com/dragthelake/ambient-context
 cd ambient-context
 npm install
-npm run tauri build
+npm run tauri build -- --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}'
 ```
 
 The app lands in `src-tauri/target/release/bundle/macos/`. Drag
 `Ambient Context.app` to Applications and open it.
+
+The config override disables release-updater artifacts, which require the
+maintainer's private signing key. Release maintainers can use the ordinary
+`npm run tauri build` command with that key configured.
 
 For development, `npm run tauri dev` runs it with hot reload.
 
@@ -111,10 +128,13 @@ cd src-tauri && cargo test
 
 ## Privacy model, in one paragraph
 
-The app reads only the focused window: never background windows, other
-displays or minimised windows, and never while the screen is locked. It
-excludes password managers and private browsing entirely, skips secure
-input fields at the accessibility level, and pattern-scrubs secrets before
-writing. Everything it produces is plaintext on your own disk, and the
-capture folder is excluded from capture so it cannot observe itself. If
-you find a hole in any of this, please open an issue.
+The app asks macOS for the frontmost application's focused window and does
+not enumerate background or minimised windows. It returns no snapshot while
+the screen is locked, skips secure input subtrees at the Accessibility level,
+discards snapshots matching its known password-manager and private-browser
+rules, and pattern-scrubs recognized secrets before writing. Everything it
+produces is plaintext on your own disk. Self-capture avoidance and redaction
+are defense-in-depth heuristics, not guarantees, and a folder you sync or give
+to a hosted agent may leave the machine. Read the full
+[privacy and security model](docs/privacy-and-security.md); if you find a
+hole, please open an issue without including real captured secrets.
