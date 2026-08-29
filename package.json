@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "docs:dev": "vite --open /docs/",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "docs:preview": "vite preview --open /docs/",
     "tauri": "tauri"
   },
   "dependencies": {

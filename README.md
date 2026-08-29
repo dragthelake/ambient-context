@@ -46,6 +46,16 @@ Requires macOS 14+ on Apple Silicon.
 - [Day-context prompt](docs/day-context-prompt.md) — optional prompt for
   distilling one captured day
 
+The same material is available as a local documentation site:
+
+```bash
+npm run docs:dev
+```
+
+Vite opens the site at `/docs/`. `npm run build` produces both the Tauri
+frontend and the static documentation site; use `npm run docs:preview` to
+inspect that production build locally.
+
 ## Status
 
 Early and unsigned. There is no notarised download yet (Apple Developer
