@@ -5,6 +5,7 @@ mod reader;
 mod redact;
 mod segment;
 mod settings;
+mod summarise;
 mod tray;
 mod writer;
 
