@@ -100,8 +100,13 @@ pub fn read_day(
 /// `## HH:MM–HH:MM · App · Title`.
 fn heading_time(line: &str) -> Option<&str> {
     let rest = line.strip_prefix("## ")?;
-    if rest.len() >= 5 && valid_time(&rest[0..5]).is_ok() {
-        Some(&rest[0..5])
+    // Captured window text is written verbatim into block bodies, so a
+    // heading can begin with any character at all. Slicing five bytes off
+    // one that begins mid-character panics the whole server process, so
+    // ask for the five bytes rather than taking them.
+    let start = rest.get(0..5)?;
+    if valid_time(start).is_ok() {
+        Some(start)
     } else {
         None
     }
@@ -246,6 +251,44 @@ mod tests {
         )
         .unwrap();
         dir
+    }
+
+    #[test]
+    fn a_multibyte_heading_is_not_a_time_rather_than_a_panic() {
+        // Captured text goes into block bodies verbatim, so a line that
+        // starts with "## " and a non-ASCII character reaches this code.
+        assert_eq!(
+            heading_time("## \u{65e5}\u{672c}\u{8a9e}\u{306e}\u{898b}\u{51fa}\u{3057}"),
+            None
+        );
+        assert_eq!(heading_time("## \u{2014} 09:00 notes"), None);
+        assert_eq!(heading_time("## \u{4e2d}09:00"), None);
+        assert_eq!(heading_time("## 09"), None);
+        assert_eq!(
+            heading_time("## 09:00\u{2013}09:20 \u{b7} Safari"),
+            Some("09:00")
+        );
+    }
+
+    #[test]
+    fn a_slice_of_a_day_containing_a_multibyte_heading_still_answers() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = [
+            "## 09:00\u{2013}09:20 \u{b7} Pages \u{b7} Notes",
+            "",
+            "## \u{65e5}\u{672c}\u{8a9e}\u{306e}\u{898b}\u{51fa}\u{3057}",
+            "",
+            "## 16:00\u{2013}16:30 \u{b7} Slack \u{b7} general",
+            "",
+            "Standup moved to nine.",
+        ]
+        .join("\n");
+        std::fs::write(dir.path().join("2026-08-30.md"), day).unwrap();
+        let text = read_day(dir.path(), date(2026, 8, 30), Some("08:00"), Some("10:00")).unwrap();
+        assert!(text.contains("Pages"));
+        // The heading that is not a time belongs to the block above it.
+        assert!(text.contains("\u{65e5}\u{672c}\u{8a9e}"));
+        assert!(!text.contains("Slack"));
     }
 
     #[test]
