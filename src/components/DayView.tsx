@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { CalendarRail } from "./CalendarRail";
 import { DayHeader } from "./DayHeader";
 import { RawPane } from "./RawPane";
@@ -100,6 +101,35 @@ export function DayView() {
     when: string;
   } | null>(null);
   const [mode, setMode] = useState<"raw" | "summary">("summary");
+
+  // Selecting a day always brings the calendar with it, so the rail and the
+  // pane never disagree about which day you are looking at.
+  const selectDate = useCallback((date: string) => {
+    setSelected(date);
+    const [year, month] = date.split("-").map(Number);
+    if (year && month) setMonth({ year, month });
+  }, []);
+
+  // The window can be opened for a particular day, by the tray or by an
+  // agent over MCP. Taken once on mount, and listened for while open.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const pending = await invoke<string | null>("take_pending_day");
+        if (!cancelled && pending) selectDate(pending);
+      } catch {
+        // An older build without the command: today is the right answer.
+      }
+    })();
+    const unlisten = listen<string>("open-day", (event) => {
+      if (event.payload) selectDate(event.payload);
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((off) => off()).catch(() => undefined);
+    };
+  }, [selectDate]);
 
   const refreshMonth = useCallback(async () => {
     const entries = await invoke<DayEntry[]>("days_in_month", {
