@@ -63,10 +63,6 @@ pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
     std::fs::read_to_string(summarise::summary_path(folder, date)).ok()
 }
 
-pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
-    std::fs::read_to_string(summarise::summary_path(folder, date)).ok()
-}
-
 /// One block as the Raw view shows it. Times stay as the `HH:MM` strings
 /// the writer wrote, because that is what is displayed and reparsing them
 /// into a `DateTime` would need the day's date and gain nothing.

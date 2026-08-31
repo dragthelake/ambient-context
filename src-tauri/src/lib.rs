@@ -5,6 +5,7 @@ mod jobs;
 mod ledger;
 mod prune;
 mod prompt;
+mod propose;
 mod reader;
 mod redact;
 mod rules;
