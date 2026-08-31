@@ -31,8 +31,6 @@ pub struct Settings {
     pub engine: Option<Engine>,
     /// Local time of day as "HH:MM". None means manual runs only.
     pub schedule_hhmm: Option<String>,
-    /// None uses the prompt bundled with this version of the app.
-    pub day_prompt: Option<PathBuf>,
     /// Absolute path to an application to open markdown with. None uses
     /// the system handler.
     pub editor: Option<String>,
@@ -61,7 +59,6 @@ impl Default for Settings {
             similarity_threshold: 0.5,
             engine: None,
             schedule_hhmm: None,
-            day_prompt: None,
             editor: None,
             launch_at_login: true,
             max_block_chars: 0,
@@ -132,6 +129,23 @@ mod tests {
     }
 
     #[test]
+    fn a_settings_file_from_an_older_version_still_loads() {
+        // day_prompt was a 0.2.0 field that nothing reads any more. An
+        // existing file that still carries it must not fall back to
+        // defaults and quietly lose the user's folder.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"folder":"/tmp/ambient","interval_secs":20,"day_prompt":"/x"}"#,
+        )
+        .unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.folder, Some(PathBuf::from("/tmp/ambient")));
+        assert_eq!(settings.interval_secs, 20);
+    }
+
+    #[test]
     fn round_trips() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("nested").join("settings.json");
@@ -160,7 +174,6 @@ mod tests {
         let settings = Settings::default();
         assert_eq!(settings.engine, None);
         assert_eq!(settings.schedule_hhmm, None);
-        assert_eq!(settings.day_prompt, None);
         assert_eq!(settings.editor, None);
         // An app whose value is a complete record cannot depend on being
         // opened by hand after a reboot.
