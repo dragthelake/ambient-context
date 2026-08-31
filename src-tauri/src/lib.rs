@@ -19,6 +19,7 @@ mod tray;
 mod writer;
 
 use serde::Serialize;
+use std::os::unix::fs::PermissionsExt;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -174,23 +175,65 @@ fn target_path(
     }
 }
 
+/// Opens one file with the configured editor. No editor configured means
+/// the system handler for markdown, which is whatever the user already
+/// double-clicks these files with.
+fn open_path_in_editor(app: &tauri::AppHandle, path: &std::path::Path) -> Result<(), String> {
+    let mut command = std::process::Command::new("open");
+    if let Some(editor) = settings::load(app).editor {
+        command.arg("-a").arg(editor);
+    }
+    command.arg(path).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[tauri::command]
 fn open_in_editor(app: tauri::AppHandle, date: String, which: String) -> Result<(), String> {
-    let config = settings::load(&app);
-    let folder = config.folder.clone().ok_or("no capture folder is set")?;
+    let folder = settings::load(&app)
+        .folder
+        .ok_or("no capture folder is set")?;
     let parsed = parse_date(&date)?;
     let path = target_path(&folder, parsed, &which).ok_or("there is no such file to open")?;
     if !path.is_file() {
         return Err(format!("there is no {which} file for {date} yet"));
     }
-    let mut command = std::process::Command::new("open");
-    // No editor configured means the system handler for markdown, which is
-    // whatever the user already double-clicks these files with.
-    if let Some(editor) = config.editor {
-        command.arg("-a").arg(editor);
+    open_path_in_editor(&app, &path)
+}
+
+/// Which file "open the prompt in my editor" means. A customised prompt is
+/// the user's own file and opens directly. With no customised prompt there
+/// is no file to open: writing the bundled text to the prompt path would
+/// make `is_customised` true without the user having changed anything, and
+/// the Settings panel would then say they have their own prompt when they
+/// do not. So the bundled text is copied to a read-only file outside the
+/// config directory instead, which is readable and copyable but cannot be
+/// edited into place. Editing the prompt is done in Settings, which writes
+/// through `set_prompt`.
+fn prompt_editor_target(
+    config_dir: &std::path::Path,
+    temp_dir: &std::path::Path,
+) -> std::io::Result<std::path::PathBuf> {
+    if prompt::is_customised(config_dir) {
+        return Ok(prompt::prompt_path(config_dir));
     }
-    command.arg(path).spawn().map_err(|e| e.to_string())?;
-    Ok(())
+    let copy = temp_dir.join("Ambient Context day-context (bundled, read only).md");
+    if copy.exists() {
+        // A copy from a previous open is read-only, so make it writable
+        // before replacing it.
+        let _ = std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::write(&copy, prompt::BUNDLED)?;
+    std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o444))?;
+    Ok(copy)
+}
+
+/// Opens the day-context prompt in the user's editor. Writes nothing the
+/// user did not already have, so there is no ledger entry.
+#[tauri::command]
+fn open_prompt_in_editor(app: tauri::AppHandle) -> Result<(), String> {
+    let path = prompt_editor_target(&settings::config_dir(&app), &std::env::temp_dir())
+        .map_err(|e| e.to_string())?;
+    open_path_in_editor(&app, &path)
 }
 
 #[tauri::command]
@@ -787,6 +830,34 @@ mod tests {
     }
 
     #[test]
+    fn a_customised_prompt_opens_the_users_own_file() {
+        let config = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        prompt::set(config.path(), prompt::BUNDLED).unwrap();
+        let target = prompt_editor_target(config.path(), temp.path()).unwrap();
+        assert_eq!(target, prompt::prompt_path(config.path()));
+    }
+
+    #[test]
+    fn the_bundled_prompt_opens_as_a_read_only_copy_and_stays_uncustomised() {
+        let config = tempfile::tempdir().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let target = prompt_editor_target(config.path(), temp.path()).unwrap();
+
+        assert!(target.starts_with(temp.path()));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), prompt::BUNDLED);
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode();
+        assert_eq!(mode & 0o222, 0, "the copy is read only");
+        assert!(
+            !prompt::is_customised(config.path()),
+            "opening the prompt is not customising it"
+        );
+
+        // Opening it twice must not fail on the read-only copy it left.
+        assert!(prompt_editor_target(config.path(), temp.path()).is_ok());
+    }
+
+    #[test]
     fn the_pending_day_is_handed_over_once_and_then_forgotten() {
         let pending = PendingOpenDay::default();
         assert_eq!(pending.take(), None);
@@ -1285,6 +1356,7 @@ pub fn run() {
             read_day,
             read_summary,
             open_in_editor,
+            open_prompt_in_editor,
             reveal_day,
             get_rules,
             add_rule,
