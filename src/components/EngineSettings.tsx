@@ -271,8 +271,8 @@ export function EngineSettings() {
           }
         />
         <p className="settings-note">
-          Turning this on summarises the last seven captured days, one at a
-          time. Older days can be summarised one at a time from the Day view.
+          Turning this on summarises up to seven recent captured days, one
+          at a time. Older days can be summarised from the Day view.
         </p>
 
         <h3 className="settings-heading">Launch at login</h3>
