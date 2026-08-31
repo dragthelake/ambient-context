@@ -30,8 +30,18 @@ function sameOutcome(a: Outcome | null, b: Outcome | null): boolean {
   );
 }
 
+export type JobStatus = "queued" | "running" | "done" | "failed";
+
+export type JobState = {
+  id: string;
+  date: string;
+  status: JobStatus;
+  stderr: string | null;
+};
+
 export type SummaryState =
   | { kind: "none" }
+  | { kind: "queued" }
   | { kind: "running" }
   | { kind: "generated"; at: string }
   | { kind: "failed"; message: string };
@@ -80,7 +90,7 @@ export function DayView() {
   const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [hasEngine, setHasEngine] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [job, setJob] = useState<JobState | null>(null);
   const [mode, setMode] = useState<"raw" | "summary">("summary");
 
   const refreshMonth = useCallback(async () => {
@@ -160,20 +170,60 @@ export function DayView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [onPrev, onNext, onToday]);
 
-  const onSummarise = useCallback(async () => {
-    setMode("summary");
-    setRunning(true);
-    try {
-      await invoke("summarise_now", { date: selected });
-    } catch (error) {
-      setOutcome({ when: new Date().toISOString(), date: selected, ok: false, message: String(error) });
-    }
-    const summary = await invoke<string | null>("read_summary", { date: selected });
+  const reloadDay = useCallback(async () => {
+    const [day, summary] = await Promise.all([
+      invoke<string | null>("read_day", { date: selected }),
+      invoke<string | null>("read_summary", { date: selected }),
+    ]);
+    setDayMarkdown(day);
     setSummaryMarkdown(summary);
     await refreshOutcome();
-    setRunning(false);
     void refreshMonth();
   }, [selected, refreshMonth, refreshOutcome]);
+
+  // Runs are queued and serial. The command returns a job id straight away;
+  // the view follows that one job and nobody else's.
+  const onSummarise = useCallback(async () => {
+    setMode("summary");
+    try {
+      const started = await invoke<{ job_id: string }>("summarise_now", {
+        date: selected,
+      });
+      setJob({ id: started.job_id, date: selected, status: "queued", stderr: null });
+    } catch (error) {
+      setJob({
+        id: "",
+        date: selected,
+        status: "failed",
+        stderr: String(error),
+      });
+    }
+  }, [selected]);
+
+  const jobId = job && job.date === selected ? job.id : null;
+  const jobStatus = job && job.date === selected ? job.status : null;
+  const pending = jobStatus === "queued" || jobStatus === "running";
+
+  useEffect(() => {
+    if (!jobId || !pending) return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      void (async () => {
+        const state = await invoke<JobState | null>("job_state", { jobId });
+        if (cancelled || !state) return;
+        setJob((current) =>
+          current && current.id === state.id && current.status === state.status
+            ? current
+            : { id: state.id, date: state.date, status: state.status, stderr: state.stderr },
+        );
+        if (state.status === "done") await reloadDay();
+      })();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [jobId, pending, reloadDay]);
 
   const entry = useMemo(
     () => days.find((d) => d.date === selected) ?? null,
@@ -181,9 +231,13 @@ export function DayView() {
   );
   const stats = useMemo(() => dayStats(dayMarkdown), [dayMarkdown]);
 
+  const running = pending;
+
   const summary: SummaryState = useMemo(() => {
-    if (running) {
-      return { kind: "running" };
+    if (jobStatus === "queued") return { kind: "queued" };
+    if (jobStatus === "running") return { kind: "running" };
+    if (jobStatus === "failed") {
+      return { kind: "failed", message: job?.stderr ?? "The run failed." };
     }
     if (summaryMarkdown) {
       const at = outcome && outcome.date === selected ? outcome.when : "";
@@ -193,7 +247,7 @@ export function DayView() {
       return { kind: "failed", message: outcome.message };
     }
     return { kind: "none" };
-  }, [summaryMarkdown, outcome, selected, running]);
+  }, [summaryMarkdown, outcome, selected, jobStatus, job]);
 
   const onMonthChange = useCallback((year: number, month: number) => {
     setMonth({ year, month });

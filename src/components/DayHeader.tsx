@@ -64,8 +64,10 @@ export function DayHeader({
     switch (summary.kind) {
       case "none":
         return "No summary yet";
+      case "queued":
+        return "Queued";
       case "running":
-        return "Summarising now";
+        return "Summarising…";
       case "generated":
         return summary.at ? `Generated at ${summary.at.slice(11, 16)}` : "Generated";
       case "failed":
