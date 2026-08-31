@@ -554,6 +554,29 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+mod registration_tests {
+    #[test]
+    fn the_registration_command_string_quotes_a_path_with_spaces() {
+        // The bundle path contains a space, always: "Ambient Context.app".
+        let quoted = super::shell_quote(
+            "/Applications/Ambient Context.app/Contents/MacOS/ambient-context",
+        );
+        assert_eq!(
+            quoted,
+            "\"/Applications/Ambient Context.app/Contents/MacOS/ambient-context\""
+        );
+    }
+
+    #[test]
+    fn a_path_without_spaces_is_left_bare() {
+        assert_eq!(
+            super::shell_quote("/usr/local/bin/ambient-context"),
+            "/usr/local/bin/ambient-context"
+        );
+    }
+}
+
 #[tauri::command]
 fn list_days(app: tauri::AppHandle) -> Vec<days::DayEntry> {
     match settings::load(&app).folder {
@@ -662,6 +685,42 @@ pub fn apply_settings_change(
         // refuses to run until it has, so give it that moment.
         std::thread::sleep(std::time::Duration::from_millis(150));
         capture::start(app.clone(), &state, next.clone());
+    }
+}
+
+/// Wraps a path in double quotes only when it needs them. The bundle path
+/// always contains a space, so an unquoted claude mcp add line is wrong on
+/// every real install.
+pub(crate) fn shell_quote(path: &str) -> String {
+    if path.contains(' ') {
+        format!("\"{path}\"")
+    } else {
+        path.to_string()
+    }
+}
+
+#[derive(Serialize)]
+struct McpRegistration {
+    binary: String,
+    quoted_binary: String,
+    running: bool,
+    last_write: Option<serde_json::Value>,
+}
+
+#[tauri::command]
+fn mcp_registration(app: tauri::AppHandle) -> McpRegistration {
+    let binary = std::env::current_exe()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let data_dir = app.path().app_data_dir().unwrap_or_default();
+    let last_write = std::fs::read_to_string(data_dir.join("last-mcp-write.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok());
+    McpRegistration {
+        quoted_binary: shell_quote(&binary),
+        binary,
+        running: ipc::socket_path(&data_dir).exists(),
+        last_write,
     }
 }
 
@@ -802,7 +861,8 @@ pub fn run() {
             propose,
             apply_proposal,
             discard_proposal,
-            copy_context
+            copy_context,
+            mcp_registration
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

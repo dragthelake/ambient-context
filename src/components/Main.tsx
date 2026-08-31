@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { DayView } from "./DayView";
 import { EngineSettings } from "./EngineSettings";
+import { McpSettings } from "./McpSettings";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
 import "../main-window.css";
@@ -33,6 +34,7 @@ export function Main() {
             <EngineSettings />
             <RulesSettings />
             <RecordingSettings />
+            <McpSettings />
           </div>
         )}
       </main>

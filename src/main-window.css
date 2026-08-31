@@ -769,3 +769,34 @@
   font-family: "Funnel Sans", sans-serif;
   font-size: 13px;
 }
+
+/* MCP registration */
+
+.mcp-picker .mcp-client {
+  min-width: 0;
+  padding: 4px 10px 5px;
+}
+
+.mcp-picker .mcp-client.is-current {
+  box-shadow: var(--bevel-in);
+}
+
+.mcp-block {
+  margin: 6px 0 8px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.mcp-status {
+  margin-top: 10px;
+}
