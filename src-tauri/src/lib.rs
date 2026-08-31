@@ -268,6 +268,8 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.manage(capture::CaptureState::new());
+            app.manage(jobs::JobState::new());
+            jobs::start(app.handle().clone());
             tray::build(app.handle())?;
 
             let config = settings::load(app.handle());

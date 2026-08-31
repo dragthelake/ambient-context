@@ -84,7 +84,16 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
         true,
         None::<&str>,
     )?;
+    let last_run = {
+        let text = app
+            .try_state::<crate::jobs::JobState>()
+            .and_then(|state| state.last_outcome())
+            .map(|outcome| outcome.message)
+            .unwrap_or_else(|| "No summaries yet".to_string());
+        MenuItem::with_id(app, "last_run", text, false, None::<&str>)?
+    };
     let open_today = MenuItem::with_id(app, "open_today", "Open Today's File", true, None::<&str>)?;
+    let browse = MenuItem::with_id(app, "browse", "Browse Days\u{2026}", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
     let setup = MenuItem::with_id(
         app,
@@ -100,8 +109,10 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
         &[
             &version,
             &toggle,
+            &last_run,
             &PredefinedMenuItem::separator(app)?,
             &open_today,
+            &browse,
             &reveal,
             &PredefinedMenuItem::separator(app)?,
             &setup,
@@ -169,6 +180,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 "toggle" => toggle_capture(app),
+                // "browse" => crate::open_main_window(app), // Task 10
                 "setup" => crate::open_setup_window(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();
