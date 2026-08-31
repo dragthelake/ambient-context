@@ -1,6 +1,7 @@
 mod capture;
 mod days;
 mod engine;
+mod ipc;
 mod jobs;
 mod ledger;
 mod prune;
