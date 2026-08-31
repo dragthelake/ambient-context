@@ -18,6 +18,10 @@ export type RulesPayload = {
   rules: Rule[];
   built_ins: BuiltIn[];
   next_id: string;
+  /// Non-null when rules.json cannot be read. The list is empty and every
+  /// write refuses with this message.
+  error: string | null;
+  path?: string | null;
 };
 
 export type RawBlock = {
