@@ -188,15 +188,17 @@ mod tests {
     fn engine_and_launch_at_login_round_trip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.json");
-        let mut settings = Settings::default();
-        settings.engine = Some(Engine {
-            label: "Claude Code".to_string(),
-            command: "/opt/homebrew/bin/claude".to_string(),
-            args: vec!["-p".to_string()],
-            timeout_secs: 600,
-        });
-        settings.schedule_hhmm = Some("06:00".to_string());
-        settings.launch_at_login = false;
+        let settings = Settings {
+            engine: Some(Engine {
+                label: "Claude Code".to_string(),
+                command: "/opt/homebrew/bin/claude".to_string(),
+                args: vec!["-p".to_string()],
+                timeout_secs: 600,
+            }),
+            schedule_hhmm: Some("06:00".to_string()),
+            launch_at_login: false,
+            ..Settings::default()
+        };
         write_to(&path, &settings).unwrap();
         assert_eq!(read_from(&path), settings);
     }

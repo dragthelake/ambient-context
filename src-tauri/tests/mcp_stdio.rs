@@ -2,9 +2,24 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 
 const EXPECTED: [&str; 18] = [
-    "add_rule", "capture_status", "get_config", "get_prompt", "list_days", "list_rules",
-    "open_day", "read_day", "read_ledger", "read_summary", "remove_rule", "search_record",
-    "set_config", "set_prompt", "start_capture", "stop_capture", "summarise_day", "update_rule",
+    "add_rule",
+    "capture_status",
+    "get_config",
+    "get_prompt",
+    "list_days",
+    "list_rules",
+    "open_day",
+    "read_day",
+    "read_ledger",
+    "read_summary",
+    "remove_rule",
+    "search_record",
+    "set_config",
+    "set_prompt",
+    "start_capture",
+    "stop_capture",
+    "summarise_day",
+    "update_rule",
 ];
 
 struct Session {
@@ -44,8 +59,7 @@ impl Session {
         let mut line = String::new();
         self.stdout.read_line(&mut line).expect("read");
         assert!(!line.trim().is_empty(), "the server answered with nothing");
-        serde_json::from_str(&line)
-            .unwrap_or_else(|error| panic!("not JSON: {error}: {line}"))
+        serde_json::from_str(&line).unwrap_or_else(|error| panic!("not JSON: {error}: {line}"))
     }
 
     fn notify(&mut self, message: serde_json::Value) {
@@ -73,7 +87,10 @@ fn the_subcommand_initialises_and_lists_the_eighteen_tools_with_no_app_and_no_co
             "clientInfo": { "name": "integration test", "version": "0.0.0" }
         }
     }));
-    assert_eq!(initialised["result"]["serverInfo"]["name"], "ambient-context");
+    assert_eq!(
+        initialised["result"]["serverInfo"]["name"],
+        "ambient-context"
+    );
     assert_eq!(initialised["result"]["protocolVersion"], "2025-11-25");
     assert!(initialised["result"]["capabilities"]["tools"].is_object());
 
@@ -136,17 +153,17 @@ fn the_process_exits_cleanly_when_stdin_closes() {
     session.call(serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" }));
     // Moving the real handle out of the struct and dropping it closes the
     // pipe, which is what ends the read loop.
-    let stdin = std::mem::replace(
-        &mut session.stdin,
-        {
-            let mut throwaway = Command::new("/bin/cat")
-                .stdin(Stdio::piped())
-                .spawn()
-                .unwrap();
-            throwaway.stdin.take().unwrap()
-        },
-    );
+    let mut throwaway = Command::new("/bin/cat")
+        .stdin(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let placeholder = throwaway.stdin.take().unwrap();
+    let stdin = std::mem::replace(&mut session.stdin, placeholder);
     drop(stdin);
     let status = session.child.wait().expect("wait");
     assert!(status.success(), "exited with {status}");
+    // Dropping the session closes the placeholder pipe, so cat sees EOF and
+    // can be reaped rather than left as a zombie.
+    drop(session);
+    throwaway.wait().expect("throwaway wait");
 }

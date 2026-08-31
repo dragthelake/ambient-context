@@ -58,6 +58,7 @@ fn patterns() -> &'static [Regex] {
     })
 }
 
+#[cfg(test)]
 pub fn redact_line(line: &str) -> String {
     redact_line_with(line, &[])
 }

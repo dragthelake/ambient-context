@@ -201,7 +201,7 @@ pub fn engine_cwd() -> std::path::PathBuf {
 /// after `timeout`. Same waiter-thread shape as `run`, because std has no
 /// wait-with-timeout and an interactive rc file can print, prompt or hang.
 fn shell_output(shell: &str, args: &[&str], timeout: Duration) -> Option<String> {
-    let mut child = Command::new(shell)
+    let child = Command::new(shell)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -374,7 +374,7 @@ pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String
     let Some((args, fix)) = auth_probe(&engine.label) else {
         return AuthState::Unknown;
     };
-    let mut child = match Command::new(&engine.command)
+    let child = match Command::new(&engine.command)
         .args(args)
         .current_dir(engine_cwd())
         .env_clear()

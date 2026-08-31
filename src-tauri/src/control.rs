@@ -443,8 +443,10 @@ mod tests {
 
     #[test]
     fn a_known_key_is_applied_and_the_rest_is_left_alone() {
-        let mut settings = Settings::default();
-        settings.interval_secs = 5;
+        let settings = Settings {
+            interval_secs: 5,
+            ..Settings::default()
+        };
         let patched = apply_patch(&settings, serde_json::json!({ "interval_secs": 12 })).unwrap();
         assert_eq!(patched.interval_secs, 12);
         assert_eq!(patched.min_dwell_secs, settings.min_dwell_secs);
@@ -498,8 +500,10 @@ mod tests {
 
     #[test]
     fn the_schedule_can_be_cleared_back_to_manual_only() {
-        let mut settings = Settings::default();
-        settings.schedule_hhmm = Some("06:00".to_string());
+        let settings = Settings {
+            schedule_hhmm: Some("06:00".to_string()),
+            ..Settings::default()
+        };
         let patched = apply_patch(&settings, serde_json::json!({ "schedule_hhmm": null })).unwrap();
         assert_eq!(patched.schedule_hhmm, None);
     }

@@ -174,7 +174,7 @@ impl std::fmt::Display for ClientError {
                 "Ambient Context is not running. Open the app and try again; \
                  reading days, summaries, rules and settings works either way."
             ),
-            ClientError::Refused { message, .. } => write!(f, "{message}"),
+            ClientError::Refused { code, message } => write!(f, "{message} ({code})"),
             ClientError::Transport(detail) => write!(f, "The control socket failed: {detail}"),
         }
     }

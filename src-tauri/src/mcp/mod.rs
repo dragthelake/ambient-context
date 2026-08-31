@@ -3,7 +3,7 @@ pub mod files;
 pub mod tools;
 
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub const LATEST_PROTOCOL: &str = "2025-11-25";
 const SUPPORTED_PROTOCOLS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
@@ -84,11 +84,7 @@ fn write_line(stdout: &mut std::io::Stdout, value: &serde_json::Value) {
 /// notification, which must never be answered.
 pub fn dispatch(server: &mut Server, message: &serde_json::Value) -> Option<serde_json::Value> {
     let method = message.get("method")?.as_str()?;
-    let id = message.get("id").cloned();
-    if id.is_none() {
-        return None;
-    }
-    let id = id.unwrap_or(serde_json::Value::Null);
+    let id = message.get("id").cloned()?;
     let params = message
         .get("params")
         .cloned()

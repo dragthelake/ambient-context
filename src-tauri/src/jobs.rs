@@ -345,6 +345,7 @@ pub struct JobQueue {
 }
 
 impl JobQueue {
+    #[cfg(test)]
     pub fn for_test() -> Self {
         Self::default()
     }
@@ -372,6 +373,7 @@ impl JobQueue {
         self.push(date, trigger)
     }
 
+    #[cfg(test)]
     pub fn enqueue_summarise(&self, date: NaiveDate) -> JobId {
         self.enqueue_summarise_with(date, ledger::Trigger::OnDemand)
     }

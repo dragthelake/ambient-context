@@ -218,7 +218,6 @@ pub fn folder_from(config_dir: &Path) -> Result<std::path::PathBuf, FileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     fn folder_with_a_day() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();

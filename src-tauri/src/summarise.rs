@@ -122,6 +122,7 @@ use std::path::{Path, PathBuf};
 /// The prompt shipped with this version. A user-supplied prompt replaces it
 /// entirely; this copy is never edited in place, so an update can improve it
 /// without touching anyone's own file.
+#[cfg(test)]
 pub const BUNDLED_PROMPT: &str = include_str!("../prompts/day-context.md");
 
 pub fn summaries_dir(folder: &Path) -> PathBuf {
