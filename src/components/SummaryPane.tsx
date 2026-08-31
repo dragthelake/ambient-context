@@ -1,4 +1,7 @@
+import { useCallback, useRef } from "react";
+import { HighlightPill } from "./HighlightPill";
 import type { ReactNode } from "react";
+import type { Selection } from "../lib/rules";
 
 export type SummaryPaneProps = {
   markdown: string | null;
@@ -6,6 +9,7 @@ export type SummaryPaneProps = {
   hasEngine: boolean;
   running: boolean;
   onSummarise: () => void;
+  date: string;
 };
 
 /// Hides the leading frontmatter block, renders the headings, paragraphs
@@ -61,7 +65,24 @@ export function SummaryPane({
   hasEngine,
   running,
   onSummarise,
+  date,
 }: SummaryPaneProps) {
+  const paneRef = useRef<HTMLElement | null>(null);
+
+  const buildSelection = useCallback((): Selection | null => {
+    const active = window.getSelection();
+    const text = active?.toString().trim();
+    if (!text) return null;
+    return {
+      date,
+      text,
+      app: null,
+      title: null,
+      time_range: null,
+      mode: "summary",
+    };
+  }, [date]);
+
   if (!hasCapture) {
     return (
       <section className="summary-pane">
@@ -83,7 +104,21 @@ export function SummaryPane({
     );
   }
   if (markdown) {
-    return <section className="summary-pane reading">{render(markdown)}</section>;
+    return (
+      <section
+        className="summary-pane reading"
+        ref={(element) => {
+          paneRef.current = element;
+        }}
+      >
+        <HighlightPill
+          container={paneRef.current}
+          buildSelection={buildSelection}
+          hasEngine={hasEngine}
+        />
+        {render(markdown)}
+      </section>
+    );
   }
   if (!hasEngine) {
     return (

@@ -46,3 +46,29 @@ export function domainOf(url: string): string | null {
 export function literalPattern(text: string): string {
   return text.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+export type ProposeTarget = "rules" | "prompt";
+
+export type Selection = {
+  date: string;
+  text: string;
+  app: string | null;
+  title: string | null;
+  time_range: string | null;
+  mode: "raw" | "summary";
+};
+
+export type Proposal = {
+  id: string;
+  target: ProposeTarget;
+  before: string;
+  after: string;
+  diff: string;
+  reasoning: string;
+  ledger_path: string;
+};
+
+export type ProposeError =
+  | { kind: "no_engine" }
+  | { kind: "engine_failed"; stderr: string }
+  | { kind: "invalid"; reason: string; raw: string };

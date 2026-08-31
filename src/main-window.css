@@ -487,3 +487,133 @@
   padding: 2px 8px 3px;
   font-size: 11px;
 }
+
+/* Highlight to instruct */
+
+.highlight-pill {
+  z-index: 30;
+  display: inline-flex;
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+  padding: 2px;
+  gap: 2px;
+}
+
+.highlight-pill button {
+  min-width: 0;
+  padding: 3px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.propose-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  width: min(640px, calc(100vw - 60px));
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  background: var(--chrome);
+  box-shadow: var(--bevel-out), 0 6px 0 rgba(0, 0, 0, 0.25);
+  padding: 12px 14px;
+}
+
+.propose-title {
+  margin: 0 0 8px;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.propose-quote {
+  margin: 0 0 10px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.propose-field {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.propose-field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.propose-engine {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--chrome-dark);
+}
+
+.propose-note {
+  font-size: 11px;
+  color: var(--chrome-dark);
+  font-weight: 600;
+}
+
+.propose-failure {
+  margin: 8px 0;
+}
+
+/* The diff: added and removed lines are marked by the prefix and by
+   colour, never by colour alone. */
+
+.diff-view {
+  margin-top: 8px;
+}
+
+.diff-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.diff-reasoning {
+  margin: 0 0 8px;
+  font-style: italic;
+  color: var(--chrome-dark);
+}
+
+.diff-body {
+  margin: 0 0 10px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-added {
+  color: var(--led-green);
+  font-weight: 700;
+}
+
+.diff-removed {
+  color: var(--warn-ink);
+  font-weight: 700;
+}

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { domainOf, literalPattern, type RawBlock, type RulesPayload } from "../lib/rules";
+import { domainOf, literalPattern, type RawBlock, type RulesPayload, type Selection } from "../lib/rules";
+import { HighlightPill } from "./HighlightPill";
 import type { Settings } from "../lib/days";
 
 type RawPaneProps = {
@@ -21,6 +22,34 @@ export function RawPane({ date, mode }: RawPaneProps) {
   const [ruleError, setRuleError] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState<string | null>(null);
   const [scrollY, setScrollY] = useState(0);
+  const [hasEngine, setHasEngine] = useState(false);
+  const paneRef = useRef<HTMLElement | null>(null);
+
+  const readRules = useCallback(async (): Promise<RulesPayload> => {
+    const payload = await invoke<RulesPayload>("get_rules");
+    setRules(payload);
+    return payload;
+  }, []);
+
+  // The provenance the pill hands the engine: the block the highlighted
+  // text came from, found through the block element the selection sits in.
+  const buildSelection = useCallback((): Selection | null => {
+    const active = window.getSelection();
+    const text = active?.toString().trim();
+    if (!text || !active || active.rangeCount === 0) return null;
+    const anchor = active.anchorNode;
+    const blockElement = anchor instanceof Element ? anchor : anchor?.parentElement;
+    const block = blockElement?.closest(".raw-block");
+    if (!block) return null;
+    return {
+      date,
+      text,
+      app: block.getAttribute("data-app"),
+      title: block.getAttribute("data-title"),
+      time_range: block.getAttribute("data-range"),
+      mode: "raw",
+    };
+  }, [date]);
 
   const read = useCallback(async () => {
     const next = await invoke<RawBlock[]>("read_day_blocks", { date });
@@ -29,9 +58,10 @@ export function RawPane({ date, mode }: RawPaneProps) {
 
   useEffect(() => {
     let cancelled = false;
-    void invoke<RulesPayload>("get_rules").then((payload) => {
-      if (!cancelled) setRules(payload);
+    void readRules().then((payload) => {
+      if (payload && !cancelled) setRules(payload);
     });
+
     void read();
     if (date !== todayIso()) {
       return () => {
@@ -43,7 +73,13 @@ export function RawPane({ date, mode }: RawPaneProps) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [date, read]);
+  }, [date, read, readRules]);
+
+  useEffect(() => {
+    void invoke<Settings>("get_settings").then((settings) =>
+      setHasEngine(settings.engine !== null),
+    );
+  }, []);
 
   // Hold the scroll position across a refresh: a view that jumps every
   // five seconds while you are reading it is worse than no refresh.
@@ -115,7 +151,19 @@ export function RawPane({ date, mode }: RawPaneProps) {
   );
 
   return (
-    <section className="raw-pane" onScroll={onScroll}>
+    <section
+      className="raw-pane"
+      onScroll={onScroll}
+      ref={(element) => {
+        paneRef.current = element;
+      }}
+    >
+      <HighlightPill
+        container={paneRef.current}
+        buildSelection={buildSelection}
+        hasEngine={hasEngine}
+        onApplied={() => void readRules()}
+      />
       {ruleError ? <p className="warn">{ruleError}</p> : null}
       {blocks.length === 0 ? (
         <p className="empty-state">Nothing was recorded on this day.</p>
@@ -123,7 +171,13 @@ export function RawPane({ date, mode }: RawPaneProps) {
       {blocks.map((block) => {
         const key = `${block.start}-${block.app}`;
         return (
-          <article key={key} className="raw-block">
+          <article
+            key={key}
+            className="raw-block"
+            data-app={block.app}
+            data-title={block.title}
+            data-range={`${block.start}–${block.end}`}
+          >
             <header className="raw-block-heading">
               <span className="raw-block-time">
                 {block.start}–{block.end}
