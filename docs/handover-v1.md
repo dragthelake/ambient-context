@@ -37,6 +37,18 @@ One bullet per choice the plans did not settle, with the task reference and why.
 ## Deviations from the plan
 Anything you did differently from the written step, with the reason. Empty is the goal.
 
+- (0.4.0) Plan C Tasks 3 and 4 share one commit (77febad). Task 3's
+  `control::handle` match arms call `control::writes::set_config` and friends,
+  which are Task 4's deliverable, so the write handlers, `SETTABLE_KEYS` and
+  `apply_patch` had to exist for Task 3 to compile. Task 4's eight patch-merge
+  tests are in the same commit and pass; the plan's "watch the tests fail"
+  step for Task 4 could not be run because the implementation preceded the
+  tests by necessity.
+- (0.4.0) Plan C Task 3: the plan's `Request::SummariseDay` test serialises
+  only `date`, but the declared variant carries `client` as well, so the
+  plan's test as written does not compile against the plan's own type. The
+  test was fixed to carry both fields.
+
 - (0.3.0) Plan B Task 7: the plan's tests assert the ledger renders dispositions
   capitalised ("Accepted", "Applied", "Discarded", "Failed", "Rejected"), but
   0.2.0's committed renderer and tests establish lowercase ("accepted",
