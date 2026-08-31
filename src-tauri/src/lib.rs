@@ -158,6 +158,55 @@ fn parse_date(date: &str) -> Result<chrono::NaiveDate, String> {
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("{date} is not a date"))
 }
 
+/// Which file a Day view action means. Unknown values return None rather
+/// than defaulting, so a typo opens nothing instead of the wrong file.
+fn target_path(
+    folder: &std::path::Path,
+    date: chrono::NaiveDate,
+    which: &str,
+) -> Option<std::path::PathBuf> {
+    match which {
+        "day" => Some(writer::file_path(folder, date)),
+        "summary" => Some(summarise::summary_path(folder, date)),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+fn open_in_editor(app: tauri::AppHandle, date: String, which: String) -> Result<(), String> {
+    let config = settings::load(&app);
+    let folder = config.folder.clone().ok_or("no capture folder is set")?;
+    let parsed = parse_date(&date)?;
+    let path = target_path(&folder, parsed, &which).ok_or("there is no such file to open")?;
+    if !path.is_file() {
+        return Err(format!("there is no {which} file for {date} yet"));
+    }
+    let mut command = std::process::Command::new("open");
+    // No editor configured means the system handler for markdown, which is
+    // whatever the user already double-clicks these files with.
+    if let Some(editor) = config.editor {
+        command.arg("-a").arg(editor);
+    }
+    command.arg(path).spawn().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn reveal_day(app: tauri::AppHandle, date: String) -> Result<(), String> {
+    let folder = settings::load(&app).folder.ok_or("no capture folder is set")?;
+    let parsed = parse_date(&date)?;
+    let path = writer::file_path(&folder, parsed);
+    // -R selects the file in Finder. A day with no file yet still has a
+    // folder worth opening.
+    let target = if path.is_file() { path } else { folder };
+    std::process::Command::new("open")
+        .arg("-R")
+        .arg(target)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Runs on the async pool: the engine can take minutes and this must not
 /// block the webview or the main thread.
 #[tauri::command]
@@ -220,6 +269,40 @@ fn get_settings(app: tauri::AppHandle) -> settings::Settings {
 #[tauri::command]
 fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
     settings::save(&app, &next).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+
+    fn date() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 28).unwrap()
+    }
+
+    #[test]
+    fn which_selects_the_day_file_or_its_summary() {
+        let folder = Path::new("/tmp/ac");
+        assert_eq!(
+            target_path(folder, date(), "day"),
+            Some(PathBuf::from("/tmp/ac/2026-08-28.md"))
+        );
+        assert_eq!(
+            target_path(folder, date(), "summary"),
+            Some(PathBuf::from("/tmp/ac/Summaries/2026-08-28.md"))
+        );
+    }
+
+    #[test]
+    fn an_unknown_target_opens_nothing_rather_than_guessing() {
+        assert_eq!(target_path(Path::new("/tmp/ac"), date(), "ledger"), None);
+    }
+
+    #[test]
+    fn a_bad_date_is_an_error_rather_than_a_panic() {
+        assert!(parse_date("not-a-date").is_err());
+        assert!(parse_date("2026-08-28").is_ok());
+    }
 }
 
 #[tauri::command]
@@ -416,7 +499,9 @@ pub fn run() {
             list_days,
             days_in_month,
             read_day,
-            read_summary
+            read_summary,
+            open_in_editor,
+            reveal_day
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]

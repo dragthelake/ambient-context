@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { DayEntry } from "./CalendarRail";
 import type { DayStats, SummaryState } from "./DayView";
 
@@ -13,8 +14,6 @@ export type DayHeaderProps = {
   onNext: () => void;
   onToday: () => void;
   onSummarise: () => void;
-  onOpenInEditor: () => void;
-  onReveal: () => void;
 };
 
 function longDate(date: string): string {
@@ -38,11 +37,28 @@ export function DayHeader({
   onNext,
   onToday,
   onSummarise,
-  onOpenInEditor,
-  onReveal,
 }: DayHeaderProps) {
   const [showStderr, setShowStderr] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const hasSummary = summary.kind === "generated";
+
+  const onOpen = async () => {
+    try {
+      await invoke("open_in_editor", { date, which: mode });
+      setActionError(null);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  };
+
+  const onRevealDay = async () => {
+    try {
+      await invoke("reveal_day", { date });
+      setActionError(null);
+    } catch (error) {
+      setActionError(String(error));
+    }
+  };
 
   const summaryLine = (() => {
     switch (summary.kind) {
@@ -123,13 +139,14 @@ export function DayHeader({
         <button type="button" onClick={onSummarise}>
           {hasSummary ? "Regenerate" : "Summarise"}
         </button>
-        <button type="button" onClick={onOpenInEditor}>
+        <button type="button" onClick={() => void onOpen()}>
           Open in editor
         </button>
-        <button type="button" onClick={onReveal}>
+        <button type="button" onClick={() => void onRevealDay()}>
           Reveal in Finder
         </button>
       </div>
+      {actionError ? <p className="day-action-error">{actionError}</p> : null}
       {entry?.title ? <p className="day-title">{entry.title}</p> : null}
     </header>
   );

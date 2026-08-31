@@ -157,9 +157,6 @@ export function DayView() {
     void refreshMonth();
   }, [selected, refreshMonth]);
 
-  const onOpenInEditor = useCallback(() => {}, []);
-  const onReveal = useCallback(() => {}, []);
-
   const entry = useMemo(
     () => days.find((d) => d.date === selected) ?? null,
     [days, selected],
@@ -206,8 +203,6 @@ export function DayView() {
           onNext={onNext}
           onToday={onToday}
           onSummarise={onSummarise}
-          onOpenInEditor={onOpenInEditor}
-          onReveal={onReveal}
         />
         <SummaryPane
           markdown={summaryMarkdown}
