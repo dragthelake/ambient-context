@@ -22,4 +22,7 @@ export type Settings = {
   day_prompt: string | null;
   editor: string | null;
   launch_at_login: boolean;
+  max_block_chars: number;
+  write_references: boolean;
+  extra_redaction_patterns: string[];
 };

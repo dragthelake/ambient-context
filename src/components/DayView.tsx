@@ -212,6 +212,7 @@ export function DayView() {
             hasEngine={hasEngine}
             running={running}
             onSummarise={onSummarise}
+            date={selected}
           />
         ) : (
           <RawPane date={selected} mode={mode} />
