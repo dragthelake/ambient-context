@@ -12,7 +12,7 @@ judged on screen; they are listed under "Needs visual pass".
 | Plan | Branch | Tasks done | Tasks blocked | Last commit |
 |---|---|---|---|---|
 | 0.2.0 (A) | build/0.2.0 | 2-13 (11 of 13; 14 is prove-it) | none | ea0f47d |
-| 0.3.0 (B) | build/0.3.0 | | | |
+| 0.3.0 (B) | build/0.3.0 | 1-12 (12 of 13; 13 is prove-it) | none | 4ea15b6 |
 | 0.4.0 (C) | build/0.4.0 | | | |
 
 ## Blockers
@@ -65,6 +65,12 @@ Anything you did differently from the written step, with the reason. Empty is th
 | Summary pane | src/components/SummaryPane.tsx | summary rendered (hand-rolled renderer: hidden frontmatter, h1/h2, paragraphs, lists), four empty states: no capture, no engine, engine + no summary, running |
 | Day view shell | src/components/DayView.tsx | owns selected date, today default, arrow-key navigation, 5s live refresh for today |
 | Engine settings | src/components/EngineSettings.tsx | explanation, engine picker with auth states, manual template, test button (testing/ok/failed), schedule with backfill note, launch at login, prompt display with revert |
+| Raw pane | src/components/RawPane.tsx | block timeline (time, app, title, file/url references), collapsed bodies with a count, live 5-second refresh for today with held scroll position, quiet blocks explained, the three rule actions with in-place confirmation, duplicate-rule errors shown verbatim |
+| Rules settings | src/components/RulesSettings.tsx | user rules (add, edit action in place, remove), built-ins rendered locked with the "cannot be changed" line, validation errors shown verbatim |
+| Recording settings | src/components/RecordingSettings.tsx | six controls with current values, "changes what is recorded from now on" note, no-restart note |
+| Highlight pill | src/components/HighlightPill.tsx | selection pill with three verbs, disabled-with-reason when no engine, copied confirmation, Escape and outside-click dismissal |
+| Propose popover | src/components/ProposePopover.tsx | quoted selection, instruction field, engine name, running state that stays open, failure with engine output behind a disclosure |
+| Diff view | src/components/DiffView.tsx | reasoning above, whole-file diff with prefix-plus-colour marks, Discard and Apply below with the "nothing written yet" line |
 
 ## Needs human verification
 | Plan | Task | What it proves |
@@ -72,6 +78,21 @@ Anything you did differently from the written step, with the reason. Empty is th
 | 0.2.0 | Task 10 Step 13 | Browse Days opens a focusable resizable window in Cmd-Tab, `list_days` invoke returns an array, closing the window leaves the app running with no Dock icon |
 | 0.2.0 | Task 13 Steps 8-11 | engine test failure and success paths in the real window, launch at login appearing in System Settings Login Items, a real summary end to end with tray status update |
 | 0.2.0 | Task 14 (all) | prove-it: a week unattended, sleep/reboot catch-up, capture unaffected, summaries judged against memory, ledger hashes checked |
+| 0.3.0 | Task 10 Step 7 | highlight-to-instruct reliability: ten real proposals against the real engine, counting first-try, retry and double-failure |
+| 0.3.0 | Task 13 (all) | prove-it: exclusion and headings-only suppression observed in real day files, rule and prompt round-trips through highlight-to-instruct, every action in the ledger |
 
 ## Test evidence
 (pasted at the end of each plan)
+
+### Plan A (0.2.0), run at ea0f47d
+```
+test result: ok. 150 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.01s
+✓ built in 386ms
+```
+
+### Plan B (0.3.0), run at 4ea15b6
+```
+test result: ok. 226 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.42s
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 218 filtered out; finished in 0.00s   (settings backward-compat re-run)
+✓ built in 413ms
+```
