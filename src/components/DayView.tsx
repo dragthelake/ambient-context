@@ -195,14 +195,15 @@ export function DayView() {
     return () => clearInterval(id);
   }, [selected, refreshOutcome]);
 
-  const onPrev = useCallback(() => setSelected((d) => shift(d, -1)), []);
-  const onNext = useCallback(() => setSelected((d) => shift(d, 1)), []);
-  const onToday = useCallback(() => {
-    const today = todayIso();
-    setSelected(today);
-    const now = new Date();
-    setMonth({ year: now.getFullYear(), month: now.getMonth() + 1 });
-  }, []);
+  const onPrev = useCallback(
+    () => selectDate(shift(selected, -1)),
+    [selectDate, selected],
+  );
+  const onNext = useCallback(
+    () => selectDate(shift(selected, 1)),
+    [selectDate, selected],
+  );
+  const onToday = useCallback(() => selectDate(todayIso()), [selectDate]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -325,7 +326,7 @@ export function DayView() {
         month={month.month}
         days={days}
         selected={selected}
-        onSelect={setSelected}
+        onSelect={selectDate}
         onMonthChange={onMonthChange}
       />
       <div className="day-main">
