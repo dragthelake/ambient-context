@@ -88,6 +88,7 @@ Anything you did differently from the written step, with the reason. Empty is th
 | Highlight pill | src/components/HighlightPill.tsx | selection pill with three verbs, disabled-with-reason when no engine, copied confirmation, Escape and outside-click dismissal |
 | Propose popover | src/components/ProposePopover.tsx | quoted selection, instruction field, engine name, running state that stays open, failure with engine output behind a disclosure |
 | Diff view | src/components/DiffView.tsx | reasoning above, whole-file diff with prefix-plus-colour marks, Discard and Apply below with the "nothing written yet" line |
+| MCP registration | src/components/McpSettings.tsx | five client blocks behind a picker (Claude Code, Claude Desktop, Cursor, Zed, generic JSON), copy button with confirmation, status line with last MCP write |
 
 ## Needs human verification
 | Plan | Task | What it proves |
