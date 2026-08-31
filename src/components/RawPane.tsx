@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { domainOf, literalPattern, type RawBlock, type RulesPayload, type Selection } from "../lib/rules";
 import { HighlightPill } from "./HighlightPill";
@@ -26,7 +26,9 @@ export function RawPane({ date, mode }: RawPaneProps) {
   const [selectionText, setSelectionText] = useState("");
   const [scrollY, setScrollY] = useState(0);
   const [hasEngine, setHasEngine] = useState(false);
-  const paneRef = useRef<HTMLElement | null>(null);
+  // Held in state, not a ref: the pill needs the element on the render it
+  // is given, and assigning a ref does not schedule one.
+  const [pane, setPane] = useState<HTMLElement | null>(null);
 
   const readRules = useCallback(async (): Promise<RulesPayload> => {
     const payload = await invoke<RulesPayload>("get_rules");
@@ -177,11 +179,11 @@ export function RawPane({ date, mode }: RawPaneProps) {
       className="raw-pane"
       onScroll={onScroll}
       ref={(element) => {
-        paneRef.current = element;
+        setPane(element);
       }}
     >
       <HighlightPill
-        container={paneRef.current}
+        container={pane}
         buildSelection={buildSelection}
         hasEngine={hasEngine}
         onApplied={() => void readRules()}
