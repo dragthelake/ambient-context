@@ -554,9 +554,20 @@ fn get_settings(app: tauri::AppHandle) -> settings::Settings {
     settings::load(&app)
 }
 
+/// Saves and then applies, exactly as the MCP `set_config` handler does:
+/// a recording knob changed on the Settings page has to reach the running
+/// poll thread, not wait for the next launch. Async so the restart's wait
+/// for the poll thread happens off the main thread.
 #[tauri::command]
-fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
-    settings::save(&app, &next).map_err(|e| e.to_string())
+async fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let previous = settings::load(&app);
+        settings::save(&app, &next).map_err(|e| e.to_string())?;
+        apply_settings_change(&app, &previous, &next);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// The setting is the truth and the OS registration follows it. Writing one
@@ -600,6 +611,33 @@ mod tests {
     #[test]
     fn an_unknown_target_opens_nothing_rather_than_guessing() {
         assert_eq!(target_path(Path::new("/tmp/ac"), date(), "ledger"), None);
+    }
+
+    #[test]
+    fn a_changed_recording_knob_asks_for_a_restart() {
+        let previous = settings::Settings::default();
+        let next = settings::Settings {
+            interval_secs: previous.interval_secs + 5,
+            ..previous.clone()
+        };
+        assert!(restart_needed(&previous, &next));
+        let dwell = settings::Settings {
+            min_dwell_secs: previous.min_dwell_secs + 5,
+            ..previous.clone()
+        };
+        assert!(restart_needed(&previous, &dwell));
+    }
+
+    #[test]
+    fn a_knob_the_poll_loop_re_reads_does_not_restart_capture() {
+        let previous = settings::Settings::default();
+        let next = settings::Settings {
+            max_block_chars: 2000,
+            write_references: false,
+            ..previous.clone()
+        };
+        assert!(!restart_needed(&previous, &next));
+        assert!(!restart_needed(&previous, &previous.clone()));
     }
 
     #[test]
@@ -712,30 +750,40 @@ pub fn open_main_window_on(app: &tauri::AppHandle, date: chrono::NaiveDate) {
     }
 }
 
+/// The three knobs the poll thread reads once, at the top of its loop, and
+/// therefore the only ones a restart is needed for. Folder, block size,
+/// references and the extra redaction patterns are all re-read on every
+/// poll, so changing them takes effect without stopping anything.
+fn restart_needed(previous: &settings::Settings, next: &settings::Settings) -> bool {
+    previous.interval_secs != next.interval_secs
+        || previous.min_dwell_secs != next.min_dwell_secs
+        || previous.similarity_threshold != next.similarity_threshold
+}
+
 /// Applies a settings change written by any surface: capture restarts with
 /// the new recording knobs if it is running, and nothing else needs a
 /// restart because every other consumer re-reads settings as it goes.
+/// Both the Settings page and the MCP `set_config` handler come through
+/// here, so the two surfaces cannot drift apart.
 pub fn apply_settings_change(
     app: &tauri::AppHandle,
     previous: &settings::Settings,
     next: &settings::Settings,
 ) {
-    let recording_changed = previous.interval_secs != next.interval_secs
-        || previous.min_dwell_secs != next.min_dwell_secs
-        || previous.similarity_threshold != next.similarity_threshold
-        || previous.max_block_chars != next.max_block_chars
-        || previous.write_references != next.write_references
-        || previous.extra_redaction_patterns != next.extra_redaction_patterns;
-    if !recording_changed {
+    if !restart_needed(previous, next) {
         return;
     }
     let state = app.state::<capture::CaptureState>().inner().clone();
     if state.is_running() && next.folder.is_some() {
-        capture::stop(&state);
-        // The poll thread notices the stop within about 100ms; start
-        // refuses to run until it has, so give it that moment.
-        std::thread::sleep(std::time::Duration::from_millis(150));
-        capture::start(app.clone(), &state, next.clone());
+        // Only start once the old thread has actually left. Two poll
+        // threads with their own segmenters append to the same day file,
+        // so a stop that has not finished is a reason to leave capture off
+        // rather than to start another.
+        if capture::stop(&state) {
+            capture::start(app.clone(), &state, next.clone());
+        } else {
+            eprintln!("[capture] the poll thread did not stop; not restarting it");
+        }
     }
 }
 

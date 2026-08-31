@@ -9,7 +9,7 @@ use crate::{
 use chrono::{Local, NaiveDate};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -55,10 +55,21 @@ fn is_own_output(snapshot: &Snapshot, folder: &Path, today: NaiveDate) -> bool {
     false
 }
 
+/// How long `stop` will wait for the poll thread to leave. The thread
+/// checks the flag every 100ms, except while it is inside an accessibility
+/// read, and the reader's own messaging timeout bounds that. Waiting
+/// longer than this would mean the read is wedged, and starting a second
+/// thread beside a wedged one is the failure worth avoiding.
+pub const STOP_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[derive(Clone, Default)]
 pub struct CaptureState {
     running: Arc<AtomicBool>,
     blocks_today: Arc<AtomicUsize>,
+    /// How many poll threads are alive. `stop` waits on this rather than on
+    /// a sleep, because the flag going false says only that the thread has
+    /// been asked to leave, not that it has.
+    live: Arc<(Mutex<usize>, Condvar)>,
 }
 
 impl CaptureState {
@@ -78,24 +89,14 @@ impl CaptureState {
 /// Spawns the poll thread. Returns immediately. Calling this while already
 /// running is a no-op rather than a second thread.
 pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
-    if state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
     let Some(mut folder) = settings.folder.clone() else {
-        state.running.store(false, Ordering::SeqCst);
         eprintln!("[capture] refusing to start with no folder set");
         return;
     };
 
-    let running = state.running.clone();
     let counter = state.blocks_today.clone();
 
-    thread::spawn(move || {
+    let spawned = spawn_tracked(state, move |running| {
         let mut segmenter = Segmenter::new(settings.min_dwell_secs, settings.similarity_threshold);
         let mut dedup = writer::DayDedup::new();
         let interval = Duration::from_secs(settings.interval_secs.max(1));
@@ -221,10 +222,67 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         }
         crate::tray::refresh(&app, false);
     });
+    if !spawned {
+        eprintln!("[capture] a poll thread is already running");
+    }
 }
 
-pub fn stop(state: &CaptureState) {
+/// Marks the state running and puts `body` on its own thread, counting it
+/// in and out so `stop` can wait for it. Returns false when a thread is
+/// already live, which is what makes a second start a no-op.
+fn spawn_tracked<F>(state: &CaptureState, body: F) -> bool
+where
+    F: FnOnce(Arc<AtomicBool>) + Send + 'static,
+{
+    if state
+        .running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return false;
+    }
+    let (count, _) = &*state.live;
+    *count.lock().expect("capture thread count") += 1;
+    let running = state.running.clone();
+    let live = state.live.clone();
+    thread::spawn(move || {
+        body(running);
+        let (count, exited) = &*live;
+        *count.lock().expect("capture thread count") -= 1;
+        exited.notify_all();
+    });
+    true
+}
+
+/// Asks the poll thread to leave and returns only once it has, or once
+/// `STOP_TIMEOUT` expires. False means it is still running, and the caller
+/// must not start another: two threads with their own segmenters append to
+/// the same day file.
+pub fn stop(state: &CaptureState) -> bool {
     state.running.store(false, Ordering::SeqCst);
+    wait_until_stopped(state, STOP_TIMEOUT)
+}
+
+fn wait_until_stopped(state: &CaptureState, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    let (count, exited) = &*state.live;
+    let mut live = count.lock().expect("capture thread count");
+    while *live > 0 {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            eprintln!("[capture] the poll thread did not exit within {timeout:?}");
+            return false;
+        }
+        let (guard, result) = exited
+            .wait_timeout(live, remaining)
+            .expect("capture thread count");
+        live = guard;
+        if result.timed_out() && *live > 0 {
+            eprintln!("[capture] the poll thread did not exit within {timeout:?}");
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -241,9 +299,67 @@ mod tests {
     #[test]
     fn stop_is_idempotent() {
         let state = CaptureState::new();
-        stop(&state);
-        stop(&state);
+        assert!(stop(&state));
+        assert!(stop(&state));
         assert!(!state.is_running());
+    }
+
+    #[test]
+    fn stop_returns_only_once_a_slow_poll_thread_has_left() {
+        // The real reader can park the poll thread inside one snapshot;
+        // this one parks it for 300ms before it looks at the flag again. A
+        // restart on a 150ms timer would start a second thread inside that
+        // window.
+        let state = CaptureState::new();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        assert!(spawn_tracked(&state, move |running| loop {
+            thread::sleep(Duration::from_millis(300));
+            counter.fetch_add(1, Ordering::SeqCst);
+            if !running.load(Ordering::SeqCst) {
+                break;
+            }
+        }));
+
+        let started = std::time::Instant::now();
+        assert!(stop(&state), "the thread left within the timeout");
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "stop waited for the blocked read, not a fixed sleep; it took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(!state.is_running());
+
+        // And having waited, a start is safe. Two starts still run one
+        // thread: the second is refused rather than doubling the writer.
+        let bodies = Arc::new(AtomicUsize::new(0));
+        let first = bodies.clone();
+        let second = bodies.clone();
+        assert!(spawn_tracked(&state, move |_| {
+            first.fetch_add(1, Ordering::SeqCst);
+        }));
+        assert!(
+            !spawn_tracked(&state, move |_| {
+                second.fetch_add(1, Ordering::SeqCst);
+            }),
+            "a second start while one is live is refused"
+        );
+        assert!(stop(&state));
+        assert_eq!(bodies.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_stop_that_times_out_says_so_rather_than_pretending() {
+        let state = CaptureState::new();
+        assert!(spawn_tracked(&state, |running| {
+            // Ignores the flag, the way a wedged accessibility read does.
+            let _ = running;
+            thread::sleep(Duration::from_millis(600));
+        }));
+        state.running.store(false, Ordering::SeqCst);
+        assert!(!wait_until_stopped(&state, Duration::from_millis(50)));
+        assert!(wait_until_stopped(&state, Duration::from_secs(5)));
     }
 
     #[test]
