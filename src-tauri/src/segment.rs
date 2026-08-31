@@ -11,6 +11,9 @@ pub struct Block {
     pub start: DateTime<Local>,
     pub end: DateTime<Local>,
     pub lines: Vec<String>,
+    /// A headings-only block keeps its heading and reference and drops its
+    /// text, by rule.
+    pub headings_only: bool,
 }
 
 /// Set similarity over whitespace-split tokens. Returns 1.0 for two empty
@@ -42,6 +45,7 @@ struct OpenBlock {
     // counter ticking across polls lands once instead of once per tick.
     skeletons: HashSet<String>,
     last_text: Vec<String>,
+    headings_only: bool,
 }
 
 fn admit(line: &str, seen: &mut HashSet<String>, skeletons: &mut HashSet<String>) -> bool {
@@ -81,6 +85,7 @@ impl Segmenter {
             Some(open) => {
                 open.app != snapshot.app
                     || open.title != snapshot.window_title
+                    || open.headings_only != snapshot.headings_only
                     || jaccard(&open.last_text, &snapshot.text) < self.similarity_threshold
             }
         };
@@ -124,6 +129,7 @@ impl Segmenter {
             lines,
             seen,
             skeletons,
+            headings_only: snapshot.headings_only,
             last_text: snapshot.text,
         });
         finished
@@ -151,6 +157,7 @@ impl Segmenter {
             start: open.start,
             end,
             lines: open.lines,
+            headings_only: open.headings_only,
         })
     }
 }
@@ -282,5 +289,26 @@ mod tests {
                 "gamma".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn a_change_of_headings_only_starts_a_new_block() {
+        let mut seg = Segmenter::new(0, 0.5);
+        seg.push(snap("Safari", "Hacker News", &["one two"]), at(0));
+        let mut quiet = snap("Safari", "Hacker News", &["one two"]);
+        quiet.headings_only = true;
+        let finished = seg.push(quiet, at(60));
+        assert!(finished.is_some());
+        assert!(!finished.unwrap().headings_only);
+    }
+
+    #[test]
+    fn a_block_carries_headings_only_from_its_first_snapshot() {
+        let mut seg = Segmenter::new(0, 0.5);
+        let mut quiet = snap("Safari", "Hacker News", &["one two"]);
+        quiet.headings_only = true;
+        seg.push(quiet, at(0));
+        let finished = seg.flush(at(60)).unwrap();
+        assert!(finished.headings_only);
     }
 }

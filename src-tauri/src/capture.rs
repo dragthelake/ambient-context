@@ -1,5 +1,5 @@
 use crate::{
-    prune, redact,
+    prune, redact, rules,
     reader::{self, Snapshot, WindowReader},
     segment::Segmenter,
     settings::{self, Settings},
@@ -12,6 +12,12 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
+
+fn rules_mtime(config_dir: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(crate::rules::rules_path(config_dir))
+        .and_then(|m| m.modified())
+        .ok()
+}
 
 /// The capture target must never include the capture output: reading
 /// today's file re-captures the previous blocks, and the dwell segmenter
@@ -94,6 +100,11 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         let interval = Duration::from_secs(settings.interval_secs.max(1));
         let mut failed_reads: u32 = 0;
         let mut counter_day = Local::now().date_naive();
+        let config_dir = settings::config_dir(&app);
+        let mut rules = rules::load(&config_dir);
+        let mut rules_stamp = rules_mtime(&config_dir);
+        let mut extra = redact::compile_extra(&settings.extra_redaction_patterns);
+        let mut extra_source = settings.extra_redaction_patterns.clone();
 
         while running.load(Ordering::SeqCst) {
             // "47 blocks today" must mean today. Reset the count when the
@@ -118,10 +129,25 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 }
             }
 
+            // Rules edited in Settings, by an agent over MCP, or in a text
+            // editor take effect on the next poll rather than the next
+            // launch. Compared by modification time so an unchanged file
+            // costs one stat call per poll.
+            let stamp = rules_mtime(&config_dir);
+            if stamp != rules_stamp {
+                rules_stamp = stamp;
+                rules = rules::load(&config_dir);
+            }
+            let current = settings::load(&app).extra_redaction_patterns;
+            if current != extra_source {
+                extra = redact::compile_extra(&current);
+                extra_source = current;
+            }
+
             match reader::PlatformReader.snapshot() {
                 Some(raw) => {
                     failed_reads = 0;
-                    if let Some(clean) = redact::redact_snapshot(raw) {
+                    if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
                         if is_own_output(&clean, &folder, today) {
                             // Looking at the capture file is not work worth
                             // recording, and recording it recurses.

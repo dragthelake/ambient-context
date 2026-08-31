@@ -39,6 +39,13 @@ pub struct Settings {
     /// Whether macOS starts the app at login. On by default: a record with
     /// a hole in it where a reboot was is worth less than no record.
     pub launch_at_login: bool,
+    /// The longest a single block's body can be, in characters. 0 is
+    /// unlimited, which is the shipped behaviour.
+    pub max_block_chars: usize,
+    /// Whether `file:` and `url:` reference lines are written.
+    pub write_references: bool,
+    /// User redaction patterns, appended to the built-ins.
+    pub extra_redaction_patterns: Vec<String>,
 }
 
 impl Default for Settings {
@@ -57,6 +64,9 @@ impl Default for Settings {
             day_prompt: None,
             editor: None,
             launch_at_login: true,
+            max_block_chars: 0,
+            write_references: true,
+            extra_redaction_patterns: Vec::new(),
         }
     }
 }
@@ -77,11 +87,12 @@ pub fn write_to(path: &Path, settings: &Settings) -> std::io::Result<()> {
     std::fs::write(path, json)
 }
 
+pub fn config_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    app.path().app_config_dir().expect("app config dir")
+}
+
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
-    app.path()
-        .app_config_dir()
-        .expect("app config dir")
-        .join("settings.json")
+    config_dir(app).join("settings.json")
 }
 
 pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {

@@ -154,6 +154,11 @@ pub fn render_block(block: &Block, lines: &[String]) -> String {
     if block.document.is_some() || block.url.is_some() {
         out.push('\n');
     }
+    // A headings-only block keeps its place in the timeline and its
+    // reference, and gives up its text.
+    if block.headings_only {
+        return out;
+    }
     for line in lines {
         out.push_str(line);
         out.push('\n');
@@ -173,7 +178,14 @@ pub fn append_block(
     let date = block.start.date_naive();
     let path = file_path(folder, date);
     let is_new = !path.exists();
-    let novel = dedup.novel_lines(folder, block);
+    // A headings-only block keeps the dedup set out of it, so a line first
+    // seen in a headings-only block can still be written when it turns up
+    // in a full block later.
+    let novel = if block.headings_only {
+        Vec::new()
+    } else {
+        dedup.novel_lines(folder, block)
+    };
 
     let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
     if is_new {
@@ -219,6 +231,7 @@ mod tests {
                 .with_ymd_and_hms(2026, 8, 25, hour, end_minute, 0)
                 .unwrap(),
             lines: vec!["read the issue".to_string()],
+            headings_only: false,
         }
     }
 
@@ -413,5 +426,33 @@ mod tests {
         fs::write(&path, &edited).unwrap();
         ensure_agents_file(dir.path()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), edited);
+    }
+
+    #[test]
+    fn a_headings_only_block_writes_its_heading_and_references_and_no_body() {
+        let mut block = block_at(9, 14, 41);
+        block.headings_only = true;
+        block.url = Some("https://news.ycombinator.com/".to_string());
+        let out = render_block(&block, &block.lines.clone());
+        assert!(out.contains("09:14"));
+        assert!(out.contains("url: https://news.ycombinator.com/"));
+        assert!(!out.contains("read the issue"));
+    }
+
+    #[test]
+    fn a_headings_only_block_does_not_consume_its_lines_from_the_day_dedup() {
+        let dir = tempdir().unwrap();
+        let mut dedup = DayDedup::new();
+        let mut quiet = block_at(9, 0, 30);
+        quiet.headings_only = true;
+        append_block(dir.path(), &quiet, &mut dedup).unwrap();
+        let loud = block_at(10, 0, 30);
+        append_block(dir.path(), &loud, &mut dedup).unwrap();
+        let written = std::fs::read_to_string(file_path(
+            dir.path(),
+            NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(written.matches("read the issue").count(), 1);
     }
 }
