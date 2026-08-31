@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Proposal } from "../lib/rules";
 
@@ -13,14 +14,26 @@ const TARGET_LABEL: Record<string, string> = {
 };
 
 export function DiffView({ proposal, onClose, onApplied }: DiffViewProps) {
+  const [error, setError] = useState<string | null>(null);
+
   const apply = async () => {
-    await invoke("apply_proposal", { id: proposal.id });
-    await onApplied();
+    try {
+      await invoke("apply_proposal", { id: proposal.id });
+      setError(null);
+      await onApplied();
+    } catch (e) {
+      setError(String(e));
+    }
   };
   const discard = async () => {
     // Discard is not a cancel: it is a recorded decision.
-    await invoke("discard_proposal", { id: proposal.id });
-    onClose();
+    try {
+      await invoke("discard_proposal", { id: proposal.id });
+      setError(null);
+      onClose();
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   return (
@@ -54,6 +67,7 @@ export function DiffView({ proposal, onClose, onApplied }: DiffViewProps) {
           Apply
         </button>
       </div>
+      {error ? <p className="warn">{error}</p> : null}
       <p className="propose-note">
         Nothing has been written yet. Apply writes the file; Discard records
         the decision and writes nothing.
