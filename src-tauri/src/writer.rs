@@ -223,20 +223,44 @@ pub fn append_block(
     Ok(())
 }
 
+/// Content hashes of `AGENTS.md` as earlier versions of the app shipped
+/// it. A file matching one of these is the app's own copy, untouched, and
+/// can be replaced with the current version. Anything else belongs to the
+/// user.
+const PREVIOUS_BUNDLED_AGENTS: &[&str] = &[
+    "3102846b796ab65642806000543c289e49131d53001b53cada23b0f88467f0af",
+    "5302950a122a3433f6a4dbbb0a285f83397d516bf9b7a1ba17619384637dd2ae",
+];
+
+fn is_bundled_agents_file(text: &str, current: &str) -> bool {
+    text == current
+        || PREVIOUS_BUNDLED_AGENTS.contains(&crate::ledger::sha256_of(text.as_bytes()).as_str())
+}
+
 /// Writes AGENTS.md into the capture folder so the folder explains itself
-/// to whatever LLM reads it. An existing file is rewritten only when it
-/// predates the layer it needs to describe, which is what the marker tests:
-/// a user who edits their own copy keeps their edits, because their copy
-/// still contains the marker.
+/// to whatever LLM reads it. A file the user has edited is never
+/// overwritten: only a copy this app wrote, byte for byte, is replaced.
+/// Everything else gets the new version beside it as `AGENTS.md.new`, once,
+/// with a line on stderr saying so.
 pub fn ensure_agents_file(folder: &Path) -> std::io::Result<()> {
     let path = folder.join("AGENTS.md");
     let current = include_str!("../assets/AGENTS.md");
-    let needs_write = match fs::read_to_string(&path) {
-        Ok(existing) => !existing.contains("## Ledger"),
-        Err(_) => true,
+    let Ok(existing) = fs::read_to_string(&path) else {
+        return fs::write(&path, current);
     };
-    if needs_write {
-        fs::write(&path, current)?;
+    if existing == current {
+        return Ok(());
+    }
+    if is_bundled_agents_file(&existing, current) {
+        return fs::write(&path, current);
+    }
+    let beside = folder.join("AGENTS.md.new");
+    if fs::read_to_string(&beside).ok().as_deref() != Some(current) {
+        fs::write(&beside, current)?;
+        eprintln!(
+            "[writer] AGENTS.md has been edited, so this version was written to {} instead.",
+            beside.display()
+        );
     }
     Ok(())
 }
@@ -514,17 +538,35 @@ mod tests {
     }
 
     #[test]
-    fn an_agents_file_from_an_older_version_is_brought_up_to_date() {
+    fn an_edited_agents_file_is_kept_and_the_new_version_lands_beside_it() {
         let dir = tempdir().unwrap();
-        fs::write(
-            dir.path().join("AGENTS.md"),
-            "# Reading this folder\n\nNo layers here.",
-        )
-        .unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let theirs = "# Reading this folder\n\nMy own notes about this record.\n";
+        fs::write(&path, theirs).unwrap();
+
         ensure_agents_file(dir.path()).unwrap();
-        let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
-        assert!(text.contains("## Summaries"));
-        assert!(text.contains("## Ledger"));
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            theirs,
+            "their file stands"
+        );
+        let beside = fs::read_to_string(dir.path().join("AGENTS.md.new")).unwrap();
+        assert!(beside.contains("## Ledger"));
+
+        // Once, not once per capture: a second call leaves both alone.
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("AGENTS.md.new")).unwrap(),
+            beside
+        );
+    }
+
+    #[test]
+    fn only_a_copy_this_app_wrote_counts_as_its_own() {
+        let current = include_str!("../assets/AGENTS.md");
+        assert!(is_bundled_agents_file(current, current));
+        assert!(!is_bundled_agents_file("# Reading this folder\n", current));
     }
 
     #[test]
@@ -536,6 +578,17 @@ mod tests {
         fs::write(&path, &edited).unwrap();
         ensure_agents_file(dir.path()).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), edited);
+    }
+
+    #[test]
+    fn an_untouched_agents_file_is_left_exactly_as_it_is() {
+        let dir = tempdir().unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert!(
+            !dir.path().join("AGENTS.md.new").exists(),
+            "nothing to write beside it"
+        );
     }
 
     #[test]
