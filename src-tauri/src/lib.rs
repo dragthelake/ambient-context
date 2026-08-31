@@ -787,6 +787,18 @@ mod tests {
     }
 
     #[test]
+    fn the_pending_day_is_handed_over_once_and_then_forgotten() {
+        let pending = PendingOpenDay::default();
+        assert_eq!(pending.take(), None);
+        pending.put("2026-08-24".to_string());
+        // A second open_day before the window asks replaces the first: the
+        // most recent request is the one that matters.
+        pending.put("2026-08-25".to_string());
+        assert_eq!(pending.take().as_deref(), Some("2026-08-25"));
+        assert_eq!(pending.take(), None);
+    }
+
+    #[test]
     fn a_rules_file_that_will_not_parse_is_reported_rather_than_read_as_no_rules() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(rules::rules_path(dir.path()), "{ not json").unwrap();
@@ -1036,13 +1048,40 @@ fn sync_activation_policy(app: &tauri::AppHandle, opening: bool) {
     let _ = (app, opening);
 }
 
+/// The day an `open_day` call asked for, held until the window asks for
+/// it. An event alone loses the race on a cold open: the webview is built,
+/// the event goes out, and the page starts listening a moment later.
+#[derive(Default)]
+pub struct PendingOpenDay(std::sync::Mutex<Option<String>>);
+
+impl PendingOpenDay {
+    fn put(&self, date: String) {
+        *self.0.lock().expect("pending open day") = Some(date);
+    }
+
+    fn take(&self) -> Option<String> {
+        self.0.lock().expect("pending open day").take()
+    }
+}
+
+/// Read once, on mount, by the Day view. Taking it clears it, so a later
+/// reload shows the day the user last chose rather than replaying an old
+/// request.
+#[tauri::command]
+fn take_pending_day(app: tauri::AppHandle) -> Option<String> {
+    app.state::<PendingOpenDay>().take()
+}
+
 /// Opens the browsing window on a given day, for MCP `open_day` and any
-/// later handoff that ends "check it looks right". The window is told which
-/// day to show through an event the Day view listens for.
+/// later handoff that ends "check it looks right". The date is left where
+/// the page can collect it when it mounts, and emitted as well for the
+/// window that is already open and already listening.
 pub fn open_main_window_on(app: &tauri::AppHandle, date: chrono::NaiveDate) {
+    let date = date.to_string();
+    app.state::<PendingOpenDay>().put(date.clone());
     open_main_window(app);
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.emit("open-day", date.to_string());
+        let _ = window.emit("open-day", date);
     }
 }
 
@@ -1259,7 +1298,8 @@ pub fn run() {
             apply_proposal,
             discard_proposal,
             copy_context,
-            mcp_registration
+            mcp_registration,
+            take_pending_day
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1287,6 +1327,7 @@ pub fn run() {
             }
             app.manage(jobs::JobQueue::default());
             app.manage(ProposalStore::default());
+            app.manage(PendingOpenDay::default());
             jobs::start(app.handle().clone());
             // The control socket, for the mcp subcommand. A failure to bind is
             // reported to stderr and nothing else: an app that will not start
