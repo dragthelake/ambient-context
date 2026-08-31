@@ -287,3 +287,15 @@ would close it.
 
 `refresh_engine_env` is not wired to a "Detect again" button. Optional in the
 brief, and it is a visual addition to a page a person is about to work on.
+
+## Fixes after the fix review (v1)
+
+The review of the fix range found two new blocking problems and three partial fixes. Closed in one commit on `v1`:
+
+- Capture: a poll thread carries a generation token and stops the moment a newer start is issued; `spawn_tracked` refuses any start while a thread is still alive, including one a timed-out stop left behind. Test: `a_thread_left_behind_by_a_timed_out_stop_blocks_the_next_start_and_then_exits`.
+- Jobs: when the tick finds no engine or no folder, queued jobs are failed with the reason instead of left as queued forever. `JobQueue::fail_queued`, tested.
+- Engine: a process-wide lock in `engine::run_with_env` makes every invocation serial whatever path it came from (scheduler, queue, test button, highlight-to-instruct). The two interactive paths (`engine_test`, the `propose` command) check `engine::is_busy()` first and answer with a message rather than blocking on a summary.
+- Ledger: `choose_folder`, `use_default_folder` and the tray's capture toggle write `settings.json` through `save_settings_recorded`, so every settings write from every surface is recorded after the save.
+- Rules: `RulesPayload` carries `path`, which the Settings error state shows.
+
+Gate at this commit, clean tree: `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` exit 0, `cargo test` 328 + 2 + 3 passed, `npx tsc --noEmit` clean, `npm run build` passes, `npm test` 4 passed.

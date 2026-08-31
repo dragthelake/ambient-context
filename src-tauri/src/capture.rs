@@ -8,7 +8,7 @@ use crate::{
 };
 use chrono::{Local, NaiveDate};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -96,6 +96,25 @@ pub struct CaptureState {
     /// a sleep, because the flag going false says only that the thread has
     /// been asked to leave, not that it has.
     live: Arc<(Mutex<usize>, Condvar)>,
+    /// Bumped on every start. A poll thread keeps going only while the
+    /// generation it was started with is still current, so a thread that
+    /// outlived a timed-out stop cannot be revived by the next start
+    /// flipping `running` back on.
+    generation: Arc<AtomicU64>,
+}
+
+/// What a poll thread checks between reads: still asked to run, and still
+/// the current generation.
+pub struct Alive {
+    running: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl Alive {
+    pub fn is_current(&self) -> bool {
+        self.running.load(Ordering::SeqCst) && self.generation.load(Ordering::SeqCst) == self.mine
+    }
 }
 
 impl CaptureState {
@@ -122,7 +141,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
 
     let counter = state.blocks_today.clone();
 
-    let spawned = spawn_tracked(state, move |running| {
+    let spawned = spawn_tracked(state, move |alive| {
         let mut segmenter = Segmenter::new(settings.min_dwell_secs, settings.similarity_threshold);
         let mut dedup = writer::DayDedup::new();
         let interval = Duration::from_secs(settings.interval_secs.max(1));
@@ -141,7 +160,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             write_references: settings.write_references,
         };
 
-        while running.load(Ordering::SeqCst) {
+        while alive.is_current() {
             // "47 blocks today" must mean today. Reset the count when the
             // date rolls over rather than letting it accumulate forever.
             let today = Local::now().date_naive();
@@ -234,7 +253,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             // silently loses the open block.
             let mut slept = Duration::ZERO;
             let slice = Duration::from_millis(100);
-            while slept < interval && running.load(Ordering::SeqCst) {
+            while slept < interval && alive.is_current() {
                 thread::sleep(slice);
                 slept += slice;
             }
@@ -256,11 +275,18 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
 
 /// Marks the state running and puts `body` on its own thread, counting it
 /// in and out so `stop` can wait for it. Returns false when a thread is
-/// already live, which is what makes a second start a no-op.
+/// already live, whether it is one that is running or one that a timed-out
+/// stop left behind: either way a second thread would append to the same
+/// day file, so the start is refused rather than doubled.
 fn spawn_tracked<F>(state: &CaptureState, body: F) -> bool
 where
-    F: FnOnce(Arc<AtomicBool>) + Send + 'static,
+    F: FnOnce(Alive) + Send + 'static,
 {
+    let (count, _) = &*state.live;
+    let mut live_count = count.lock().expect("capture thread count");
+    if *live_count > 0 {
+        return false;
+    }
     if state
         .running
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -268,12 +294,17 @@ where
     {
         return false;
     }
-    let (count, _) = &*state.live;
-    *count.lock().expect("capture thread count") += 1;
-    let running = state.running.clone();
+    let mine = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    *live_count += 1;
+    drop(live_count);
+    let alive = Alive {
+        running: state.running.clone(),
+        generation: state.generation.clone(),
+        mine,
+    };
     let live = state.live.clone();
     thread::spawn(move || {
-        body(running);
+        body(alive);
         let (count, exited) = &*live;
         *count.lock().expect("capture thread count") -= 1;
         exited.notify_all();
@@ -359,10 +390,10 @@ mod tests {
         let state = CaptureState::new();
         let reads = Arc::new(AtomicUsize::new(0));
         let counter = reads.clone();
-        assert!(spawn_tracked(&state, move |running| loop {
+        assert!(spawn_tracked(&state, move |alive| loop {
             thread::sleep(Duration::from_millis(300));
             counter.fetch_add(1, Ordering::SeqCst);
-            if !running.load(Ordering::SeqCst) {
+            if !alive.is_current() {
                 break;
             }
         }));
@@ -398,14 +429,50 @@ mod tests {
     #[test]
     fn a_stop_that_times_out_says_so_rather_than_pretending() {
         let state = CaptureState::new();
-        assert!(spawn_tracked(&state, |running| {
+        assert!(spawn_tracked(&state, |alive| {
             // Ignores the flag, the way a wedged accessibility read does.
-            let _ = running;
+            let _ = alive;
             thread::sleep(Duration::from_millis(600));
         }));
         state.running.store(false, Ordering::SeqCst);
         assert!(!wait_until_stopped(&state, Duration::from_millis(50)));
         assert!(wait_until_stopped(&state, Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_thread_left_behind_by_a_timed_out_stop_blocks_the_next_start_and_then_exits() {
+        // The failure this guards: stop times out, the caller starts again,
+        // the new start flips `running` back to true, and the old thread's
+        // loop carries on beside the new one. Two writers, one day file.
+        let state = CaptureState::new();
+        let old_iterations = Arc::new(AtomicUsize::new(0));
+        let counter = old_iterations.clone();
+        assert!(spawn_tracked(&state, move |alive| loop {
+            thread::sleep(Duration::from_millis(300));
+            counter.fetch_add(1, Ordering::SeqCst);
+            if !alive.is_current() {
+                break;
+            }
+        }));
+
+        state.running.store(false, Ordering::SeqCst);
+        assert!(!wait_until_stopped(&state, Duration::from_millis(20)));
+
+        // While the old thread is alive a new start is refused outright.
+        assert!(!spawn_tracked(&state, |_| {}));
+        assert!(!state.is_running(), "a refused start must not set running");
+
+        // Even if something forced `running` back on, the old thread's
+        // generation is stale the moment a new one is issued.
+        state.running.store(true, Ordering::SeqCst);
+        state.generation.fetch_add(1, Ordering::SeqCst);
+        assert!(wait_until_stopped(&state, Duration::from_secs(5)));
+        assert_eq!(old_iterations.load(Ordering::SeqCst), 1);
+        state.running.store(false, Ordering::SeqCst);
+
+        // And once it has gone, a start is admitted again.
+        assert!(spawn_tracked(&state, |_| {}));
+        assert!(stop(&state));
     }
 
     #[test]

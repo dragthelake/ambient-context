@@ -7,6 +7,7 @@
 //! resolves absolute paths from it. `parse_env` is the pure half of that.
 
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// The connected engine lives in settings.rs because it is persisted as
 /// part of settings.json; re-exported here so callers can talk about it as
@@ -121,11 +122,30 @@ impl std::fmt::Display for EngineError {
 /// std has no wait-with-timeout, and rather than take a dependency for one
 /// call site we keep the pid and send it a signal through /bin/kill, which
 /// is always present on macOS.
+/// The app never runs two engine invocations at once, from any path: the
+/// scheduler, the on-demand queue, the test button and highlight-to-instruct
+/// all pass through here. The queue keeps the scheduled and on-demand runs
+/// serial by design; this lock is the floor under everything else.
+static ENGINE_LOCK: Mutex<()> = Mutex::new(());
+
+/// True while an engine invocation is in progress. Interactive callers ask
+/// this first so they can say "a summary is running" instead of parking a
+/// button on a lock for up to ten minutes.
+pub fn is_busy() -> bool {
+    ENGINE_LOCK.try_lock().is_err()
+}
+
+pub const BUSY_MESSAGE: &str =
+    "An engine run is already in progress. Wait for it to finish and try again.";
+
 pub fn run_with_env(
     engine: &crate::settings::Engine,
     prompt: &str,
     env: &HashMap<String, String>,
 ) -> Result<String, EngineError> {
+    let _one_at_a_time = ENGINE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut command = Command::new(&engine.command);
     command
         .args(&engine.args)

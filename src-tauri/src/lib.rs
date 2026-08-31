@@ -55,7 +55,14 @@ async fn choose_folder(app: tauri::AppHandle) -> Option<String> {
     let path = picked.into_path().ok()?;
     let mut config = settings::load(&app);
     config.folder = Some(path.clone());
-    let _ = settings::save(&app, &config);
+    if let Err(error) = save_settings_recorded(
+        &settings::config_dir(&app),
+        Some(&path),
+        "choose_folder",
+        &config,
+    ) {
+        eprintln!("[settings] could not save the chosen folder: {error}");
+    }
     Some(path.to_string_lossy().to_string())
 }
 
@@ -71,7 +78,14 @@ fn use_default_folder(app: tauri::AppHandle) -> Option<String> {
     std::fs::create_dir_all(&path).ok()?;
     let mut config = settings::load(&app);
     config.folder = Some(path.clone());
-    let _ = settings::save(&app, &config);
+    if let Err(error) = save_settings_recorded(
+        &settings::config_dir(&app),
+        Some(&path),
+        "use_default_folder",
+        &config,
+    ) {
+        eprintln!("[settings] could not save the default folder: {error}");
+    }
     Some(path.to_string_lossy().to_string())
 }
 
@@ -263,21 +277,26 @@ struct RulesPayload {
     /// empty in that case, and it is not empty because the user has no
     /// rules: Settings has to be able to tell those two apart.
     error: Option<String>,
+    /// Where the file lives, so an error message can point at it.
+    path: String,
 }
 
 fn rules_payload(config_dir: &std::path::Path) -> RulesPayload {
+    let path = rules::rules_path(config_dir).to_string_lossy().to_string();
     match rules::load_result(config_dir) {
         Ok(loaded) => RulesPayload {
             next_id: rules::new_id(&loaded),
             rules: loaded.rules,
             built_ins: rules::built_ins(),
             error: None,
+            path,
         },
         Err(error) => RulesPayload {
             next_id: rules::new_id(&rules::Rules::default()),
             rules: Vec::new(),
             built_ins: rules::built_ins(),
             error: Some(error.to_string()),
+            path,
         },
     }
 }
@@ -335,6 +354,7 @@ fn write_rules(
         rules: loaded.rules,
         built_ins: rules::built_ins(),
         error: None,
+        path: rules::rules_path(&config_dir).to_string_lossy().to_string(),
     })
 }
 
@@ -458,6 +478,13 @@ async fn propose(
     let loaded = settings::load(&app);
     let engine = loaded.engine.ok_or(propose::ProposeError::NoEngine)?;
     let folder = loaded.folder.ok_or(propose::ProposeError::NoEngine)?;
+    // A popover must not park on the engine lock behind a ten-minute
+    // summary; say so and let the user try again.
+    if engine::is_busy() {
+        return Err(propose::ProposeError::EngineFailed {
+            stderr: engine::BUSY_MESSAGE.to_string(),
+        });
+    }
     let config_dir = settings::config_dir(&app);
     let handle = app.clone();
     let proposal = tauri::async_runtime::spawn_blocking(move || {
@@ -639,6 +666,9 @@ async fn engine_test(
     engine_config: settings::Engine,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        if engine::is_busy() {
+            return Err(engine::BUSY_MESSAGE.to_string());
+        }
         let mut probe = engine_config;
         // A test must never park the window for ten minutes.
         probe.timeout_secs = probe.timeout_secs.min(60);
@@ -709,7 +739,7 @@ fn get_settings(app: tauri::AppHandle) -> settings::Settings {
 /// the file changes, because that is what makes the entry reproducible:
 /// the ledger names the input the actor saw. The entry is written after
 /// the save, so a failed save leaves no entry claiming otherwise.
-fn save_settings_recorded(
+pub(crate) fn save_settings_recorded(
     config_dir: &std::path::Path,
     folder: Option<&std::path::Path>,
     action: &str,

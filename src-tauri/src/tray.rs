@@ -138,13 +138,13 @@ pub fn toggle_capture(app: &AppHandle) {
         // An explicit stop is remembered: the app will not auto-start
         // capture again until the user starts it.
         config.enabled = false;
-        let _ = settings::save(app, &config);
+        record_toggle(app, &config);
         // The thread notices within ~100ms and flushes on its way
         // out, but the icon must empty now, not when it does.
         refresh(app, false);
     } else {
         config.enabled = true;
-        let _ = settings::save(app, &config);
+        record_toggle(app, &config);
         capture::start(app.clone(), &state, config);
         refresh(app, true);
     }
@@ -199,4 +199,18 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .build(app)?;
 
     Ok(())
+}
+
+/// The left-click toggle writes `enabled` to settings.json, and a settings
+/// write is a settings write whichever surface made it: it goes through the
+/// same recorded save as the Settings page and MCP.
+fn record_toggle(app: &tauri::AppHandle, config: &settings::Settings) {
+    if let Err(error) = crate::save_settings_recorded(
+        &settings::config_dir(app),
+        config.folder.as_deref(),
+        "toggle_capture",
+        config,
+    ) {
+        eprintln!("[settings] could not record the capture toggle: {error}");
+    }
 }

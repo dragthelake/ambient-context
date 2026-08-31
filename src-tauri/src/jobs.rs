@@ -274,6 +274,15 @@ fn tick(app: &AppHandle) {
 
     let config = settings::load(app);
     let (Some(folder), Some(_)) = (config.folder.clone(), config.engine.clone()) else {
+        // A job queued before the engine or the folder went away must not
+        // sit as "queued" forever with the window polling it. Fail it with
+        // the reason, which is also what the Day view shows.
+        let reason = if config.folder.is_none() {
+            "No capture folder is set. Choose one in Setup."
+        } else {
+            "No engine is connected. Choose one in Settings."
+        };
+        app.state::<JobQueue>().fail_queued(&state, reason);
         return;
     };
 
@@ -473,6 +482,22 @@ impl JobQueue {
         if let Some(job) = history.iter_mut().find(|job| job.id == id) {
             job.status = status;
         }
+    }
+
+    /// Drains everything queued and marks it failed with `reason`. Used when
+    /// the tick finds nothing that could run a job, so nothing is left in
+    /// "queued" with no path out of it. Returns how many were failed.
+    pub(crate) fn fail_queued(&self, state: &JobState, reason: &str) -> usize {
+        let drained = self.drain_if_idle(state);
+        for job in &drained {
+            self.record(
+                &job.id,
+                JobStatus::Failed {
+                    stderr: reason.to_string(),
+                },
+            );
+        }
+        drained.len()
     }
 }
 
@@ -738,6 +763,23 @@ mod tests {
         assert_eq!(found.status, JobStatus::Queued);
         assert_eq!(found.date, day(2026, 8, 30));
         assert!(queue.find("job-nope").is_none());
+    }
+
+    #[test]
+    fn a_queued_job_with_nothing_to_run_it_is_failed_not_stranded() {
+        let queue = JobQueue::for_test();
+        let state = JobState::default();
+        let id = queue.enqueue_summarise(chrono::NaiveDate::from_ymd_opt(2026, 8, 30).unwrap());
+        assert_eq!(queue.fail_queued(&state, "No engine is connected."), 1);
+        let job = queue.find(&id.0).expect("the job stays findable");
+        assert!(
+            matches!(job.status, JobStatus::Failed { ref stderr } if stderr.contains("No engine"))
+        );
+        assert_eq!(
+            queue.fail_queued(&state, "again"),
+            0,
+            "nothing left to fail"
+        );
     }
 
     #[test]
