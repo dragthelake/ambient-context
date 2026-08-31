@@ -5,7 +5,7 @@ mod engine;
 mod ipc;
 mod jobs;
 mod ledger;
-mod mcp;
+pub mod mcp;
 mod prune;
 mod prompt;
 mod propose;
