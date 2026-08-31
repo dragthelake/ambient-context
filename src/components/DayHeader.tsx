@@ -44,7 +44,11 @@ export function DayHeader({
 
   const onOpen = async () => {
     try {
-      await invoke("open_in_editor", { date, which: mode });
+      // The raw view is the day file; "raw" is not a file the backend knows.
+      await invoke("open_in_editor", {
+        date,
+        which: mode === "raw" ? "day" : "summary",
+      });
       setActionError(null);
     } catch (error) {
       setActionError(String(error));
