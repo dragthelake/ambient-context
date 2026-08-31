@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 /// Applications whose contents are never read at all. Matched
 /// case-insensitively against the application's localised name, as a
 /// substring, so that "1Password 8" and "1Password" both match.
-const EXCLUDED_APPS: &[&str] = &[
+pub const EXCLUDED_APPS: &[&str] = &[
     "1password",
     "bitwarden",
     "dashlane",
@@ -28,7 +28,7 @@ pub fn is_excluded_app(app: &str) -> bool {
 /// happen inside Safari and Chrome, which can never be on the app exclusion
 /// list, and the title is the only per-site signal available. A private
 /// window is the user saying "not this", so the whole snapshot is dropped.
-const PRIVATE_WINDOW_MARKERS: &[&str] = &["private browsing", "incognito", "inprivate"];
+pub const PRIVATE_WINDOW_MARKERS: &[&str] = &["private browsing", "incognito", "inprivate"];
 
 pub fn is_private_window(title: &str) -> bool {
     let lower = title.to_lowercase();

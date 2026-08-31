@@ -6,6 +6,7 @@ mod ledger;
 mod prune;
 mod reader;
 mod redact;
+mod rules;
 mod segment;
 mod settings;
 mod summarise;
