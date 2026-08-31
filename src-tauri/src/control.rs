@@ -70,7 +70,10 @@ fn stop_capture(app: &AppHandle, client: &str) -> Response {
 
 fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
     let Ok(date) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
-        return Response::err("invalid", format!("{date} is not a date in YYYY-MM-DD form."));
+        return Response::err(
+            "invalid",
+            format!("{date} is not a date in YYYY-MM-DD form."),
+        );
     };
     let config = settings::load(app);
     if config.engine.is_none() {
@@ -86,8 +89,12 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
         return Response::err("not_found", format!("There is no capture for {date}."));
     }
     let queue = app.state::<jobs::JobQueue>();
-    let id =
-        queue.enqueue_summarise_with(date, ledger::Trigger::Mcp { client: client.to_string() });
+    let id = queue.enqueue_summarise_with(
+        date,
+        ledger::Trigger::Mcp {
+            client: client.to_string(),
+        },
+    );
     Response::Ok(serde_json::json!({
         "job_id": id.to_string(),
         "status": "queued",
@@ -105,7 +112,10 @@ fn job_status(app: &AppHandle, id: &str) -> Response {
 
 fn open_day(app: &AppHandle, date: &str) -> Response {
     let Ok(parsed) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
-        return Response::err("invalid", format!("{date} is not a date in YYYY-MM-DD form."));
+        return Response::err(
+            "invalid",
+            format!("{date} is not a date in YYYY-MM-DD form."),
+        );
     };
     crate::open_main_window_on(app, parsed);
     Response::Ok(serde_json::json!({ "opened": date }))
@@ -148,7 +158,10 @@ pub mod writes {
         "extra_redaction_patterns",
     ];
 
-    pub fn apply_patch(current: &settings::Settings, patch: serde_json::Value) -> Result<settings::Settings, Refusal> {
+    pub fn apply_patch(
+        current: &settings::Settings,
+        patch: serde_json::Value,
+    ) -> Result<settings::Settings, Refusal> {
         let serde_json::Value::Object(patch) = patch else {
             return Err((
                 "invalid",
@@ -203,7 +216,9 @@ pub mod writes {
         output: String,
         disposition: ledger::Disposition,
     ) {
-        let Some(folder) = settings::load(app).folder else { return };
+        let Some(folder) = settings::load(app).folder else {
+            return;
+        };
         let inputs = ledger::hash_file(target)
             .map(|input| vec![input])
             .unwrap_or_default();
@@ -430,24 +445,29 @@ mod tests {
     fn a_known_key_is_applied_and_the_rest_is_left_alone() {
         let mut settings = Settings::default();
         settings.interval_secs = 5;
-        let patched =
-            apply_patch(&settings, serde_json::json!({ "interval_secs": 12 })).unwrap();
+        let patched = apply_patch(&settings, serde_json::json!({ "interval_secs": 12 })).unwrap();
         assert_eq!(patched.interval_secs, 12);
         assert_eq!(patched.min_dwell_secs, settings.min_dwell_secs);
     }
 
     #[test]
     fn an_unknown_key_is_refused_by_name() {
-        let error = apply_patch(&Settings::default(), serde_json::json!({ "colour": "blue" }))
-            .unwrap_err();
+        let error = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "colour": "blue" }),
+        )
+        .unwrap_err();
         assert_eq!(error.0, "unknown_key");
         assert!(error.1.contains("colour"), "{}", error.1);
     }
 
     #[test]
     fn retention_is_refused_with_an_explanation_rather_than_as_a_typo() {
-        let error = apply_patch(&Settings::default(), serde_json::json!({ "retention_days": 30 }))
-            .unwrap_err();
+        let error = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "retention_days": 30 }),
+        )
+        .unwrap_err();
         assert_eq!(error.0, "unknown_key");
         assert!(
             error.1.contains("nothing deletes captured content"),
@@ -458,8 +478,11 @@ mod tests {
 
     #[test]
     fn enabled_is_refused_and_names_the_capture_tools() {
-        let error = apply_patch(&Settings::default(), serde_json::json!({ "enabled": false }))
-            .unwrap_err();
+        let error = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "enabled": false }),
+        )
+        .unwrap_err();
         assert!(error.1.contains("stop_capture"), "{}", error.1);
     }
 
@@ -483,8 +506,11 @@ mod tests {
 
     #[test]
     fn a_value_of_the_wrong_type_is_refused_as_invalid() {
-        let error = apply_patch(&Settings::default(), serde_json::json!({ "interval_secs": "fast" }))
-            .unwrap_err();
+        let error = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "interval_secs": "fast" }),
+        )
+        .unwrap_err();
         assert_eq!(error.0, "invalid");
     }
 

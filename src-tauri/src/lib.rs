@@ -6,9 +6,9 @@ mod ipc;
 mod jobs;
 mod ledger;
 pub mod mcp;
-mod prune;
 mod prompt;
 mod propose;
+mod prune;
 mod reader;
 mod redact;
 mod rules;
@@ -135,12 +135,7 @@ fn census_snapshot() -> Option<CensusSnapshot> {
     let started = std::time::Instant::now();
     let snap = reader::macos::snapshot()?;
     let character_count = snap.text.iter().map(|line| line.chars().count()).sum();
-    let sample: String = snap
-        .text
-        .join(" ")
-        .chars()
-        .take(200)
-        .collect();
+    let sample: String = snap.text.join(" ").chars().take(200).collect();
     Some(CensusSnapshot {
         app: snap.app,
         window_title: snap.window_title,
@@ -200,7 +195,9 @@ fn open_in_editor(app: tauri::AppHandle, date: String, which: String) -> Result<
 
 #[tauri::command]
 fn reveal_day(app: tauri::AppHandle, date: String) -> Result<(), String> {
-    let folder = settings::load(&app).folder.ok_or("no capture folder is set")?;
+    let folder = settings::load(&app)
+        .folder
+        .ok_or("no capture folder is set")?;
     let parsed = parse_date(&date)?;
     let path = writer::file_path(&folder, parsed);
     // -R selects the file in Finder. A day with no file yet still has a
@@ -296,7 +293,9 @@ fn prompt_payload(app: &tauri::AppHandle) -> PromptPayload {
     PromptPayload {
         text: prompt::current(&config_dir),
         customised: prompt::is_customised(&config_dir),
-        path: prompt::prompt_path(&config_dir).to_string_lossy().to_string(),
+        path: prompt::prompt_path(&config_dir)
+            .to_string_lossy()
+            .to_string(),
     }
 }
 
@@ -390,7 +389,14 @@ async fn propose(
     let config_dir = settings::config_dir(&app);
     let handle = app.clone();
     let proposal = tauri::async_runtime::spawn_blocking(move || {
-        propose::propose(&config_dir, &folder, &engine, target, selection, &instruction)
+        propose::propose(
+            &config_dir,
+            &folder,
+            &engine,
+            target,
+            selection,
+            &instruction,
+        )
     })
     .await
     .map_err(|e| propose::ProposeError::EngineFailed {
@@ -559,9 +565,8 @@ mod registration_tests {
     #[test]
     fn the_registration_command_string_quotes_a_path_with_spaces() {
         // The bundle path contains a space, always: "Ambient Context.app".
-        let quoted = super::shell_quote(
-            "/Applications/Ambient Context.app/Contents/MacOS/ambient-context",
-        );
+        let quoted =
+            super::shell_quote("/Applications/Ambient Context.app/Contents/MacOS/ambient-context");
         assert_eq!(
             quoted,
             "\"/Applications/Ambient Context.app/Contents/MacOS/ambient-context\""
@@ -614,16 +619,13 @@ pub fn open_main_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    if let Ok(window) = WebviewWindowBuilder::new(
-        app,
-        "main",
-        WebviewUrl::App("index.html?view=main".into()),
-    )
-    .title("Ambient Context")
-    .inner_size(1000.0, 700.0)
-    .min_inner_size(820.0, 560.0)
-    .resizable(true)
-    .build()
+    if let Ok(window) =
+        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html?view=main".into()))
+            .title("Ambient Context")
+            .inner_size(1000.0, 700.0)
+            .min_inner_size(820.0, 560.0)
+            .resizable(true)
+            .build()
     {
         let _ = window.set_focus();
     }
@@ -882,9 +884,7 @@ pub fn run() {
                 match ipc::bind(&ipc::socket_path(&data_dir)) {
                     Ok(listener) => {
                         std::thread::spawn(move || {
-                            ipc::serve(listener, move |request| {
-                                control::handle(&handle, request)
-                            });
+                            ipc::serve(listener, move |request| control::handle(&handle, request));
                         });
                     }
                     Err(error) => eprintln!("control socket unavailable: {error}"),

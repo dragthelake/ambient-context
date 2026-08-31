@@ -1,6 +1,7 @@
 use crate::{
-    prune, redact, rules,
+    prune,
     reader::{self, Snapshot, WindowReader},
+    redact, rules,
     segment::Segmenter,
     settings::{self, Settings},
     writer,
@@ -264,7 +265,11 @@ mod tests {
             document: Some("/Users/x/Ambient Context/2026-08-25.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
+        assert!(is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
     }
 
     #[test]
@@ -274,7 +279,11 @@ mod tests {
             window_title: Some("2026-08-25.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
+        assert!(is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
     }
 
     #[test]
@@ -284,7 +293,11 @@ mod tests {
             window_title: Some("2026-08-25 - Ambient Context - Obsidian".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
+        assert!(is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
     }
 
     #[test]
@@ -294,7 +307,11 @@ mod tests {
             window_title: Some("2026-08-23 - Audio Capture Spike Findings".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
+        assert!(!is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
     }
 
     #[test]
@@ -305,7 +322,11 @@ mod tests {
             url: Some("https://v2.tauri.app/".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
+        assert!(!is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
     }
 
     #[test]

@@ -11,16 +11,42 @@ use std::path::{Path, PathBuf};
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
     CaptureStatus,
-    StartCapture { client: String },
-    StopCapture { client: String },
-    SummariseDay { date: String, client: String },
-    JobStatus { id: String },
-    SetConfig { patch: serde_json::Value, client: String },
-    AddRule { rule: crate::rules::Rule, client: String },
-    UpdateRule { rule: crate::rules::Rule, client: String },
-    RemoveRule { id: String, client: String },
-    SetPrompt { text: String, client: String },
-    OpenDay { date: String },
+    StartCapture {
+        client: String,
+    },
+    StopCapture {
+        client: String,
+    },
+    SummariseDay {
+        date: String,
+        client: String,
+    },
+    JobStatus {
+        id: String,
+    },
+    SetConfig {
+        patch: serde_json::Value,
+        client: String,
+    },
+    AddRule {
+        rule: crate::rules::Rule,
+        client: String,
+    },
+    UpdateRule {
+        rule: crate::rules::Rule,
+        client: String,
+    },
+    RemoveRule {
+        id: String,
+        client: String,
+    },
+    SetPrompt {
+        text: String,
+        client: String,
+    },
+    OpenDay {
+        date: String,
+    },
 }
 
 /// Error codes, exhaustive:
@@ -104,7 +130,9 @@ where
 }
 
 fn serve_connection<H: Fn(Request) -> Response>(stream: UnixStream, handler: &H) {
-    let Ok(clone) = stream.try_clone() else { return };
+    let Ok(clone) = stream.try_clone() else {
+        return;
+    };
     let reader = BufReader::new(clone);
     let mut writer = stream;
     for line in reader.lines() {
@@ -172,14 +200,18 @@ pub fn request(socket: &Path, request: &Request) -> Result<serde_json::Value, Cl
     writer
         .write_all(line.as_bytes())
         .map_err(|e| ClientError::Transport(e.to_string()))?;
-    writer.flush().map_err(|e| ClientError::Transport(e.to_string()))?;
+    writer
+        .flush()
+        .map_err(|e| ClientError::Transport(e.to_string()))?;
 
     let mut answer = String::new();
     BufReader::new(clone)
         .read_line(&mut answer)
         .map_err(|e| ClientError::Transport(e.to_string()))?;
     if answer.trim().is_empty() {
-        return Err(ClientError::Transport("the app closed the connection".into()));
+        return Err(ClientError::Transport(
+            "the app closed the connection".into(),
+        ));
     }
     match serde_json::from_str::<Response>(&answer) {
         Ok(Response::Ok(value)) => Ok(value),
@@ -271,7 +303,11 @@ mod tests {
         let path = socket_path(Path::new(
             "/Users/averylongusername/Library/Application Support/com.0x0000007a.ambientcontext",
         ));
-        assert!(path.as_os_str().len() < 104, "{} bytes", path.as_os_str().len());
+        assert!(
+            path.as_os_str().len() < 104,
+            "{} bytes",
+            path.as_os_str().len()
+        );
     }
 
     use std::os::unix::fs::PermissionsExt;

@@ -268,15 +268,20 @@ fn required_str<'a>(
     arguments: &'a serde_json::Value,
     key: &str,
 ) -> Result<&'a str, serde_json::Value> {
-    arguments[key]
-        .as_str()
-        .ok_or_else(|| tool_error(format!("The {key} argument is required and must be a string.")))
+    arguments[key].as_str().ok_or_else(|| {
+        tool_error(format!(
+            "The {key} argument is required and must be a string."
+        ))
+    })
 }
 
 fn required_date(arguments: &serde_json::Value) -> Result<chrono::NaiveDate, serde_json::Value> {
     let raw = required_str(arguments, "date")?;
-    chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-        .map_err(|_| tool_error(format!("{raw} is not a date. Use YYYY-MM-DD, for example 2026-08-30.")))
+    chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").map_err(|_| {
+        tool_error(format!(
+            "{raw} is not a date. Use YYYY-MM-DD, for example 2026-08-30."
+        ))
+    })
 }
 
 fn folder(server: &Server) -> Result<std::path::PathBuf, serde_json::Value> {
@@ -292,7 +297,11 @@ pub fn call(server: &mut Server, name: &str, arguments: &serde_json::Value) -> s
 
 /// The tools that never need the app. `None` means "not a read tool", which
 /// sends the call to the socket client instead.
-fn read_call(server: &Server, name: &str, arguments: &serde_json::Value) -> Option<serde_json::Value> {
+fn read_call(
+    server: &Server,
+    name: &str,
+    arguments: &serde_json::Value,
+) -> Option<serde_json::Value> {
     let out = match name {
         "list_days" => match folder(server) {
             Ok(dir) => ok_json(files::list_days(&dir)),
@@ -361,9 +370,23 @@ mod tests {
     use super::*;
 
     const EXPECTED: [&str; 18] = [
-        "add_rule", "capture_status", "get_config", "get_prompt", "list_days", "list_rules",
-        "open_day", "read_day", "read_ledger", "read_summary", "remove_rule", "search_record",
-        "set_config", "set_prompt", "start_capture", "stop_capture", "summarise_day",
+        "add_rule",
+        "capture_status",
+        "get_config",
+        "get_prompt",
+        "list_days",
+        "list_rules",
+        "open_day",
+        "read_day",
+        "read_ledger",
+        "read_summary",
+        "remove_rule",
+        "search_record",
+        "set_config",
+        "set_prompt",
+        "start_capture",
+        "stop_capture",
+        "summarise_day",
         "update_rule",
     ];
 
@@ -377,7 +400,11 @@ mod tests {
     #[test]
     fn every_tool_has_a_description_that_says_what_it_does() {
         for def in defs() {
-            assert!(def.description.len() > 30, "{} has a stub description", def.name);
+            assert!(
+                def.description.len() > 30,
+                "{} has a stub description",
+                def.name
+            );
         }
     }
 
@@ -385,9 +412,11 @@ mod tests {
     fn every_write_tool_says_so_in_its_description() {
         for def in defs().iter().filter(|def| !def.read_only) {
             let text = def.description.to_lowercase();
-            let states_effect = ["writes", "changes", "turns", "removes", "adds", "replaces", "opens", "queues"]
-                .iter()
-                .any(|verb| text.contains(verb));
+            let states_effect = [
+                "writes", "changes", "turns", "removes", "adds", "replaces", "opens", "queues",
+            ]
+            .iter()
+            .any(|verb| text.contains(verb));
             assert!(states_effect, "{} does not state its effect", def.name);
         }
     }
@@ -395,8 +424,15 @@ mod tests {
     #[test]
     fn the_eight_readers_are_annotated_read_only_and_never_destructive() {
         let readers = [
-            "capture_status", "list_days", "read_day", "read_summary", "search_record",
-            "read_ledger", "list_rules", "get_prompt", "get_config",
+            "capture_status",
+            "list_days",
+            "read_day",
+            "read_summary",
+            "search_record",
+            "read_ledger",
+            "list_rules",
+            "get_prompt",
+            "get_config",
         ];
         for name in readers {
             let def = defs().into_iter().find(|def| def.name == name).unwrap();
@@ -407,7 +443,13 @@ mod tests {
 
     #[test]
     fn the_tools_that_overwrite_something_are_annotated_destructive() {
-        for name in ["set_config", "set_prompt", "update_rule", "remove_rule", "summarise_day"] {
+        for name in [
+            "set_config",
+            "set_prompt",
+            "update_rule",
+            "remove_rule",
+            "summarise_day",
+        ] {
             let def = defs().into_iter().find(|def| def.name == name).unwrap();
             assert!(def.destructive, "{name} overwrites and should say so");
         }
@@ -415,7 +457,10 @@ mod tests {
 
     #[test]
     fn add_rule_is_a_write_but_not_destructive() {
-        let def = defs().into_iter().find(|def| def.name == "add_rule").unwrap();
+        let def = defs()
+            .into_iter()
+            .find(|def| def.name == "add_rule")
+            .unwrap();
         assert!(!def.read_only);
         assert!(!def.destructive);
     }
@@ -429,7 +474,10 @@ mod tests {
 
     #[test]
     fn a_tool_with_no_arguments_accepts_only_an_empty_object() {
-        let def = defs().into_iter().find(|def| def.name == "capture_status").unwrap();
+        let def = defs()
+            .into_iter()
+            .find(|def| def.name == "capture_status")
+            .unwrap();
         assert_eq!(def.input_schema["additionalProperties"], false);
         assert!(def.input_schema.get("properties").is_none());
     }
@@ -437,7 +485,10 @@ mod tests {
     #[test]
     fn the_json_form_carries_annotations_the_client_can_read() {
         let listed = list();
-        let read_day = listed.iter().find(|tool| tool["name"] == "read_day").unwrap();
+        let read_day = listed
+            .iter()
+            .find(|tool| tool["name"] == "read_day")
+            .unwrap();
         assert_eq!(read_day["annotations"]["readOnlyHint"], true);
         assert_eq!(read_day["annotations"]["openWorldHint"], false);
         assert!(read_day["inputSchema"]["properties"]["date"].is_object());
@@ -480,7 +531,10 @@ mod tests {
         let mut server = server_on(config.path());
         let out = call(&mut server, "read_day", &json!({ "date": "2026-08-30" }));
         assert_eq!(out["isError"], false);
-        assert!(out["content"][0]["text"].as_str().unwrap().contains("Index-only scans"));
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Index-only scans"));
     }
 
     #[test]
@@ -510,14 +564,21 @@ mod tests {
         let mut server = server_on(config.path());
         let out = call(&mut server, "list_days", &json!({}));
         assert_eq!(out["structuredContent"]["days"][0]["date"], "2026-08-30");
-        assert!(out["content"][0]["text"].as_str().unwrap().contains("2026-08-30"));
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("2026-08-30"));
     }
 
     #[test]
     fn search_record_defaults_to_fifty_hits() {
         let (config, _folder) = set_up();
         let mut server = server_on(config.path());
-        let out = call(&mut server, "search_record", &json!({ "query": "postgres" }));
+        let out = call(
+            &mut server,
+            "search_record",
+            &json!({ "query": "postgres" }),
+        );
         assert_eq!(out["isError"], false);
         assert_eq!(out["structuredContent"]["hits"][0]["layer"], "day");
     }

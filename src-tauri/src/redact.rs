@@ -20,7 +20,9 @@ pub const EXCLUDED_APPS: &[&str] = &[
 
 pub fn is_excluded_app(app: &str) -> bool {
     let lower = app.to_lowercase();
-    EXCLUDED_APPS.iter().any(|excluded| lower.contains(excluded))
+    EXCLUDED_APPS
+        .iter()
+        .any(|excluded| lower.contains(excluded))
 }
 
 /// Window-title markers for private browsing in the major browsers. The

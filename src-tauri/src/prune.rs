@@ -3,9 +3,7 @@ use std::sync::OnceLock;
 
 /// Characters that render as nothing but defeat emptiness checks. Today's
 /// capture had hundreds of lines that were only these.
-const ZERO_WIDTH: &[char] = &[
-    '\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '\u{feff}',
-];
+const ZERO_WIDTH: &[char] = &['\u{200b}', '\u{200c}', '\u{200d}', '\u{2060}', '\u{feff}'];
 
 /// A short fragment is usually a UI label ("Shell", "Cancel"), but short
 /// identifiers are the most valuable lines in the file. Anything carrying
@@ -50,10 +48,7 @@ fn is_metric(line: &str) -> bool {
 /// segments is chrome, not content.
 fn is_pipe_menu(line: &str) -> bool {
     let segments: Vec<&str> = line.split('|').collect();
-    segments.len() >= 5
-        && segments
-            .iter()
-            .all(|s| s.trim().split_whitespace().count() <= 3)
+    segments.len() >= 5 && segments.iter().all(|s| s.split_whitespace().count() <= 3)
 }
 
 /// The line with every digit run replaced by '#'. Two captures of the same
@@ -170,8 +165,18 @@ mod tests {
     #[test]
     fn drops_bare_counters_and_social_chrome() {
         for junk in [
-            "440", "6:03", "12,211", "42k", "1.2M", "86 views", "440 points",
-            "38 comments", "1,149 words", "8 minutes ago", "50m", "9h",
+            "440",
+            "6:03",
+            "12,211",
+            "42k",
+            "1.2M",
+            "86 views",
+            "440 points",
+            "38 comments",
+            "1,149 words",
+            "8 minutes ago",
+            "50m",
+            "9h",
             "1 Minutes 43 Seconds of 10 Minutes 31 Seconds",
         ] {
             assert_eq!(normalise_line(junk), None, "should drop {junk:?}");
@@ -216,7 +221,9 @@ mod tests {
         assert!(is_skeleton_dedupable(
             "Dan Verified account @dan 5 hours ago so it looks like 3 things broke"
         ));
-        assert!(!is_skeleton_dedupable("Round 2: the incremental loop, same day"));
+        assert!(!is_skeleton_dedupable(
+            "Round 2: the incremental loop, same day"
+        ));
         assert!(!is_skeleton_dedupable("9:41 and 10:05"));
     }
 }

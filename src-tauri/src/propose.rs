@@ -277,9 +277,9 @@ fn read_target(config_dir: &Path, target: ProposeTarget) -> String {
 /// path that did not check it.
 fn check(target: ProposeTarget, file: &str) -> Result<(), String> {
     match target {
-        ProposeTarget::Rules => {
-            crate::rules::parse(file).map(|_| ()).map_err(|e| e.to_string())
-        }
+        ProposeTarget::Rules => crate::rules::parse(file)
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
         ProposeTarget::Prompt => crate::prompt::validate(file).map_err(|e| e.to_string()),
     }
 }
@@ -529,7 +529,12 @@ mod tests {
 
     #[test]
     fn the_prompt_prompt_carries_the_required_headings() {
-        let out = build_prompt(ProposeTarget::Prompt, &selection(), "the prompt", "be terser");
+        let out = build_prompt(
+            ProposeTarget::Prompt,
+            &selection(),
+            "the prompt",
+            "be terser",
+        );
         assert!(out.contains("## Worth remembering"));
         assert!(out.contains("## Reasoning"));
     }
@@ -591,7 +596,9 @@ mod tests {
     #[test]
     fn an_unchanged_file_diffs_to_nothing_added_or_removed() {
         let out = line_diff("a\nb\n", "a\nb\n");
-        assert!(!out.lines().any(|l| l.starts_with('+') || l.starts_with('-')));
+        assert!(!out
+            .lines()
+            .any(|l| l.starts_with('+') || l.starts_with('-')));
     }
 
     #[test]

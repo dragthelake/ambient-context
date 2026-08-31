@@ -148,7 +148,9 @@ pub fn summarise_day(
         prompt_id: Some("day-context".to_string()),
         prompt_sha256: Some(ledger::sha256_of(template.as_bytes())),
         engine: Some(engine_config.label.clone()),
-        inputs: ledger::hash_file(&day_path).map(|i| vec![i]).unwrap_or_default(),
+        inputs: ledger::hash_file(&day_path)
+            .map(|i| vec![i])
+            .unwrap_or_default(),
         output: None,
         reasoning: None,
         disposition: ledger::Disposition::Accepted,
@@ -203,7 +205,14 @@ pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Re
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("rejected");
-    summarise_day(&folder, &engine_config, &template, date, trigger, &reject_dir)
+    summarise_day(
+        &folder,
+        &engine_config,
+        &template,
+        date,
+        trigger,
+        &reject_dir,
+    )
 }
 
 /// Ticks once a minute. A minute is fine granularity for a daily job and
@@ -286,7 +295,10 @@ fn tick(app: &AppHandle) {
         state.record(outcome);
     }
     state.set_running(false);
-    crate::tray::refresh(app, app.state::<crate::capture::CaptureState>().is_running());
+    crate::tray::refresh(
+        app,
+        app.state::<crate::capture::CaptureState>().is_running(),
+    );
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -341,32 +353,22 @@ impl JobQueue {
         use std::sync::atomic::Ordering;
         let n = self.counter.fetch_add(1, Ordering::SeqCst);
         let id = format!("job-{n}");
-        self.queue
-            .lock()
-            .expect("job queue")
-            .push_back(QueuedJob {
-                id: id.clone(),
-                date,
-                trigger,
-            });
-        self.history
-            .lock()
-            .expect("job history")
-            .push(JobSummary {
-                id: id.clone(),
-                date,
-                status: JobStatus::Queued,
-            });
+        self.queue.lock().expect("job queue").push_back(QueuedJob {
+            id: id.clone(),
+            date,
+            trigger,
+        });
+        self.history.lock().expect("job history").push(JobSummary {
+            id: id.clone(),
+            date,
+            status: JobStatus::Queued,
+        });
         JobId(id)
     }
 
     /// The trigger travels with the job because the runner writes the ledger
     /// entry, and an MCP-triggered summary must name the client that asked.
-    pub fn enqueue_summarise_with(
-        &self,
-        date: NaiveDate,
-        trigger: ledger::Trigger,
-    ) -> JobId {
+    pub fn enqueue_summarise_with(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
         self.push(date, trigger)
     }
 
@@ -483,9 +485,14 @@ mod tests {
     #[test]
     fn a_malformed_schedule_string_means_no_schedule_rather_than_a_panic() {
         let captured = vec![day(2026, 8, 28)];
-        assert!(
-            due(at(2026, 8, 29, 9, 0), Some("nonsense"), None, &captured, &[]).is_empty()
-        );
+        assert!(due(
+            at(2026, 8, 29, 9, 0),
+            Some("nonsense"),
+            None,
+            &captured,
+            &[]
+        )
+        .is_empty());
     }
 
     use tempfile::tempdir;
@@ -548,8 +555,7 @@ mod tests {
         assert!(!crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
         assert!(rejects.path().join("2026-08-28.md").exists());
 
-        let ledger_file =
-            crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
+        let ledger_file = crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
         let text = std::fs::read_to_string(ledger_file).unwrap();
         assert_eq!(text.matches("\n## ").count(), 1, "exactly one entry");
         assert!(text.contains("rejected:"));
@@ -572,8 +578,7 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("not logged in"), "error was {error:?}");
-        let ledger_file =
-            crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
+        let ledger_file = crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
         let text = std::fs::read_to_string(ledger_file).unwrap();
         assert_eq!(text.matches("\n## ").count(), 1);
         assert!(text.contains("failed:"));
@@ -597,14 +602,14 @@ mod tests {
         )
         .unwrap();
 
-        let summary = std::fs::read_to_string(
-            crate::summarise::summary_path(folder.path(), day(2026, 8, 28)),
-        )
+        let summary = std::fs::read_to_string(crate::summarise::summary_path(
+            folder.path(),
+            day(2026, 8, 28),
+        ))
         .unwrap();
         assert!(summary.contains("# A day of plumbing"));
 
-        let ledger_file =
-            crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
+        let ledger_file = crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
         let text = std::fs::read_to_string(ledger_file).unwrap();
         assert!(text.contains("- disposition: accepted"));
         assert!(text.contains("Kept the long block."));

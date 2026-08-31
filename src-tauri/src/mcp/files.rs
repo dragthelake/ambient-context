@@ -21,7 +21,10 @@ impl std::fmt::Display for FileError {
             ),
             FileError::NoLedger(date) => write!(f, "There are no ledger entries for {date}."),
             FileError::BadTime(value) => {
-                write!(f, "{value} is not a time. Use 24-hour HH:MM, for example 09:30.")
+                write!(
+                    f,
+                    "{value} is not a time. Use 24-hour HH:MM, for example 09:30."
+                )
             }
             FileError::NoFolder => write!(
                 f,
@@ -132,10 +135,15 @@ pub fn search_record(folder: &Path, query: &str, limit: usize) -> Vec<Hit> {
         let date = day.date.to_string();
         let sources = [
             ("day", folder.join(format!("{date}.md"))),
-            ("summary", folder.join("Summaries").join(format!("{date}.md"))),
+            (
+                "summary",
+                folder.join("Summaries").join(format!("{date}.md")),
+            ),
         ];
         for (layer, path) in sources {
-            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
             let lines: Vec<&str> = text.lines().collect();
             for (index, line) in lines.iter().enumerate() {
                 if hits.len() >= limit {

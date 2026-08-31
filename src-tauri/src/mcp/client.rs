@@ -85,7 +85,10 @@ fn build(
             client,
         },
         "set_config" => {
-            let patch = arguments.get("patch").cloned().unwrap_or(serde_json::Value::Null);
+            let patch = arguments
+                .get("patch")
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
             if !patch.is_object() {
                 return Err(tool_error(
                     "The patch argument is required and must be an object of setting keys. \

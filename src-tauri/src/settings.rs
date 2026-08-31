@@ -135,9 +135,11 @@ mod tests {
     fn round_trips() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("nested").join("settings.json");
-        let mut settings = Settings::default();
-        settings.folder = Some(PathBuf::from("/tmp/ambient"));
-        settings.interval_secs = 10;
+        let settings = Settings {
+            folder: Some(PathBuf::from("/tmp/ambient")),
+            interval_secs: 10,
+            ..Settings::default()
+        };
 
         write_to(&path, &settings).unwrap();
         assert_eq!(read_from(&path), settings);

@@ -383,8 +383,12 @@ mod tests {
     fn round_trips_through_the_file() {
         let dir = tempdir().unwrap();
         let mut set = Rules::default();
-        set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("Slack".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
         save(dir.path(), &set).unwrap();
         assert_eq!(load(dir.path()), set);
     }
@@ -405,10 +409,18 @@ mod tests {
     #[test]
     fn rejects_a_duplicate_id() {
         let mut set = Rules::default();
-        set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("Slack".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
         let err = set
-            .add(rule("r1", Target::App("Linear".to_string()), Action::Exclude))
+            .add(rule(
+                "r1",
+                Target::App("Linear".to_string()),
+                Action::Exclude,
+            ))
             .unwrap_err();
         assert_eq!(err, RuleError::Duplicate("r1".to_string()));
     }
@@ -416,8 +428,12 @@ mod tests {
     #[test]
     fn rejects_a_second_rule_for_the_same_target() {
         let mut set = Rules::default();
-        set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("Slack".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
         let err = set
             .add(rule("r2", Target::App("slack".to_string()), Action::Full))
             .unwrap_err();
@@ -450,7 +466,11 @@ mod tests {
     fn refuses_to_weaken_a_locked_application_protection() {
         let mut set = Rules::default();
         let err = set
-            .add(rule("r1", Target::App("1Password".to_string()), Action::Full))
+            .add(rule(
+                "r1",
+                Target::App("1Password".to_string()),
+                Action::Full,
+            ))
             .unwrap_err();
         assert!(matches!(err, RuleError::Locked(_)));
     }
@@ -458,15 +478,23 @@ mod tests {
     #[test]
     fn allows_a_stricter_rule_on_an_already_locked_application() {
         let mut set = Rules::default();
-        set.add(rule("r1", Target::App("1Password".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("1Password".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
     }
 
     #[test]
     fn update_replaces_in_place_and_remove_takes_it_out() {
         let mut set = Rules::default();
-        set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("Slack".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
         set.update(rule(
             "r1",
             Target::App("Slack".to_string()),
@@ -510,8 +538,12 @@ mod tests {
     fn new_id_takes_the_lowest_unused_slot() {
         let mut set = Rules::default();
         assert_eq!(new_id(&set), "r1");
-        set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
-            .unwrap();
+        set.add(rule(
+            "r1",
+            Target::App("Slack".to_string()),
+            Action::Exclude,
+        ))
+        .unwrap();
         assert_eq!(new_id(&set), "r2");
     }
 
@@ -586,7 +618,10 @@ mod tests {
             decide(&rules, "Arc", Some("Dashboard - example.com"), None),
             Decision::Exclude
         );
-        assert_eq!(decide(&rules, "Arc", Some("Dashboard"), None), Decision::Full);
+        assert_eq!(
+            decide(&rules, "Arc", Some("Dashboard"), None),
+            Decision::Full
+        );
     }
 
     #[test]
@@ -623,7 +658,12 @@ mod tests {
             Decision::Full
         );
         assert_eq!(
-            decide(&rules, "Safari", Some("Bank"), Some("https://bank.example/")),
+            decide(
+                &rules,
+                "Safari",
+                Some("Bank"),
+                Some("https://bank.example/")
+            ),
             Decision::Exclude
         );
     }
@@ -632,7 +672,11 @@ mod tests {
     fn a_title_rule_beats_a_broader_application_rule() {
         let rules = set(vec![
             rule("r1", Target::App("Slack".to_string()), Action::HeadingsOnly),
-            rule("r2", Target::Title("#empty-build".to_string()), Action::Full),
+            rule(
+                "r2",
+                Target::Title("#empty-build".to_string()),
+                Action::Full,
+            ),
         ]);
         assert_eq!(
             decide(&rules, "Slack", Some("#empty-build"), None),
@@ -648,7 +692,11 @@ mod tests {
     fn the_longer_pattern_wins_within_the_same_kind_of_target() {
         let rules = set(vec![
             rule("r1", Target::Title("Xero".to_string()), Action::Full),
-            rule("r2", Target::Title("Xero Payroll".to_string()), Action::Exclude),
+            rule(
+                "r2",
+                Target::Title("Xero Payroll".to_string()),
+                Action::Exclude,
+            ),
         ]);
         assert_eq!(
             decide(&rules, "Chrome", Some("Xero Payroll"), None),

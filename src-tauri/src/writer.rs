@@ -253,7 +253,9 @@ mod tests {
             title: Some("YN-102".to_string()),
             document: None,
             url: None,
-            start: Local.with_ymd_and_hms(2026, 8, 25, hour, minute, 0).unwrap(),
+            start: Local
+                .with_ymd_and_hms(2026, 8, 25, hour, minute, 0)
+                .unwrap(),
             end: Local
                 .with_ymd_and_hms(2026, 8, 25, hour, end_minute, 0)
                 .unwrap(),
@@ -305,8 +307,20 @@ mod tests {
     fn creates_the_file_with_frontmatter_once() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -320,7 +334,13 @@ mod tests {
     fn creates_the_folder_if_it_is_missing() {
         let dir = tempdir().unwrap();
         let nested = dir.path().join("a").join("b");
-        append_block(&nested, &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
+        append_block(
+            &nested,
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+        )
+        .unwrap();
         assert!(nested.exists());
     }
 
@@ -328,8 +348,20 @@ mod tests {
     fn a_line_is_written_once_per_day_but_headings_always_appear() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -341,9 +373,21 @@ mod tests {
     #[test]
     fn a_fresh_dedup_is_seeded_from_the_existing_day_file() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+        )
+        .unwrap();
         // Simulates a restart: new dedup, same folder, same day.
-        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new(), Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut DayDedup::new(),
+            Shape::default(),
+        )
+        .unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -354,7 +398,13 @@ mod tests {
     fn novel_lines_still_write_alongside_repeated_ones() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
         let mut second = block_at(10, 0, 20);
         second.lines = vec![
             "read the issue".to_string(),
@@ -372,12 +422,24 @@ mod tests {
     fn deleting_the_day_file_resets_the_dedup() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         fs::remove_file(&path).unwrap();
 
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
         let contents = fs::read_to_string(&path).unwrap();
         assert!(
             contents.contains("read the issue"),
@@ -391,9 +453,21 @@ mod tests {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir_a.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir_a.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
         dedup.reset();
-        append_block(dir_b.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
+        append_block(
+            dir_b.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+        )
+        .unwrap();
 
         let path = file_path(dir_b.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -418,13 +492,22 @@ mod tests {
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
         assert!(contents.contains(&tweet_v1));
-        assert!(!contents.contains("6 hours ago"), "the re-capture is dropped");
+        assert!(
+            !contents.contains("6 hours ago"),
+            "the re-capture is dropped"
+        );
     }
 
     #[test]
     fn writes_agents_md_into_the_folder() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+        )
+        .unwrap();
         let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert!(text.contains("## Summaries"));
         assert!(text.contains("## Ledger"));

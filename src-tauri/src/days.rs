@@ -297,7 +297,9 @@ mod tests {
 
     #[test]
     fn frontmatter_never_becomes_a_block() {
-        assert!(parse_blocks(DAY).iter().all(|b| !b.app.contains("captured_by")));
+        assert!(parse_blocks(DAY)
+            .iter()
+            .all(|b| !b.app.contains("captured_by")));
     }
 
     #[test]

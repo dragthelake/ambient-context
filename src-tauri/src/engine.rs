@@ -66,6 +66,9 @@ pub fn run(engine: &Engine, stdin: &str) -> RunOutput {
 /// Parses the output of `env`: KEY=VALUE per line. Values may contain '='
 /// and may be empty; keys may not. Lines without '=' are continuations of a
 /// previous multi-line value and are ignored rather than guessed at.
+// Consumed by login_shell_env once the engine subprocess lands (0.2.0 plan,
+// Task 3); until then the spike's tests are its only caller.
+#[allow(dead_code)]
 pub fn parse_env(raw: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for line in raw.lines() {
@@ -89,7 +92,10 @@ pub enum EngineError {
     /// absolute path after the user moved or reinstalled the CLI.
     NotFound,
     Timeout,
-    Failed { code: Option<i32>, stderr: String },
+    Failed {
+        code: Option<i32>,
+        stderr: String,
+    },
     Io(String),
 }
 
@@ -99,7 +105,9 @@ impl std::fmt::Display for EngineError {
             EngineError::NotFound => write!(f, "the engine command could not be found"),
             EngineError::Timeout => write!(f, "the engine took too long and was stopped"),
             EngineError::Failed { code, stderr } => {
-                let code = code.map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+                let code = code
+                    .map(|c| c.to_string())
+                    .unwrap_or_else(|| "signal".into());
                 write!(f, "the engine exited with {code}: {}", stderr.trim())
             }
             EngineError::Io(message) => write!(f, "{message}"),
@@ -140,7 +148,10 @@ pub fn run_with_env(
 
     // Write on a thread: a prompt larger than the pipe buffer deadlocks if
     // the parent writes while the child is also blocked writing output.
-    let mut stdin = child.stdin.take().ok_or(EngineError::Io("no stdin".into()))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or(EngineError::Io("no stdin".into()))?;
     let owned_prompt = prompt.to_string();
     std::thread::spawn(move || {
         let _ = stdin.write_all(owned_prompt.as_bytes());
@@ -208,7 +219,9 @@ fn shell_output(shell: &str, args: &[&str], timeout: Duration) -> Option<String>
         }
         Ok(_) => None,
         Err(_) => {
-            let _ = Command::new("/bin/kill").args(["-9", &pid.to_string()]).status();
+            let _ = Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .status();
             None
         }
     }
@@ -382,7 +395,9 @@ pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String
     let output = match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(Ok(output)) => output,
         _ => {
-            let _ = Command::new("/bin/kill").args(["-9", &pid.to_string()]).status();
+            let _ = Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .status();
             return AuthState::Unknown;
         }
     };

@@ -16,7 +16,10 @@ pub enum Invalid {
     /// day file. A summary that cannot be checked against the record is an
     /// opinion, and the record is the only thing this product sells.
     NoCitations,
-    TooLong { lines: usize, max: usize },
+    TooLong {
+        lines: usize,
+        max: usize,
+    },
 }
 
 impl std::fmt::Display for Invalid {
@@ -30,7 +33,10 @@ impl std::fmt::Display for Invalid {
                 write!(f, "the summary cites no time ranges from the day file")
             }
             Invalid::TooLong { lines, max } => {
-                write!(f, "the summary is {lines} lines, over the {max} line budget")
+                write!(
+                    f,
+                    "the summary is {lines} lines, over the {max} line budget"
+                )
             }
         }
     }
@@ -57,9 +63,7 @@ pub fn unfence(text: &str) -> &str {
 /// file's own headings use an en dash and models copy either.
 fn citation() -> &'static Regex {
     static CITATION: OnceLock<Regex> = OnceLock::new();
-    CITATION.get_or_init(|| {
-        Regex::new(r"\b\d{1,2}:\d{2}\s*[-\x{2013}]\s*\d{1,2}:\d{2}\b").unwrap()
-    })
+    CITATION.get_or_init(|| Regex::new(r"\b\d{1,2}:\d{2}\s*[-\x{2013}]\s*\d{1,2}:\d{2}\b").unwrap())
 }
 
 pub fn validate(text: &str, max_lines: usize) -> Result<(), Invalid> {
@@ -182,7 +186,9 @@ pub fn title_of(summary: &str) -> Option<String> {
 /// be wrong in the same ways the summary can.
 pub fn reasoning_of(summary: &str) -> Option<String> {
     let body = unfence(summary);
-    let mut lines = body.lines().skip_while(|line| line.trim() != "## Reasoning");
+    let mut lines = body
+        .lines()
+        .skip_while(|line| line.trim() != "## Reasoning");
     lines.next()?;
     let text = lines
         .take_while(|line| !line.starts_with("## "))
@@ -398,9 +404,13 @@ mod tests {
     #[test]
     fn writing_a_summary_creates_the_folder_and_strips_any_code_fence() {
         let dir = tempdir().unwrap();
-        write_summary(dir.path(), date(2026, 8, 28), "```markdown\n---\nx\n---\n```").unwrap();
-        let written =
-            std::fs::read_to_string(summary_path(dir.path(), date(2026, 8, 28))).unwrap();
+        write_summary(
+            dir.path(),
+            date(2026, 8, 28),
+            "```markdown\n---\nx\n---\n```",
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(summary_path(dir.path(), date(2026, 8, 28))).unwrap();
         assert_eq!(written, "---\nx\n---\n");
     }
 

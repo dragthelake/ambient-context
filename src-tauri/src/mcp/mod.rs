@@ -89,14 +89,19 @@ pub fn dispatch(server: &mut Server, message: &serde_json::Value) -> Option<serd
         return None;
     }
     let id = id.unwrap_or(serde_json::Value::Null);
-    let params = message.get("params").cloned().unwrap_or(serde_json::json!({}));
+    let params = message
+        .get("params")
+        .cloned()
+        .unwrap_or(serde_json::json!({}));
 
     match method {
         "initialize" => {
             if let Some(name) = params["clientInfo"]["name"].as_str() {
                 server.client = name.to_string();
             }
-            let requested = params["protocolVersion"].as_str().unwrap_or(LATEST_PROTOCOL);
+            let requested = params["protocolVersion"]
+                .as_str()
+                .unwrap_or(LATEST_PROTOCOL);
             let version = if SUPPORTED_PROTOCOLS.contains(&requested) {
                 requested
             } else {
@@ -134,7 +139,10 @@ pub fn dispatch(server: &mut Server, message: &serde_json::Value) -> Option<serd
             if !crate::mcp::tools::exists(&name) {
                 return Some(error(id, -32602, format!("Unknown tool: {name}")));
             }
-            Some(result(id, crate::mcp::tools::call(server, &name, &arguments)))
+            Some(result(
+                id,
+                crate::mcp::tools::call(server, &name, &arguments),
+            ))
         }
         other => Some(error(id, -32601, format!("Method not found: {other}"))),
     }
@@ -266,7 +274,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(answer["error"]["code"], -32602);
-        assert!(answer["error"]["message"].as_str().unwrap().contains("rm_rf"));
+        assert!(answer["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("rm_rf"));
     }
 
     #[test]
@@ -295,6 +306,9 @@ mod tests {
         )
         .unwrap();
         let line = serde_json::to_string(&answer).unwrap();
-        assert!(!line.contains('\n'), "a raw newline would break the stdio framing");
+        assert!(
+            !line.contains('\n'),
+            "a raw newline would break the stdio framing"
+        );
     }
 }
