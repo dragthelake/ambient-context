@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { DayView } from "./DayView";
 import { EngineSettings } from "./EngineSettings";
+import { RecordingSettings } from "./RecordingSettings";
+import { RulesSettings } from "./RulesSettings";
 import "../main-window.css";
 
 type View = "day" | "settings";
@@ -26,7 +28,13 @@ export function Main() {
       </nav>
       <main className="pane">
         {view === "day" && <DayView />}
-        {view === "settings" && <EngineSettings />}
+        {view === "settings" && (
+          <div className="settings-stack">
+            <EngineSettings />
+            <RulesSettings />
+            <RecordingSettings />
+          </div>
+        )}
       </main>
     </div>
   );

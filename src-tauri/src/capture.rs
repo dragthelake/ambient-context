@@ -105,6 +105,12 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         let mut rules_stamp = rules_mtime(&config_dir);
         let mut extra = redact::compile_extra(&settings.extra_redaction_patterns);
         let mut extra_source = settings.extra_redaction_patterns.clone();
+        // The two output knobs the settings page exposes; rebuilt whenever
+        // the settings they come from change.
+        let mut shape = writer::Shape {
+            max_block_chars: settings.max_block_chars,
+            write_references: settings.write_references,
+        };
 
         while running.load(Ordering::SeqCst) {
             // "47 blocks today" must mean today. Reset the count when the
@@ -122,7 +128,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             if let Some(new_folder) = settings::load(&app).folder {
                 if new_folder != folder {
                     if let Some(block) = segmenter.flush(Local::now()) {
-                        let _ = writer::append_block(&folder, &block, &mut dedup);
+                        let _ = writer::append_block(&folder, &block, &mut dedup, shape);
                     }
                     folder = new_folder;
                     dedup.reset();
@@ -138,10 +144,17 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 rules_stamp = stamp;
                 rules = rules::load(&config_dir);
             }
-            let current = settings::load(&app).extra_redaction_patterns;
-            if current != extra_source {
-                extra = redact::compile_extra(&current);
-                extra_source = current;
+            let current = settings::load(&app);
+            if current.extra_redaction_patterns != extra_source {
+                extra = redact::compile_extra(&current.extra_redaction_patterns);
+                extra_source = current.extra_redaction_patterns.clone();
+            }
+            let next_shape = writer::Shape {
+                max_block_chars: current.max_block_chars,
+                write_references: current.write_references,
+            };
+            if next_shape != shape {
+                shape = next_shape;
             }
 
             match reader::PlatformReader.snapshot() {
@@ -161,7 +174,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                                 ..clean
                             };
                             if let Some(block) = segmenter.push(clean, Local::now()) {
-                                match writer::append_block(&folder, &block, &mut dedup) {
+                                match writer::append_block(&folder, &block, &mut dedup, shape) {
                                     Ok(()) => {
                                         counter.fetch_add(1, Ordering::SeqCst);
                                     }
@@ -178,7 +191,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                     failed_reads += 1;
                     if failed_reads == 3 {
                         if let Some(block) = segmenter.flush(Local::now()) {
-                            if writer::append_block(&folder, &block, &mut dedup).is_ok() {
+                            if writer::append_block(&folder, &block, &mut dedup, shape).is_ok() {
                                 counter.fetch_add(1, Ordering::SeqCst);
                             }
                         }
@@ -201,7 +214,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         // Closing the open block on stop means the last stretch of work is
         // not silently lost when capture is switched off.
         if let Some(block) = segmenter.flush(Local::now()) {
-            if writer::append_block(&folder, &block, &mut dedup).is_ok() {
+            if writer::append_block(&folder, &block, &mut dedup, shape).is_ok() {
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         }

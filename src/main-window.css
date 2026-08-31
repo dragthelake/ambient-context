@@ -617,3 +617,155 @@
   color: var(--warn-ink);
   font-weight: 700;
 }
+
+/* Settings sections */
+
+.settings-stack {
+  padding: 10px 12px;
+  display: block;
+}
+
+.settings-heading {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  margin: 14px 0 4px;
+}
+
+.settings-note {
+  color: var(--chrome-dark);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.engine-list,
+.rules-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+}
+
+.engine-row,
+.rule-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+
+.rule-row.is-locked {
+  color: var(--chrome-dark);
+}
+
+.engine-label {
+  font-weight: 700;
+  min-width: 110px;
+}
+
+.engine-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.engine-auth {
+  font-size: 11px;
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+.manual-engine {
+  margin: 6px 0 6px 24px;
+  display: grid;
+  gap: 6px;
+}
+
+.manual-engine label,
+.propose-field,
+.patterns-field,
+.number-field {
+  font-weight: 600;
+  display: block;
+}
+
+.manual-engine input,
+.number-field input {
+  display: block;
+  margin-top: 2px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 4px 6px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.schedule-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-weight: 600;
+  margin: 6px 0;
+}
+
+.patterns-field textarea {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 6px 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  resize: vertical;
+}
+
+.number-current {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--chrome-dark);
+  margin-left: 6px;
+}
+
+.rule-target {
+  font-weight: 700;
+  min-width: 140px;
+}
+
+.rule-note {
+  color: var(--chrome-dark);
+  font-size: 12px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.rule-remove {
+  min-width: 0;
+  padding: 2px 8px 3px;
+  font-size: 11px;
+}
+
+.rule-add {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0;
+  max-width: 420px;
+}
+
+.rule-add input,
+.rule-add select {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 4px 6px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+}

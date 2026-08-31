@@ -120,11 +120,29 @@ fn frontmatter(date: NaiveDate) -> String {
     )
 }
 
+/// The two output knobs the settings page exposes. `max_block_chars` of 0
+/// is unlimited, which is what the default must be for this release to
+/// change nothing until it is touched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shape {
+    pub max_block_chars: usize,
+    pub write_references: bool,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Shape {
+            max_block_chars: 0,
+            write_references: true,
+        }
+    }
+}
+
 /// Renders a block's heading and references, with `lines` as the body:
 /// the caller decides which lines are worth writing (usually the novel
 /// ones). A block with no novel lines still renders, because the heading
 /// is the day's timeline even when the content was all seen before.
-pub fn render_block(block: &Block, lines: &[String]) -> String {
+pub fn render_block(block: &Block, lines: &[String], shape: Shape) -> String {
     let mut out = String::new();
     out.push_str("\n## ");
     out.push_str(&block.start.format("%H:%M").to_string());
@@ -141,27 +159,35 @@ pub fn render_block(block: &Block, lines: &[String]) -> String {
     out.push_str("\n\n");
     // The reference outranks the scraped text: it points at the real
     // document, which the consuming LLM can open in full.
-    if let Some(document) = &block.document {
-        out.push_str("file: ");
-        out.push_str(document);
-        out.push('\n');
-    }
-    if let Some(url) = &block.url {
-        out.push_str("url: ");
-        out.push_str(url);
-        out.push('\n');
-    }
-    if block.document.is_some() || block.url.is_some() {
-        out.push('\n');
+    if shape.write_references {
+        if let Some(document) = &block.document {
+            out.push_str("file: ");
+            out.push_str(document);
+            out.push('\n');
+        }
+        if let Some(url) = &block.url {
+            out.push_str("url: ");
+            out.push_str(url);
+            out.push('\n');
+        }
+        if block.document.is_some() || block.url.is_some() {
+            out.push('\n');
+        }
     }
     // A headings-only block keeps its place in the timeline and its
     // reference, and gives up its text.
     if block.headings_only {
         return out;
     }
+    let mut written = 0usize;
     for line in lines {
+        if shape.max_block_chars > 0 && written >= shape.max_block_chars {
+            out.push_str("[truncated]\n");
+            break;
+        }
         out.push_str(line);
         out.push('\n');
+        written += line.chars().count() + 1;
     }
     out
 }
@@ -173,6 +199,7 @@ pub fn append_block(
     folder: &Path,
     block: &Block,
     dedup: &mut DayDedup,
+    shape: Shape,
 ) -> std::io::Result<()> {
     fs::create_dir_all(folder)?;
     let date = block.start.date_naive();
@@ -191,7 +218,7 @@ pub fn append_block(
     if is_new {
         file.write_all(frontmatter(date).as_bytes())?;
     }
-    file.write_all(render_block(block, &novel).as_bytes())?;
+    file.write_all(render_block(block, &novel, shape).as_bytes())?;
     ensure_agents_file(folder)?;
     Ok(())
 }
@@ -240,7 +267,7 @@ mod tests {
         let mut block = block_at(9, 14, 41);
         block.document = Some("/Users/x/report.pdf".to_string());
         block.url = Some("https://v2.tauri.app/".to_string());
-        let out = render_block(&block, &block.lines.clone());
+        let out = render_block(&block, &block.lines.clone(), Shape::default());
         assert!(out.contains("file: /Users/x/report.pdf\n"));
         assert!(out.contains("url: https://v2.tauri.app/\n"));
         assert!(
@@ -261,7 +288,7 @@ mod tests {
     #[test]
     fn renders_a_heading_with_time_range_app_and_title() {
         let block = block_at(9, 14, 41);
-        let out = render_block(&block, &block.lines.clone());
+        let out = render_block(&block, &block.lines.clone(), Shape::default());
         assert!(out.contains("## 09:14\u{2013}09:41 \u{00b7} Linear \u{00b7} YN-102"));
         assert!(out.contains("read the issue"));
     }
@@ -270,7 +297,7 @@ mod tests {
     fn renders_without_a_title_when_there_is_none() {
         let mut block = block_at(9, 14, 41);
         block.title = None;
-        let out = render_block(&block, &block.lines.clone());
+        let out = render_block(&block, &block.lines.clone(), Shape::default());
         assert!(out.contains("\u{00b7} Linear\n"));
     }
 
@@ -278,8 +305,8 @@ mod tests {
     fn creates_the_file_with_frontmatter_once() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
+        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -293,7 +320,7 @@ mod tests {
     fn creates_the_folder_if_it_is_missing() {
         let dir = tempdir().unwrap();
         let nested = dir.path().join("a").join("b");
-        append_block(&nested, &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
+        append_block(&nested, &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
         assert!(nested.exists());
     }
 
@@ -301,8 +328,8 @@ mod tests {
     fn a_line_is_written_once_per_day_but_headings_always_appear() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
+        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -314,9 +341,9 @@ mod tests {
     #[test]
     fn a_fresh_dedup_is_seeded_from_the_existing_day_file() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
         // Simulates a restart: new dedup, same folder, same day.
-        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new()).unwrap();
+        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new(), Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -327,13 +354,13 @@ mod tests {
     fn novel_lines_still_write_alongside_repeated_ones() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
         let mut second = block_at(10, 0, 20);
         second.lines = vec![
             "read the issue".to_string(),
             "drafted the reply".to_string(),
         ];
-        append_block(dir.path(), &second, &mut dedup).unwrap();
+        append_block(dir.path(), &second, &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -345,12 +372,12 @@ mod tests {
     fn deleting_the_day_file_resets_the_dedup() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         fs::remove_file(&path).unwrap();
 
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
         let contents = fs::read_to_string(&path).unwrap();
         assert!(
             contents.contains("read the issue"),
@@ -364,9 +391,9 @@ mod tests {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir_a.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
+        append_block(dir_a.path(), &block_at(9, 14, 41), &mut dedup, Shape::default()).unwrap();
         dedup.reset();
-        append_block(dir_b.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(dir_b.path(), &block_at(10, 0, 20), &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir_b.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -382,11 +409,11 @@ mod tests {
 
         let mut first = block_at(9, 14, 41);
         first.lines = vec![tweet_v1.clone()];
-        append_block(dir.path(), &first, &mut dedup).unwrap();
+        append_block(dir.path(), &first, &mut dedup, Shape::default()).unwrap();
 
         let mut second = block_at(10, 0, 20);
         second.lines = vec![tweet_v2];
-        append_block(dir.path(), &second, &mut dedup).unwrap();
+        append_block(dir.path(), &second, &mut dedup, Shape::default()).unwrap();
 
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
@@ -397,7 +424,7 @@ mod tests {
     #[test]
     fn writes_agents_md_into_the_folder() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
+        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new(), Shape::default()).unwrap();
         let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert!(text.contains("## Summaries"));
         assert!(text.contains("## Ledger"));
@@ -433,7 +460,7 @@ mod tests {
         let mut block = block_at(9, 14, 41);
         block.headings_only = true;
         block.url = Some("https://news.ycombinator.com/".to_string());
-        let out = render_block(&block, &block.lines.clone());
+        let out = render_block(&block, &block.lines.clone(), Shape::default());
         assert!(out.contains("09:14"));
         assert!(out.contains("url: https://news.ycombinator.com/"));
         assert!(!out.contains("read the issue"));
@@ -445,14 +472,45 @@ mod tests {
         let mut dedup = DayDedup::new();
         let mut quiet = block_at(9, 0, 30);
         quiet.headings_only = true;
-        append_block(dir.path(), &quiet, &mut dedup).unwrap();
+        append_block(dir.path(), &quiet, &mut dedup, Shape::default()).unwrap();
         let loud = block_at(10, 0, 30);
-        append_block(dir.path(), &loud, &mut dedup).unwrap();
+        append_block(dir.path(), &loud, &mut dedup, Shape::default()).unwrap();
         let written = std::fs::read_to_string(file_path(
             dir.path(),
             NaiveDate::from_ymd_opt(2026, 8, 25).unwrap(),
         ))
         .unwrap();
         assert_eq!(written.matches("read the issue").count(), 1);
+    }
+
+    #[test]
+    fn a_body_over_the_limit_is_truncated() {
+        let mut block = block_at(9, 14, 41);
+        block.lines = (0..10)
+            .map(|i| format!("line {i} of a fairly long body"))
+            .collect();
+        let shape = Shape {
+            max_block_chars: 20,
+            write_references: true,
+        };
+        let out = render_block(&block, &block.lines.clone(), shape);
+        assert!(out.ends_with("[truncated]\n"));
+        assert!(out.contains("line 0"));
+        assert!(!out.contains("line 9"));
+    }
+
+    #[test]
+    fn write_references_false_drops_the_reference_lines() {
+        let mut block = block_at(9, 14, 41);
+        block.document = Some("/Users/x/report.pdf".to_string());
+        block.url = Some("https://v2.tauri.app/".to_string());
+        let shape = Shape {
+            max_block_chars: 0,
+            write_references: false,
+        };
+        let out = render_block(&block, &block.lines.clone(), shape);
+        assert!(!out.contains("file:"));
+        assert!(!out.contains("url:"));
+        assert!(out.contains("read the issue"));
     }
 }
