@@ -290,6 +290,19 @@ pub mod writes {
         }
     }
 
+    /// The login-at-launch value a patch asks for, or None when the patch
+    /// does not mention it. A patch that names the value it already has
+    /// still counts: the registration may have been removed in System
+    /// Settings, and reconciling it is the point.
+    pub(crate) fn patched_launch_at_login(
+        patch: &serde_json::Value,
+        patched: &settings::Settings,
+    ) -> Option<bool> {
+        patch
+            .get("launch_at_login")
+            .map(|_| patched.launch_at_login)
+    }
+
     pub fn set_config(app: &AppHandle, patch: serde_json::Value, client: &str) -> Response {
         let dir = settings::config_dir(app);
         let before = hash_before(&dir.join("settings.json"));
@@ -323,6 +336,20 @@ pub mod writes {
             patch.to_string(),
             ledger::Disposition::Applied,
         );
+        // Launch at login is a setting plus an OS registration, and the
+        // two must move together whichever surface writes them. The UI's
+        // command and this handler now call the same function; the write
+        // is already in the ledger above, so it is not recorded twice.
+        if let Some(enabled) = patched_launch_at_login(&patch, &patched) {
+            if let Err(error) = crate::set_launch_at_login_inner(app, enabled, None) {
+                return Response::err(
+                    "io",
+                    format!(
+                        "The setting was saved but the login item could not be changed: {error}"
+                    ),
+                );
+            }
+        }
         crate::apply_settings_change(app, &current, &patched);
         Response::Ok(serde_json::to_value(&patched).unwrap_or(serde_json::Value::Null))
     }
@@ -477,6 +504,22 @@ pub mod writes {
 mod tests {
     use super::writes::apply_patch;
     use crate::settings::Settings;
+
+    use super::writes::patched_launch_at_login;
+
+    #[test]
+    fn a_patch_naming_launch_at_login_asks_for_the_registration_to_move() {
+        let patch = serde_json::json!({ "launch_at_login": false });
+        let patched = apply_patch(&Settings::default(), patch.clone()).unwrap();
+        assert_eq!(patched_launch_at_login(&patch, &patched), Some(false));
+    }
+
+    #[test]
+    fn a_patch_that_does_not_mention_it_leaves_the_login_item_alone() {
+        let patch = serde_json::json!({ "interval_secs": 12 });
+        let patched = apply_patch(&Settings::default(), patch.clone()).unwrap();
+        assert_eq!(patched_launch_at_login(&patch, &patched), None);
+    }
 
     #[test]
     fn a_known_key_is_applied_and_the_rest_is_left_alone() {
