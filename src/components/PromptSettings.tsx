@@ -60,6 +60,17 @@ export function PromptSettings() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Opens the customised prompt for editing, or a read-only copy of the
+  // bundled one when nothing has been customised yet.
+  const openInEditor = async () => {
+    try {
+      await invoke("open_prompt_in_editor");
+      setError(null);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   if (!payload) return null;
 
   return (
@@ -88,6 +99,9 @@ export function PromptSettings() {
       <div className="button-row">
         <button type="button" onClick={() => void save()} disabled={draft === payload.text}>
           {saved ? "Saved" : "Save"}
+        </button>
+        <button type="button" onClick={() => void openInEditor()}>
+          Open in editor
         </button>
         <button type="button" onClick={() => void copyPath()}>
           {copied ? "Path copied" : "Copy path"}
