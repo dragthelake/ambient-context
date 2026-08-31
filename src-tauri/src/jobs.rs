@@ -157,7 +157,7 @@ pub fn summarise_day(
     let prompt = summarise::build_prompt(template, date, &day_markdown);
     let env = engine::login_shell_env();
 
-    let output = match engine::run(engine_config, &prompt, &env) {
+    let output = match engine::run_with_env(engine_config, &prompt, &env) {
         Ok(output) => output,
         Err(error) => {
             let message = error.to_string();

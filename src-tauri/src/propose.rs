@@ -229,6 +229,257 @@ pub fn copy_as_context(selection: &Selection) -> String {
     out
 }
 
+use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Proposal {
+    pub id: String,
+    pub target: ProposeTarget,
+    pub before: String,
+    pub after: String,
+    pub diff: String,
+    pub reasoning: String,
+    pub ledger_path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProposeError {
+    NoEngine,
+    EngineFailed { stderr: String },
+    Invalid { reason: String, raw: String },
+}
+
+impl std::fmt::Display for ProposeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProposeError::NoEngine => write!(
+                f,
+                "no engine is connected. Connect one in Settings to use this."
+            ),
+            ProposeError::EngineFailed { stderr } => write!(f, "the engine failed: {stderr}"),
+            ProposeError::Invalid { reason, .. } => {
+                write!(f, "the engine's answer was not usable: {reason}")
+            }
+        }
+    }
+}
+
+fn read_target(config_dir: &Path, target: ProposeTarget) -> String {
+    match target {
+        ProposeTarget::Rules => serde_json::to_string_pretty(&crate::rules::load(config_dir))
+            .unwrap_or_else(|_| "{\n  \"rules\": []\n}".to_string()),
+        ProposeTarget::Prompt => crate::prompt::current(config_dir),
+    }
+}
+
+/// The validation `apply` repeats, so a proposal can never be written by a
+/// path that did not check it.
+fn check(target: ProposeTarget, file: &str) -> Result<(), String> {
+    match target {
+        ProposeTarget::Rules => {
+            crate::rules::parse(file).map(|_| ()).map_err(|e| e.to_string())
+        }
+        ProposeTarget::Prompt => crate::prompt::validate(file).map_err(|e| e.to_string()),
+    }
+}
+
+fn action_name(target: ProposeTarget) -> &'static str {
+    match target {
+        ProposeTarget::Rules => "propose_rules",
+        ProposeTarget::Prompt => "propose_prompt",
+    }
+}
+
+fn target_path(config_dir: &Path, target: ProposeTarget) -> PathBuf {
+    match target {
+        ProposeTarget::Rules => crate::rules::rules_path(config_dir),
+        ProposeTarget::Prompt => crate::prompt::prompt_path(config_dir),
+    }
+}
+
+fn inputs_for(config_dir: &Path, target: ProposeTarget) -> Vec<crate::ledger::Input> {
+    crate::ledger::hash_file(&target_path(config_dir, target))
+        .map(|input| vec![input])
+        .unwrap_or_default()
+}
+
+pub fn propose(
+    config_dir: &Path,
+    folder: &Path,
+    engine: &crate::engine::Engine,
+    target: ProposeTarget,
+    selection: Selection,
+    instruction: &str,
+) -> Result<Proposal, ProposeError> {
+    let before = read_target(config_dir, target);
+    let base = build_prompt(target, &selection, &before, instruction);
+    let inputs = inputs_for(config_dir, target);
+
+    let mut prompt = base.clone();
+    let mut last_reason = String::new();
+    let mut last_raw = String::new();
+
+    // Two attempts, never three. The second restates the exact failure,
+    // which is the cheapest thing that turns a near-miss into a usable
+    // answer and the only mitigation this feature gets.
+    for attempt in 0..2 {
+        let run = crate::engine::run(engine, &prompt);
+        if run.timed_out || run.status != 0 {
+            let stderr = if run.timed_out {
+                format!("timed out after {}s", engine.timeout_secs)
+            } else {
+                run.stderr.clone()
+            };
+            let _ = ledger(
+                folder,
+                target,
+                engine,
+                &prompt,
+                inputs.clone(),
+                Some(run.stdout.clone()),
+                None,
+                crate::ledger::Disposition::Failed {
+                    stderr: stderr.clone(),
+                },
+            );
+            return Err(ProposeError::EngineFailed { stderr });
+        }
+        last_raw = run.stdout.clone();
+        match parse_response(&run.stdout).and_then(|(file, reasoning)| {
+            check(target, &file)?;
+            Ok((file, reasoning))
+        }) {
+            Ok((after, reasoning)) => {
+                let ledger_path = ledger(
+                    folder,
+                    target,
+                    engine,
+                    &prompt,
+                    inputs,
+                    Some(run.stdout.clone()),
+                    Some(reasoning.clone()),
+                    crate::ledger::Disposition::Accepted,
+                )
+                .unwrap_or_default();
+                return Ok(Proposal {
+                    id: format!("p-{}", chrono::Local::now().timestamp_micros()),
+                    target,
+                    diff: line_diff(&before, &after),
+                    before,
+                    after,
+                    reasoning,
+                    ledger_path,
+                });
+            }
+            Err(reason) => {
+                last_reason = reason.clone();
+                if attempt == 0 {
+                    prompt = format!(
+                        "{base}\n\nYour previous answer could not be used: {reason}\nAnswer again, \
+                         following the response format exactly.\n"
+                    );
+                }
+            }
+        }
+    }
+
+    let _ = ledger(
+        folder,
+        target,
+        engine,
+        &prompt,
+        inputs,
+        Some(last_raw.clone()),
+        None,
+        crate::ledger::Disposition::Rejected {
+            reason: last_reason.clone(),
+        },
+    );
+    Err(ProposeError::Invalid {
+        reason: last_reason,
+        raw: last_raw,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ledger(
+    folder: &Path,
+    target: ProposeTarget,
+    engine: &crate::engine::Engine,
+    prompt: &str,
+    inputs: Vec<crate::ledger::Input>,
+    output: Option<String>,
+    reasoning: Option<String>,
+    disposition: crate::ledger::Disposition,
+) -> std::io::Result<PathBuf> {
+    crate::ledger::append(
+        folder,
+        &crate::ledger::Entry {
+            at: chrono::Local::now(),
+            trigger: crate::ledger::Trigger::Propose,
+            action: action_name(target).to_string(),
+            prompt_id: Some(action_name(target).to_string()),
+            prompt_sha256: Some(crate::ledger::sha256_of(prompt.as_bytes())),
+            engine: Some(engine.label.clone()),
+            inputs,
+            output,
+            reasoning,
+            disposition,
+        },
+    )
+}
+
+/// Validates again before writing, because a proposal is data that crossed
+/// the process boundary into the webview and came back.
+pub fn apply(config_dir: &Path, folder: &Path, proposal: &Proposal) -> Result<(), String> {
+    check(proposal.target, &proposal.after)?;
+    match proposal.target {
+        ProposeTarget::Rules => {
+            let parsed = crate::rules::parse(&proposal.after).map_err(|e| e.to_string())?;
+            crate::rules::save(config_dir, &parsed).map_err(|e| e.to_string())?;
+        }
+        ProposeTarget::Prompt => {
+            crate::prompt::set(config_dir, &proposal.after).map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = crate::ledger::append(
+        folder,
+        &crate::ledger::Entry {
+            at: chrono::Local::now(),
+            trigger: crate::ledger::Trigger::Propose,
+            action: format!("apply_{}", action_name(proposal.target)),
+            prompt_id: None,
+            prompt_sha256: None,
+            engine: None,
+            inputs: inputs_for(config_dir, proposal.target),
+            output: Some(proposal.after.clone()),
+            reasoning: Some(proposal.reasoning.clone()),
+            disposition: crate::ledger::Disposition::Applied,
+        },
+    );
+    Ok(())
+}
+
+pub fn discard(folder: &Path, proposal: &Proposal) -> std::io::Result<()> {
+    crate::ledger::append(
+        folder,
+        &crate::ledger::Entry {
+            at: chrono::Local::now(),
+            trigger: crate::ledger::Trigger::Propose,
+            action: format!("discard_{}", action_name(proposal.target)),
+            prompt_id: None,
+            prompt_sha256: None,
+            engine: None,
+            inputs: Vec::new(),
+            output: Some(proposal.after.clone()),
+            reasoning: Some(proposal.reasoning.clone()),
+            disposition: crate::ledger::Disposition::Discarded,
+        },
+    )
+    .map(|_| ())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +610,182 @@ mod tests {
         assert!(out.contains("Hacker News"));
         assert!(out.contains("09:14\u{2013}09:41"));
         assert!(out.contains("Sponsored - You may also like"));
+    }
+
+    use tempfile::tempdir;
+
+    fn fake_engine(script: &str) -> crate::engine::Engine {
+        crate::engine::Engine {
+            label: "fake".to_string(),
+            command: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), script.to_string()],
+            timeout_secs: 10,
+        }
+    }
+
+    const GOOD_RULES: &str = "cat >/dev/null; printf '%s\\n' '````file' '{\"rules\":[{\"id\":\"r1\",\"target\":{\"app\":\"Slack\"},\"action\":\"exclude\"}]}' '````' '' '````reasoning' 'Excluded Slack.' '````'";
+
+    #[test]
+    fn a_valid_rules_proposal_returns_a_diff_and_writes_nothing() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let proposal = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(GOOD_RULES),
+            ProposeTarget::Rules,
+            selection(),
+            "never record Slack",
+        )
+        .unwrap();
+        assert!(proposal.after.contains("\"exclude\""));
+        assert!(proposal.diff.contains('+'));
+        assert_eq!(proposal.reasoning, "Excluded Slack.");
+        assert!(crate::rules::load(config.path()).rules.is_empty());
+    }
+
+    #[test]
+    fn a_valid_proposal_ledgers_accepted() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let proposal = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(GOOD_RULES),
+            ProposeTarget::Rules,
+            selection(),
+            "never record Slack",
+        )
+        .unwrap();
+        let written = std::fs::read_to_string(&proposal.ledger_path).unwrap();
+        assert!(written.contains("propose_rules"));
+        assert!(written.contains("accepted"));
+    }
+
+    #[test]
+    fn a_failing_engine_is_a_failure_and_is_ledgered() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let err = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine("cat >/dev/null; echo 'not logged in' >&2; exit 1"),
+            ProposeTarget::Rules,
+            selection(),
+            "x",
+        )
+        .unwrap_err();
+        assert!(matches!(err, ProposeError::EngineFailed { .. }));
+        assert!(days_ledger(folder.path()).contains("failed:"));
+    }
+
+    #[test]
+    fn an_invalid_response_is_retried_once_and_then_rejected() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        // Counts its own invocations through a file in the capture folder.
+        let counter = folder.path().join("runs");
+        let script = format!(
+            "cat >/dev/null; echo x >> {}; echo 'here are your rules'",
+            counter.display()
+        );
+        let err = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(&script),
+            ProposeTarget::Rules,
+            selection(),
+            "x",
+        )
+        .unwrap_err();
+        assert!(matches!(err, ProposeError::Invalid { .. }));
+        assert_eq!(
+            std::fs::read_to_string(&counter).unwrap().lines().count(),
+            2
+        );
+        assert!(days_ledger(folder.path()).contains("rejected:"));
+    }
+
+    #[test]
+    fn a_response_that_breaks_the_rules_schema_is_rejected() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let script = "cat >/dev/null; printf '%s\\n' '````file' '{\"rules\":[{\"id\":\"r1\",\"target\":{\"app\":\"1Password\"},\"action\":\"full\"}]}' '````' '' '````reasoning' 'why' '````'";
+        let err = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(script),
+            ProposeTarget::Rules,
+            selection(),
+            "x",
+        )
+        .unwrap_err();
+        assert!(matches!(err, ProposeError::Invalid { .. }));
+    }
+
+    #[test]
+    fn apply_writes_the_file_and_ledgers_applied() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let proposal = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(GOOD_RULES),
+            ProposeTarget::Rules,
+            selection(),
+            "never record Slack",
+        )
+        .unwrap();
+        apply(config.path(), folder.path(), &proposal).unwrap();
+        let saved = crate::rules::load(config.path());
+        assert_eq!(saved.rules.len(), 1);
+        assert_eq!(saved.rules[0].action, crate::rules::Action::Exclude);
+        assert!(days_ledger(folder.path()).contains("applied"));
+    }
+
+    #[test]
+    fn apply_revalidates_and_refuses_a_tampered_proposal() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let mut proposal = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(GOOD_RULES),
+            ProposeTarget::Rules,
+            selection(),
+            "never record Slack",
+        )
+        .unwrap();
+        proposal.after = "{ not json".to_string();
+        assert!(apply(config.path(), folder.path(), &proposal).is_err());
+        assert!(crate::rules::load(config.path()).rules.is_empty());
+    }
+
+    #[test]
+    fn discard_writes_nothing_and_ledgers_discarded() {
+        let config = tempdir().unwrap();
+        let folder = tempdir().unwrap();
+        let proposal = propose(
+            config.path(),
+            folder.path(),
+            &fake_engine(GOOD_RULES),
+            ProposeTarget::Rules,
+            selection(),
+            "never record Slack",
+        )
+        .unwrap();
+        discard(folder.path(), &proposal).unwrap();
+        assert!(crate::rules::load(config.path()).rules.is_empty());
+        assert!(days_ledger(folder.path()).contains("discarded"));
+    }
+
+    fn days_ledger(folder: &std::path::Path) -> String {
+        let dir = folder.join("Ledger");
+        std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| std::fs::read_to_string(e.path()).unwrap_or_default())
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

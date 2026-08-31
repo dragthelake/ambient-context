@@ -8,6 +8,61 @@
 
 use std::collections::HashMap;
 
+/// The connected engine lives in settings.rs because it is persisted as
+/// part of settings.json; re-exported here so callers can talk about it as
+/// `engine::Engine`.
+pub use crate::settings::Engine;
+
+/// The outcome of one engine invocation, in the shape the propose pipeline
+/// reads: a failed run is data, not an error type.
+#[derive(Debug, Clone)]
+pub struct RunOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub status: i32,
+    pub timed_out: bool,
+}
+
+/// Runs the engine with a freshly captured login-shell environment and
+/// reports the outcome as data. A missing binary is a failure with status
+/// 127 and its explanation on stderr, the same shape a failing CLI
+/// produces.
+pub fn run(engine: &Engine, stdin: &str) -> RunOutput {
+    let env = login_shell_env();
+    match run_with_env(engine, stdin, &env) {
+        Ok(stdout) => RunOutput {
+            stdout,
+            stderr: String::new(),
+            status: 0,
+            timed_out: false,
+        },
+        Err(EngineError::Timeout) => RunOutput {
+            stdout: String::new(),
+            stderr: format!("timed out after {}s", engine.timeout_secs),
+            status: 124,
+            timed_out: true,
+        },
+        Err(EngineError::NotFound) => RunOutput {
+            stdout: String::new(),
+            stderr: "the engine command could not be found".to_string(),
+            status: 127,
+            timed_out: false,
+        },
+        Err(EngineError::Failed { code, stderr }) => RunOutput {
+            stdout: String::new(),
+            stderr,
+            status: code.unwrap_or(1),
+            timed_out: false,
+        },
+        Err(EngineError::Io(message)) => RunOutput {
+            stdout: String::new(),
+            stderr: message,
+            status: 1,
+            timed_out: false,
+        },
+    }
+}
+
 /// Parses the output of `env`: KEY=VALUE per line. Values may contain '='
 /// and may be empty; keys may not. Lines without '=' are continuations of a
 /// previous multi-line value and are ignored rather than guessed at.
@@ -58,7 +113,7 @@ impl std::fmt::Display for EngineError {
 /// std has no wait-with-timeout, and rather than take a dependency for one
 /// call site we keep the pid and send it a signal through /bin/kill, which
 /// is always present on macOS.
-pub fn run(
+pub fn run_with_env(
     engine: &crate::settings::Engine,
     prompt: &str,
     env: &HashMap<String, String>,
@@ -382,7 +437,7 @@ mod tests {
     fn feeds_the_prompt_on_stdin_and_returns_stdout() {
         // /bin/cat copies stdin to stdout, which is exactly the contract.
         let engine = engine_for("/bin/cat", &[], 10);
-        let out = run(&engine, "hello prompt", &HashMap::new()).unwrap();
+        let out = run_with_env(&engine, "hello prompt", &HashMap::new()).unwrap();
         assert_eq!(out, "hello prompt");
     }
 
@@ -390,7 +445,7 @@ mod tests {
     fn a_missing_binary_is_not_found_rather_than_a_generic_io_error() {
         let engine = engine_for("/nope/not/here", &[], 10);
         assert!(matches!(
-            run(&engine, "x", &HashMap::new()),
+            run_with_env(&engine, "x", &HashMap::new()),
             Err(EngineError::NotFound)
         ));
     }
@@ -398,13 +453,9 @@ mod tests {
     #[test]
     fn a_nonzero_exit_carries_its_stderr() {
         let engine = engine_for("/bin/sh", &["-c", "echo boom >&2; exit 3"], 10);
-        match run(&engine, "x", &HashMap::new()) {
-            Err(EngineError::Failed { code, stderr }) => {
-                assert_eq!(code, Some(3));
-                assert!(stderr.contains("boom"), "stderr was {stderr:?}");
-            }
-            other => panic!("expected Failed, got {other:?}"),
-        }
+        let out = run(&engine, "x");
+        assert_eq!(out.status, 3);
+        assert!(out.stderr.contains("boom"), "stderr was {:?}", out.stderr);
     }
 
     #[test]
@@ -412,7 +463,7 @@ mod tests {
         let engine = engine_for("/bin/sh", &["-c", "sleep 30"], 1);
         let started = std::time::Instant::now();
         assert!(matches!(
-            run(&engine, "x", &HashMap::new()),
+            run_with_env(&engine, "x", &HashMap::new()),
             Err(EngineError::Timeout)
         ));
         assert!(
@@ -426,7 +477,7 @@ mod tests {
         let engine = engine_for("/bin/sh", &["-c", "printf %s \"$AC_TEST_VAR\""], 10);
         let mut env = HashMap::new();
         env.insert("AC_TEST_VAR".to_string(), "present".to_string());
-        assert_eq!(run(&engine, "", &env).unwrap(), "present");
+        assert_eq!(run_with_env(&engine, "", &env).unwrap(), "present");
     }
 
     #[test]

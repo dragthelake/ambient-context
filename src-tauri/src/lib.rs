@@ -243,7 +243,7 @@ async fn engine_test(engine_config: settings::Engine) -> Result<String, String> 
         let mut probe = engine_config;
         // A test must never park the window for ten minutes.
         probe.timeout_secs = probe.timeout_secs.min(60);
-        engine::run(
+        engine::run_with_env(
             &probe,
             "Reply with exactly the word: ok",
             &engine::login_shell_env(),
