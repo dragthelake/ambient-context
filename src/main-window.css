@@ -1,0 +1,14 @@
+.main-window {
+  display: flex;
+  height: 100vh;
+}
+
+.rail {
+  width: 180px;
+  flex-shrink: 0;
+}
+
+.pane {
+  flex: 1;
+  overflow-y: auto;
+}

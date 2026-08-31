@@ -180,7 +180,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                     }
                 }
                 "toggle" => toggle_capture(app),
-                // "browse" => crate::open_main_window(app), // Task 10
+                "browse" => crate::open_main_window(app),
                 "setup" => crate::open_setup_window(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();

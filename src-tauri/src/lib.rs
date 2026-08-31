@@ -1,4 +1,5 @@
 mod capture;
+mod days;
 mod engine;
 mod jobs;
 mod ledger;
@@ -221,7 +222,82 @@ fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), S
     settings::save(&app, &next).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn list_days(app: tauri::AppHandle) -> Vec<days::DayEntry> {
+    match settings::load(&app).folder {
+        Some(folder) => days::list_days(&folder),
+        None => Vec::new(),
+    }
+}
+
+#[tauri::command]
+fn days_in_month(app: tauri::AppHandle, year: i32, month: u32) -> Vec<days::DayEntry> {
+    match settings::load(&app).folder {
+        Some(folder) => days::days_in_month(&folder, year, month),
+        None => Vec::new(),
+    }
+}
+
+#[tauri::command]
+fn read_day(app: tauri::AppHandle, date: String) -> Option<String> {
+    let folder = settings::load(&app).folder?;
+    days::read_day(&folder, parse_date(&date).ok()?)
+}
+
+#[tauri::command]
+fn read_summary(app: tauri::AppHandle, date: String) -> Option<String> {
+    let folder = settings::load(&app).folder?;
+    days::read_summary(&folder, parse_date(&date).ok()?)
+}
+
+/// The browsing window, unlike the setup card, is resizable and keeps the
+/// native titlebar: it is a document window and should behave like one.
+pub fn open_main_window(app: &tauri::AppHandle) {
+    sync_activation_policy(app, true);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    if let Ok(window) = WebviewWindowBuilder::new(
+        app,
+        "main",
+        WebviewUrl::App("index.html?view=main".into()),
+    )
+    .title("Ambient Context")
+    .inner_size(1000.0, 700.0)
+    .min_inner_size(820.0, 560.0)
+    .resizable(true)
+    .build()
+    {
+        let _ = window.set_focus();
+    }
+}
+
+/// An Accessory app has no Dock icon and cannot properly take focus, which
+/// is right for a menu bar app and wrong for a window you read in. Raise to
+/// Regular while any window is open, and drop back when the last one goes.
+fn sync_activation_policy(app: &tauri::AppHandle, opening: bool) {
+    #[cfg(target_os = "macos")]
+    {
+        let any_open = opening
+            || app
+                .webview_windows()
+                .values()
+                .any(|w| w.is_visible().unwrap_or(false));
+        let policy = if any_open {
+            tauri::ActivationPolicy::Regular
+        } else {
+            tauri::ActivationPolicy::Accessory
+        };
+        let _ = app.set_activation_policy(policy);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, opening);
+}
+
 pub fn open_setup_window(app: &tauri::AppHandle) {
+    sync_activation_policy(app, true);
     if let Some(window) = app.get_webview_window("setup") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -336,7 +412,11 @@ pub fn run() {
             engine_test,
             engine_auth,
             get_settings,
-            set_settings
+            set_settings,
+            list_days,
+            days_in_month,
+            read_day,
+            read_summary
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -360,6 +440,16 @@ pub fn run() {
                 tray::refresh(app.handle(), true);
             }
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle().clone();
+                // Destroyed fires before the window leaves the collection on
+                // some runs; a short hop to the main thread lets it settle.
+                let _ = app.clone().run_on_main_thread(move || {
+                    sync_activation_policy(&app, false);
+                });
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
