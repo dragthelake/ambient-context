@@ -195,11 +195,9 @@ pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Re
     let config = settings::load(app);
     let folder = config.folder.clone().ok_or("no capture folder is set")?;
     let engine_config = config.engine.clone().ok_or("no engine is connected")?;
-    let template = match &config.day_prompt {
-        Some(path) => std::fs::read_to_string(path)
-            .map_err(|e| format!("your prompt file could not be read: {e}"))?,
-        None => summarise::BUNDLED_PROMPT.to_string(),
-    };
+    let config_dir = settings::config_dir(app);
+    // The customised prompt when there is one, the bundled copy otherwise.
+    let template = crate::prompt::current(&config_dir);
     let reject_dir = app
         .path()
         .app_data_dir()

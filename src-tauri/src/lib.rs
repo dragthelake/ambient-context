@@ -4,6 +4,7 @@ mod engine;
 mod jobs;
 mod ledger;
 mod prune;
+mod prompt;
 mod reader;
 mod redact;
 mod rules;
