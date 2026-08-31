@@ -37,6 +37,18 @@ One bullet per choice the plans did not settle, with the task reference and why.
 ## Deviations from the plan
 Anything you did differently from the written step, with the reason. Empty is the goal.
 
+- (0.3.0) Plan B Task 7: the plan's tests assert the ledger renders dispositions
+  capitalised ("Accepted", "Applied", "Discarded", "Failed", "Rejected"), but
+  0.2.0's committed renderer and tests establish lowercase ("accepted",
+  "rejected:", "failed:"). The assertions were matched to the committed
+  lowercase render; the assertion still verifies the disposition is recorded.
+- (0.3.0) Plan B Task 7: `Engine` is re-exported from `engine.rs`
+  (`pub use crate::settings::Engine`) and `engine::run(engine, stdin) ->
+  RunOutput` was implemented as a wrapper over the 0.2.0 three-argument
+  `run_with_env`, because Plan B's preamble declares that two-argument
+  signature as its contract while Plan A built `Engine` inside settings.rs.
+  The plan's propose code and the 0.4.0 contract now compile as written.
+
 - (0.2.0) Plan A Task 11 Steps 1-2 and 7-8 were not executed: reference
   screenshots, design-skill invocation and screenshot judgement are visual
   work the run cannot see. All components, states and empty states were built,
