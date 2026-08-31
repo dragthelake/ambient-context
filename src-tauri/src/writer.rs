@@ -184,15 +184,22 @@ pub fn append_block(
     Ok(())
 }
 
-/// Writes AGENTS.md into the capture folder if it is not already there, so
-/// the folder explains itself to whatever LLM reads it. Never overwrites:
-/// the user may have edited it.
+/// Writes AGENTS.md into the capture folder so the folder explains itself
+/// to whatever LLM reads it. An existing file is rewritten only when it
+/// predates the layer it needs to describe, which is what the marker tests:
+/// a user who edits their own copy keeps their edits, because their copy
+/// still contains the marker.
 pub fn ensure_agents_file(folder: &Path) -> std::io::Result<()> {
     let path = folder.join("AGENTS.md");
-    if path.exists() {
-        return Ok(());
+    let current = include_str!("../assets/AGENTS.md");
+    let needs_write = match fs::read_to_string(&path) {
+        Ok(existing) => !existing.contains("## Ledger"),
+        Err(_) => true,
+    };
+    if needs_write {
+        fs::write(&path, current)?;
     }
-    fs::write(path, include_str!("../assets/AGENTS.md"))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -375,14 +382,36 @@ mod tests {
     }
 
     #[test]
-    fn writes_agents_md_into_the_folder_once() {
+    fn writes_agents_md_into_the_folder() {
         let dir = tempdir().unwrap();
         append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
-        let agents = dir.path().join("AGENTS.md");
-        assert!(agents.exists());
+        let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(text.contains("## Summaries"));
+        assert!(text.contains("## Ledger"));
+    }
 
-        fs::write(&agents, "user edited").unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new()).unwrap();
-        assert_eq!(fs::read_to_string(&agents).unwrap(), "user edited");
+    #[test]
+    fn an_agents_file_from_an_older_version_is_brought_up_to_date() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("AGENTS.md"),
+            "# Reading this folder\n\nNo layers here.",
+        )
+        .unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(text.contains("## Summaries"));
+        assert!(text.contains("## Ledger"));
+    }
+
+    #[test]
+    fn a_current_agents_file_keeps_the_users_edits() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        ensure_agents_file(dir.path()).unwrap();
+        let edited = format!("{}\n\nMy own note.\n", fs::read_to_string(&path).unwrap());
+        fs::write(&path, &edited).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), edited);
     }
 }

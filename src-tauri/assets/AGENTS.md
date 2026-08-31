@@ -9,6 +9,8 @@ about the user's day without asking them to narrate it.
 ## Files
 
 - `YYYY-MM-DD.md`: one file per day, blocks appended in real time.
+- `Summaries/YYYY-MM-DD.md`: one distilled account per day.
+- `Ledger/YYYY-MM-DD.md`: every model action taken on the user's behalf.
 - `AGENTS.md`: this file.
 
 ## Format of a day file
@@ -68,6 +70,33 @@ line is the web page. Both are optional.
   are not.
 - Be honest about gaps. The user can stop capture at any time, so
   uncaptured hours are normal and mean nothing beyond "not recorded".
+
+## Summaries
+
+`Summaries/YYYY-MM-DD.md` holds one distilled account per day, written by
+the user's own LLM from the day file of the same name.
+
+Read the summary for what a day meant, and the day file for evidence. The
+summary interprets and can be wrong; the day file is the record and cannot.
+Every claim in a summary carries the time range that supports it, so open
+the day file at that range rather than trusting the sentence.
+
+A day with no summary means the summary has not run yet, never that nothing
+happened.
+
+## Ledger
+
+`Ledger/YYYY-MM-DD.md` records every time the summariser ran, including the
+runs that produced nothing. Each entry names the prompt, the engine, the
+files that went in with their content hashes, what came out, and why.
+
+Read it when a summary looks wrong, or when a day has no summary and you
+need to know whether that means it failed or has not run. The hashes let you
+tell whether an input has changed since the summary was written.
+
+The reasoning in an entry is the model's own account of its choices. It is
+not a record of what the model computed, and it can be wrong in the same
+ways the summary can.
 
 These files never leave this machine unless the user moves them. Treat them
 with the discretion their existence assumes.
