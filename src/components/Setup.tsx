@@ -191,8 +191,9 @@ export function Setup() {
           <p>
             Your files are plain markdown. The default folder sits outside
             Documents so iCloud will not upload them. You can move or delete
-            them at any time. Ambient Context also starts with your Mac,
-            which you can turn off in Settings.
+            them at any time. Ambient Context opens when you log in so the
+            record does not have a hole in it after a restart; you can turn
+            that off in Settings.
           </p>
           {folder ? (
             <p className="status-line done">
