@@ -19,7 +19,7 @@ under signing or the updater pubkey.
 |---|---|---|---|---|
 | 0.2.0 (A) | build/0.2.0 | 2-13 (11 of 13; 14 is prove-it) | none | ea0f47d |
 | 0.3.0 (B) | build/0.3.0 | 1-12 (12 of 13; 13 is prove-it) | none | 4ea15b6 |
-| 0.4.0 (C) | build/0.4.0 | 1-12 (12 of 13; 13 is prove-it) | none | e31c68e |
+| 0.4.0 (C) | build/0.4.0 | 1-12 (12 of 13; 13 is prove-it) | none | f7c3d34 |
 
 ## Blockers
 (empty)
