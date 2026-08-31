@@ -20,7 +20,10 @@ export function RawPane({ date, mode }: RawPaneProps) {
   const [blocks, setBlocks] = useState<RawBlock[]>([]);
   const [rules, setRules] = useState<RulesPayload | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
-  const [confirmed, setConfirmed] = useState<string | null>(null);
+  const [confirmed, setConfirmed] = useState<{ block: string; id: string } | null>(
+    null,
+  );
+  const [selectionText, setSelectionText] = useState("");
   const [scrollY, setScrollY] = useState(0);
   const [hasEngine, setHasEngine] = useState(false);
   const paneRef = useRef<HTMLElement | null>(null);
@@ -81,6 +84,16 @@ export function RawPane({ date, mode }: RawPaneProps) {
     );
   }, []);
 
+  // Whether there is anything to redact is a live question: follow the
+  // selection rather than reading it during an unrelated render.
+  useEffect(() => {
+    const onChange = () =>
+      setSelectionText(window.getSelection()?.toString() ?? "");
+    onChange();
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, []);
+
   // Hold the scroll position across a refresh: a view that jumps every
   // five seconds while you are reading it is worse than no refresh.
   const onScroll = useCallback((event: React.UIEvent<HTMLElement>) => {
@@ -94,21 +107,30 @@ export function RawPane({ date, mode }: RawPaneProps) {
 
   const nextId = rules?.next_id ?? "r1";
 
-  const addRule = useCallback(async (rule: RawRuleInput) => {
-    try {
-      const payload = await invoke<RulesPayload>("add_rule", { rule });
-      setRules(payload);
-      setRuleError(null);
-      setConfirmed(rule.id);
-      setTimeout(() => setConfirmed(null), 2500);
-    } catch (error) {
-      setRuleError(String(error));
-    }
-  }, []);
+  const addRule = useCallback(
+    async (blockKey: string, rule: RawRuleInput) => {
+      const before = new Set((rules?.rules ?? []).map((r) => r.id));
+      try {
+        const payload = await invoke<RulesPayload>("add_rule", { rule });
+        setRules(payload);
+        setRuleError(null);
+        // The id the write actually used, read back from the list it wrote.
+        // `next_id` has already moved on by the time the answer arrives.
+        const added =
+          payload.rules.find((r) => !before.has(r.id)) ??
+          payload.rules[payload.rules.length - 1];
+        if (added) setConfirmed({ block: blockKey, id: added.id });
+        setTimeout(() => setConfirmed(null), 2500);
+      } catch (error) {
+        setRuleError(String(error));
+      }
+    },
+    [rules],
+  );
 
   const neverRecordApp = useCallback(
-    async (block: RawBlock) => {
-      await addRule({
+    async (blockKey: string, block: RawBlock) => {
+      await addRule(blockKey, {
         id: nextId,
         target: { app: block.app },
         action: "exclude",
@@ -119,10 +141,10 @@ export function RawPane({ date, mode }: RawPaneProps) {
   );
 
   const headingsOnlyForSite = useCallback(
-    async (block: RawBlock) => {
+    async (blockKey: string, block: RawBlock) => {
       const domain = block.url ? domainOf(block.url) : null;
       if (!domain) return;
-      await addRule({
+      await addRule(blockKey, {
         id: nextId,
         target: { website: domain },
         action: "headings_only",
@@ -133,7 +155,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
   );
 
   const redactLikeThis = useCallback(
-    async (selected: string) => {
+    async (blockKey: string, selected: string) => {
       const current = await invoke<Settings>("get_settings");
       await invoke("set_settings", {
         next: {
@@ -144,7 +166,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
           ],
         },
       });
-      setConfirmed(`redact:${selected}`);
+      setConfirmed({ block: blockKey, id: "redact" });
       setTimeout(() => setConfirmed(null), 2500);
     },
     [],
@@ -198,10 +220,12 @@ export function RawPane({ date, mode }: RawPaneProps) {
             <footer className="raw-actions">
               <button
                 type="button"
-                onClick={() => void neverRecordApp(block)}
+                onClick={() => void neverRecordApp(key, block)}
                 title={`Never record ${block.app}`}
               >
-                {confirmed === nextId ? "Rule added" : "Never record this app"}
+                {confirmed?.block === key && confirmed.id !== "redact"
+                  ? "Rule added"
+                  : "Never record this app"}
               </button>
               <button
                 type="button"
@@ -211,20 +235,21 @@ export function RawPane({ date, mode }: RawPaneProps) {
                     ? `Headings only for ${domainOf(block.url)}`
                     : "This block has no url reference, so there is no site to match"
                 }
-                onClick={() => void headingsOnlyForSite(block)}
+                onClick={() => void headingsOnlyForSite(key, block)}
               >
                 Headings only for this site
               </button>
               <button
                 type="button"
-                disabled={window.getSelection()?.toString().length === 0}
+                disabled={selectionText.trim() === ""}
                 title="Redact the selected text, exactly as written"
                 onClick={() => {
-                  const selected = window.getSelection()?.toString();
-                  if (selected) void redactLikeThis(selected);
+                  if (selectionText.trim()) void redactLikeThis(key, selectionText);
                 }}
               >
-                Redact text like this
+                {confirmed?.block === key && confirmed.id === "redact"
+                  ? "Redaction added"
+                  : "Redact text like this"}
               </button>
             </footer>
           </article>
