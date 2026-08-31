@@ -23,9 +23,261 @@ pub fn parse_env(raw: &str) -> HashMap<String, String> {
     out
 }
 
+use std::io::Write;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
+
+#[derive(Debug)]
+pub enum EngineError {
+    /// The command does not exist at that path. Almost always a stale
+    /// absolute path after the user moved or reinstalled the CLI.
+    NotFound,
+    Timeout,
+    Failed { code: Option<i32>, stderr: String },
+    Io(String),
+}
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EngineError::NotFound => write!(f, "the engine command could not be found"),
+            EngineError::Timeout => write!(f, "the engine took too long and was stopped"),
+            EngineError::Failed { code, stderr } => {
+                let code = code.map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+                write!(f, "the engine exited with {code}: {}", stderr.trim())
+            }
+            EngineError::Io(message) => write!(f, "{message}"),
+        }
+    }
+}
+
+/// Runs the engine once: prompt in on stdin, response out on stdout.
+///
+/// The child is moved into a waiter thread so the caller can give up on it.
+/// std has no wait-with-timeout, and rather than take a dependency for one
+/// call site we keep the pid and send it a signal through /bin/kill, which
+/// is always present on macOS.
+pub fn run(
+    engine: &crate::settings::Engine,
+    prompt: &str,
+    env: &HashMap<String, String>,
+) -> Result<String, EngineError> {
+    let mut command = Command::new(&engine.command);
+    command
+        .args(&engine.args)
+        .current_dir(engine_cwd())
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(EngineError::NotFound)
+        }
+        Err(error) => return Err(EngineError::Io(error.to_string())),
+    };
+
+    let pid = child.id();
+
+    // Write on a thread: a prompt larger than the pipe buffer deadlocks if
+    // the parent writes while the child is also blocked writing output.
+    let mut stdin = child.stdin.take().ok_or(EngineError::Io("no stdin".into()))?;
+    let owned_prompt = prompt.to_string();
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(owned_prompt.as_bytes());
+        // Dropping stdin closes it, which is what tells the child the
+        // prompt is complete. Without this, cat waits forever.
+    });
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(Duration::from_secs(engine.timeout_secs)) {
+        Ok(Ok(output)) => {
+            if output.status.success() {
+                Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            } else {
+                Err(EngineError::Failed {
+                    code: output.status.code(),
+                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                })
+            }
+        }
+        Ok(Err(error)) => Err(EngineError::Io(error.to_string())),
+        Err(_) => {
+            let _ = Command::new("/bin/kill")
+                .args(["-9", &pid.to_string()])
+                .status();
+            Err(EngineError::Timeout)
+        }
+    }
+}
+
+/// Where every engine runs. Claude Code reads CLAUDE.md and Codex reads
+/// AGENTS.md from the working directory, so the child must start somewhere
+/// the app owns and keeps empty, never in whatever directory the app
+/// happened to inherit. Created on first use.
+pub fn engine_cwd() -> std::path::PathBuf {
+    let dir = std::env::temp_dir()
+        .join("com.0x0000007a.ambientcontext")
+        .join("engine-cwd");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Runs a shell with the given arguments and returns its stdout, giving up
+/// after `timeout`. Same waiter-thread shape as `run`, because std has no
+/// wait-with-timeout and an interactive rc file can print, prompt or hang.
+fn shell_output(shell: &str, args: &[&str], timeout: Duration) -> Option<String> {
+    let mut child = Command::new(shell)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) if output.status.success() => {
+            Some(String::from_utf8_lossy(&output.stdout).to_string())
+        }
+        Ok(_) => None,
+        Err(_) => {
+            let _ = Command::new("/bin/kill").args(["-9", &pid.to_string()]).status();
+            None
+        }
+    }
+}
+
+/// Directories an agent CLI is likely to live in, for when no shell can be
+/// run at all. Measured on the build machine: claude and cursor-agent in
+/// ~/.local/bin, codex behind a volta shim, opencode in /opt/homebrew/bin.
+const CANDIDATE_DIRS: &[&str] = &[
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "~/.local/bin",
+    "~/.volta/bin",
+    "~/.bun/bin",
+    "~/.opencode/bin",
+    "~/.cargo/bin",
+    "~/.npm-global/bin",
+    "/usr/bin",
+    "/bin",
+];
+
+/// The environment a terminal would have. Apps launched from the Dock get
+/// only the launchd environment (measured: it sets nothing but
+/// SSH_AUTH_SOCK, so PATH is the launchd default /usr/bin:/bin:/usr/sbin:/sbin),
+/// so brew, volta and ~/.local/bin are missing and every agent CLI is
+/// invisible. Capture this once at startup and pass it to every child.
+///
+/// Order: the interactive login shell first, because some users only set
+/// PATH in .zshrc (0.5 s on the build machine, 54 variables), then the
+/// non-interactive login shell (41 variables, every preset still found),
+/// then the launchd environment with a fixed candidate PATH prepended.
+pub fn login_shell_env() -> HashMap<String, String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let timeout = Duration::from_secs(5);
+    if let Some(raw) = shell_output(&shell, &["-l", "-i", "-c", "env"], timeout) {
+        let env = parse_env(&raw);
+        if env.contains_key("PATH") {
+            return env;
+        }
+    }
+    if let Some(raw) = shell_output(&shell, &["-l", "-c", "env"], timeout) {
+        let env = parse_env(&raw);
+        if env.contains_key("PATH") {
+            return env;
+        }
+    }
+    let mut env: HashMap<String, String> = std::env::vars().collect();
+    let home = env.get("HOME").cloned().unwrap_or_default();
+    let candidates: Vec<String> = CANDIDATE_DIRS
+        .iter()
+        .map(|d| d.replacen("~", &home, 1))
+        .collect();
+    let inherited = env.get("PATH").cloned().unwrap_or_default();
+    env.insert(
+        "PATH".to_string(),
+        format!("{}:{}", candidates.join(":"), inherited),
+    );
+    env
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::Engine;
+
+    fn engine_for(command: &str, args: &[&str], timeout_secs: u64) -> Engine {
+        Engine {
+            label: "test".to_string(),
+            command: command.to_string(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+            timeout_secs,
+        }
+    }
+
+    #[test]
+    fn feeds_the_prompt_on_stdin_and_returns_stdout() {
+        // /bin/cat copies stdin to stdout, which is exactly the contract.
+        let engine = engine_for("/bin/cat", &[], 10);
+        let out = run(&engine, "hello prompt", &HashMap::new()).unwrap();
+        assert_eq!(out, "hello prompt");
+    }
+
+    #[test]
+    fn a_missing_binary_is_not_found_rather_than_a_generic_io_error() {
+        let engine = engine_for("/nope/not/here", &[], 10);
+        assert!(matches!(
+            run(&engine, "x", &HashMap::new()),
+            Err(EngineError::NotFound)
+        ));
+    }
+
+    #[test]
+    fn a_nonzero_exit_carries_its_stderr() {
+        let engine = engine_for("/bin/sh", &["-c", "echo boom >&2; exit 3"], 10);
+        match run(&engine, "x", &HashMap::new()) {
+            Err(EngineError::Failed { code, stderr }) => {
+                assert_eq!(code, Some(3));
+                assert!(stderr.contains("boom"), "stderr was {stderr:?}");
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_slow_engine_times_out_instead_of_hanging_forever() {
+        let engine = engine_for("/bin/sh", &["-c", "sleep 30"], 1);
+        let started = std::time::Instant::now();
+        assert!(matches!(
+            run(&engine, "x", &HashMap::new()),
+            Err(EngineError::Timeout)
+        ));
+        assert!(
+            started.elapsed().as_secs() < 10,
+            "run did not return promptly on timeout"
+        );
+    }
+
+    #[test]
+    fn the_supplied_environment_reaches_the_child() {
+        let engine = engine_for("/bin/sh", &["-c", "printf %s \"$AC_TEST_VAR\""], 10);
+        let mut env = HashMap::new();
+        env.insert("AC_TEST_VAR".to_string(), "present".to_string());
+        assert_eq!(run(&engine, "", &env).unwrap(), "present");
+    }
 
     #[test]
     fn parses_key_value_lines() {
