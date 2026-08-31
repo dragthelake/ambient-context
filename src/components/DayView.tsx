@@ -91,6 +91,14 @@ export function DayView() {
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [hasEngine, setHasEngine] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
+  // A run you started yourself, and the message it failed with. The
+  // scheduler's last outcome is a different fact about a possibly different
+  // day, and must never stand in for this one.
+  const [manualFailure, setManualFailure] = useState<{
+    date: string;
+    message: string;
+    when: string;
+  } | null>(null);
   const [mode, setMode] = useState<"raw" | "summary">("summary");
 
   const refreshMonth = useCallback(async () => {
@@ -111,6 +119,13 @@ export function DayView() {
   const refreshOutcome = useCallback(async () => {
     const status = await invoke<Outcome | null>("job_status");
     setOutcome((current) => (sameOutcome(current, status) ? current : status));
+    // A later run for the same day supersedes the manual failure; a run for
+    // any other day leaves it alone.
+    setManualFailure((current) =>
+      current && status && status.date === current.date && status.when > current.when
+        ? null
+        : current,
+    );
   }, []);
 
   useEffect(() => {
@@ -190,12 +205,20 @@ export function DayView() {
         date: selected,
       });
       setJob({ id: started.job_id, date: selected, status: "queued", stderr: null });
+      setManualFailure((current) =>
+        current && current.date === selected ? null : current,
+      );
     } catch (error) {
       setJob({
         id: "",
         date: selected,
         status: "failed",
         stderr: String(error),
+      });
+      setManualFailure({
+        date: selected,
+        message: String(error),
+        when: new Date().toISOString(),
       });
     }
   }, [selected]);
@@ -216,7 +239,19 @@ export function DayView() {
             ? current
             : { id: state.id, date: state.date, status: state.status, stderr: state.stderr },
         );
-        if (state.status === "done") await reloadDay();
+        if (state.status === "failed") {
+          setManualFailure({
+            date: state.date,
+            message: state.stderr ?? "The run failed.",
+            when: new Date().toISOString(),
+          });
+        }
+        if (state.status === "done") {
+          setManualFailure((current) =>
+            current && current.date === state.date ? null : current,
+          );
+          await reloadDay();
+        }
       })();
     }, 2000);
     return () => {
@@ -236,8 +271,8 @@ export function DayView() {
   const summary: SummaryState = useMemo(() => {
     if (jobStatus === "queued") return { kind: "queued" };
     if (jobStatus === "running") return { kind: "running" };
-    if (jobStatus === "failed") {
-      return { kind: "failed", message: job?.stderr ?? "The run failed." };
+    if (manualFailure && manualFailure.date === selected) {
+      return { kind: "failed", message: manualFailure.message };
     }
     if (summaryMarkdown) {
       const at = outcome && outcome.date === selected ? outcome.when : "";
@@ -247,7 +282,7 @@ export function DayView() {
       return { kind: "failed", message: outcome.message };
     }
     return { kind: "none" };
-  }, [summaryMarkdown, outcome, selected, jobStatus, job]);
+  }, [summaryMarkdown, outcome, selected, jobStatus, manualFailure]);
 
   const onMonthChange = useCallback((year: number, month: number) => {
     setMonth({ year, month });
