@@ -214,6 +214,156 @@ pub fn login_shell_env() -> HashMap<String, String> {
     env
 }
 
+use std::path::Path;
+
+pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
+
+/// Label, binary name, and the argv that makes it read one prompt from
+/// stdin and print one answer to stdout. Taken verbatim from
+/// docs/engine-spike.md; do not invent entries for CLIs nobody has run.
+const PRESETS: &[(&str, &str, &[&str])] = &[
+    ("Claude Code", "claude", &["-p", "--output-format", "text"]),
+    (
+        "Codex",
+        "codex",
+        &["exec", "--skip-git-repo-check", "--color", "never", "-"],
+    ),
+    ("opencode", "opencode", &["run"]),
+];
+// Not presets, per the spike: cursor-agent (its headless mode gates on
+// per-directory workspace trust and the only bypass also force-allows
+// commands), and goose, gemini, amp and copilot (not installed on the
+// build machine, so unverified). All are reachable through the manual
+// template in Settings.
+
+/// Resolves a binary name against a PATH, the way a shell would. Used
+/// instead of shelling out to `which` so detection cannot itself depend on
+/// a shell being available.
+pub fn which(name: &str, env: &HashMap<String, String>) -> Option<String> {
+    let path = env.get("PATH")?;
+    for dir in path.split(':').filter(|d| !d.is_empty()) {
+        let candidate = Path::new(dir).join(name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
+pub fn detect(env: &HashMap<String, String>) -> Vec<crate::settings::Engine> {
+    detect_from(PRESETS, env)
+}
+
+pub fn detect_from(
+    presets: &[(&str, &str, &[&str])],
+    env: &HashMap<String, String>,
+) -> Vec<crate::settings::Engine> {
+    presets
+        .iter()
+        .filter_map(|(label, binary, args)| {
+            which(binary, env).map(|command| crate::settings::Engine {
+                label: label.to_string(),
+                command,
+                args: args.iter().map(|a| a.to_string()).collect(),
+                timeout_secs: DEFAULT_TIMEOUT_SECS,
+            })
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum AuthState {
+    /// The CLI reports it is signed in.
+    Ok,
+    /// The CLI reports it is not, and this is what the user should run.
+    NotLoggedIn { fix: String },
+    /// The CLI works without credentials but will use a free model.
+    NoProvider { fix: String },
+    /// A manual template, or a preset whose check could not run.
+    Unknown,
+}
+
+/// The auth probe for a preset, by label. Manual engines return None.
+fn auth_probe(label: &str) -> Option<(&'static [&'static str], &'static str)> {
+    match label {
+        "Claude Code" => Some((
+            &["auth", "status"],
+            "Run `claude` in a terminal and use /login.",
+        )),
+        "Codex" => Some((&["login", "status"], "Run `codex login`.")),
+        "opencode" => Some((
+            &["auth", "list"],
+            "Run `opencode auth login` to use your own provider.",
+        )),
+        _ => None,
+    }
+}
+
+/// Asks the engine whether it is signed in. Ten second cap; a probe that
+/// hangs is Unknown, not a failure.
+pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String>) -> AuthState {
+    let Some((args, fix)) = auth_probe(&engine.label) else {
+        return AuthState::Unknown;
+    };
+    let mut child = match Command::new(&engine.command)
+        .args(args)
+        .current_dir(engine_cwd())
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(_) => return AuthState::Unknown,
+    };
+    let pid = child.id();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let output = match rx.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok(output)) => output,
+        _ => {
+            let _ = Command::new("/bin/kill").args(["-9", &pid.to_string()]).status();
+            return AuthState::Unknown;
+        }
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    match engine.label.as_str() {
+        "Claude Code" => {
+            if output.status.success() && stdout.contains("\"loggedIn\": true") {
+                AuthState::Ok
+            } else {
+                AuthState::NotLoggedIn {
+                    fix: fix.to_string(),
+                }
+            }
+        }
+        "Codex" => {
+            if output.status.success() {
+                AuthState::Ok
+            } else {
+                AuthState::NotLoggedIn {
+                    fix: fix.to_string(),
+                }
+            }
+        }
+        "opencode" => {
+            if stdout.contains("0 credentials") {
+                AuthState::NoProvider {
+                    fix: fix.to_string(),
+                }
+            } else {
+                AuthState::Ok
+            }
+        }
+        _ => AuthState::Unknown,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,6 +427,110 @@ mod tests {
         let mut env = HashMap::new();
         env.insert("AC_TEST_VAR".to_string(), "present".to_string());
         assert_eq!(run(&engine, "", &env).unwrap(), "present");
+    }
+
+    #[test]
+    fn which_finds_a_binary_on_the_supplied_path() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin:/bin".to_string());
+        assert_eq!(which("cat", &env), Some("/bin/cat".to_string()));
+    }
+
+    #[test]
+    fn which_returns_none_when_the_binary_is_absent() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin:/bin".to_string());
+        assert_eq!(which("definitely-not-a-real-binary", &env), None);
+    }
+
+    #[test]
+    fn which_ignores_directories_that_do_not_exist() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/nope/nope:/bin".to_string());
+        assert_eq!(which("cat", &env), Some("/bin/cat".to_string()));
+    }
+
+    #[test]
+    fn detect_returns_nothing_when_no_cli_is_installed() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/nope/nope".to_string());
+        assert!(detect(&env).is_empty());
+    }
+
+    #[test]
+    fn a_detected_engine_carries_an_absolute_path_and_a_timeout() {
+        // Stand in for a real CLI: /bin/cat exists everywhere.
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/bin".to_string());
+        let found = detect_from(&[("Cat", "cat", &[])], &env);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].command, "/bin/cat");
+        assert_eq!(found[0].label, "Cat");
+        assert_eq!(found[0].timeout_secs, DEFAULT_TIMEOUT_SECS);
+    }
+
+    /// A stand-in CLI: a script that prints `stdout` and exits with `code`,
+    /// whatever arguments it is given.
+    fn fake_cli(
+        dir: &std::path::Path,
+        label: &str,
+        stdout: &str,
+        code: i32,
+    ) -> crate::settings::Engine {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(format!("fake-{}", label.to_lowercase().replace(' ', "-")));
+        std::fs::write(
+            &path,
+            format!("#!/bin/sh\nprintf '%s\\n' '{stdout}'\nexit {code}\n"),
+        )
+        .unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        crate::settings::Engine {
+            label: label.to_string(),
+            command: path.to_string_lossy().to_string(),
+            args: vec![],
+            timeout_secs: 5,
+        }
+    }
+
+    #[test]
+    fn a_manual_engine_has_unknown_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = HashMap::new();
+        let engine = fake_cli(dir.path(), "Something else", "", 0);
+        assert_eq!(auth_state(&engine, &env), AuthState::Unknown);
+    }
+
+    #[test]
+    fn claude_logged_in_is_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = HashMap::new();
+        let engine = fake_cli(dir.path(), "Claude Code", "{ \"loggedIn\": true }", 0);
+        assert_eq!(auth_state(&engine, &env), AuthState::Ok);
+    }
+
+    #[test]
+    fn codex_logged_out_names_the_fix() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = HashMap::new();
+        let engine = fake_cli(dir.path(), "Codex", "Not logged in", 1);
+        assert_eq!(
+            auth_state(&engine, &env),
+            AuthState::NotLoggedIn {
+                fix: "Run `codex login`.".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn opencode_with_no_credentials_is_a_warning_not_a_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let env = HashMap::new();
+        let engine = fake_cli(dir.path(), "opencode", "└  0 credentials", 0);
+        assert!(matches!(
+            auth_state(&engine, &env),
+            AuthState::NoProvider { .. }
+        ));
     }
 
     #[test]
