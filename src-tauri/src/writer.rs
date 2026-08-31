@@ -164,11 +164,7 @@ pub fn render_block(block: &Block, lines: &[String]) -> String {
 /// Appends one block to the file for the block's own start date, creating the
 /// folder and the file with frontmatter if they do not exist yet. Only lines
 /// the day has not already recorded are written.
-pub fn append_block(
-    folder: &Path,
-    block: &Block,
-    dedup: &mut DayDedup,
-) -> std::io::Result<()> {
+pub fn append_block(folder: &Path, block: &Block, dedup: &mut DayDedup) -> std::io::Result<()> {
     fs::create_dir_all(folder)?;
     let date = block.start.date_naive();
     let path = file_path(folder, date);
@@ -207,7 +203,9 @@ mod tests {
             title: Some("YN-102".to_string()),
             document: None,
             url: None,
-            start: Local.with_ymd_and_hms(2026, 8, 25, hour, minute, 0).unwrap(),
+            start: Local
+                .with_ymd_and_hms(2026, 8, 25, hour, minute, 0)
+                .unwrap(),
             end: Local
                 .with_ymd_and_hms(2026, 8, 25, hour, end_minute, 0)
                 .unwrap(),
@@ -371,7 +369,10 @@ mod tests {
         let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
         let contents = fs::read_to_string(path).unwrap();
         assert!(contents.contains(&tweet_v1));
-        assert!(!contents.contains("6 hours ago"), "the re-capture is dropped");
+        assert!(
+            !contents.contains("6 hours ago"),
+            "the re-capture is dropped"
+        );
     }
 
     #[test]

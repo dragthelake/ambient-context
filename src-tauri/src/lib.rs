@@ -124,12 +124,7 @@ fn census_snapshot() -> Option<CensusSnapshot> {
     let started = std::time::Instant::now();
     let snap = reader::macos::snapshot()?;
     let character_count = snap.text.iter().map(|line| line.chars().count()).sum();
-    let sample: String = snap
-        .text
-        .join(" ")
-        .chars()
-        .take(200)
-        .collect();
+    let sample: String = snap.text.join(" ").chars().take(200).collect();
     Some(CensusSnapshot {
         app: snap.app,
         window_title: snap.window_title,

@@ -86,13 +86,7 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
     )?;
     let open_today = MenuItem::with_id(app, "open_today", "Open Today's File", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
-    let setup = MenuItem::with_id(
-        app,
-        "setup",
-        "Settings\u{2026}",
-        true,
-        None::<&str>,
-    )?;
+    let setup = MenuItem::with_id(app, "setup", "Settings\u{2026}", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     Menu::with_items(

@@ -11,6 +11,9 @@ use std::collections::HashMap;
 /// Parses the output of `env`: KEY=VALUE per line. Values may contain '='
 /// and may be empty; keys may not. Lines without '=' are continuations of a
 /// previous multi-line value and are ignored rather than guessed at.
+// Consumed by login_shell_env once the engine subprocess lands (0.2.0 plan,
+// Task 3); until then the spike's tests are its only caller.
+#[allow(dead_code)]
 pub fn parse_env(raw: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for line in raw.lines() {

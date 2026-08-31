@@ -176,9 +176,30 @@ mod tests {
     #[test]
     fn a_ticking_counter_lands_once_per_block() {
         let mut seg = Segmenter::new(0, 0.3);
-        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:41"]), at(0));
-        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:46"]), at(5));
-        seg.push(snap("Spotify", "Now Playing", &["some song title words here", "1:51"]), at(10));
+        seg.push(
+            snap(
+                "Spotify",
+                "Now Playing",
+                &["some song title words here", "1:41"],
+            ),
+            at(0),
+        );
+        seg.push(
+            snap(
+                "Spotify",
+                "Now Playing",
+                &["some song title words here", "1:46"],
+            ),
+            at(5),
+        );
+        seg.push(
+            snap(
+                "Spotify",
+                "Now Playing",
+                &["some song title words here", "1:51"],
+            ),
+            at(10),
+        );
         let block = seg.flush(at(60)).unwrap();
         let timers: Vec<_> = block.lines.iter().filter(|l| l.contains(':')).collect();
         assert_eq!(timers, vec!["1:41"], "later ticks share the skeleton");
@@ -276,11 +297,7 @@ mod tests {
         let block = seg.flush(at(60)).unwrap();
         assert_eq!(
             block.lines,
-            vec![
-                "alpha".to_string(),
-                "beta".to_string(),
-                "gamma".to_string()
-            ]
+            vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]
         );
     }
 }
