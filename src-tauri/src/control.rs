@@ -41,6 +41,7 @@ fn start_capture(app: &AppHandle, client: &str) -> Response {
             "No capture folder is set. Open Ambient Context and choose one first.",
         );
     }
+    let before = writes::hash_before(&settings::config_dir(app).join("settings.json"));
     if !state.is_running() {
         config.enabled = true;
         if let Err(error) = settings::save(app, &config) {
@@ -48,14 +49,17 @@ fn start_capture(app: &AppHandle, client: &str) -> Response {
         }
         capture::start(app.clone(), &state, config);
         tray::refresh(app, true);
+        // Only a write earns an entry. Calling start twice must not read
+        // as two changes to the file.
+        ledger_config_write(app, client, "start_capture", "enabled = true", before);
     }
-    ledger_config_write(app, client, "start_capture", "enabled = true");
     capture_status(app)
 }
 
 fn stop_capture(app: &AppHandle, client: &str) -> Response {
     let state = app.state::<capture::CaptureState>().inner().clone();
     let mut config = settings::load(app);
+    let before = writes::hash_before(&settings::config_dir(app).join("settings.json"));
     if state.is_running() {
         config.enabled = false;
         if let Err(error) = settings::save(app, &config) {
@@ -63,8 +67,8 @@ fn stop_capture(app: &AppHandle, client: &str) -> Response {
         }
         capture::stop(&state);
         tray::refresh(app, false);
+        ledger_config_write(app, client, "stop_capture", "enabled = false", before);
     }
-    ledger_config_write(app, client, "stop_capture", "enabled = false");
     capture_status(app)
 }
 
@@ -121,12 +125,18 @@ fn open_day(app: &AppHandle, date: &str) -> Response {
     Response::Ok(serde_json::json!({ "opened": date }))
 }
 
-fn ledger_config_write(app: &AppHandle, client: &str, action: &str, detail: &str) {
+fn ledger_config_write(
+    app: &AppHandle,
+    client: &str,
+    action: &str,
+    detail: &str,
+    inputs: Vec<ledger::Input>,
+) {
     writes::ledger_write(
         app,
         client,
         action,
-        &settings::config_dir(app).join("settings.json"),
+        inputs,
         detail.to_string(),
         ledger::Disposition::Applied,
     );
@@ -205,23 +215,28 @@ pub mod writes {
             .map_err(|error| ("invalid", error.to_string()))
     }
 
-    /// Records one config-file write. The file is hashed before it changes,
-    /// because that is what makes the entry reproducible: the ledger names the
-    /// input the actor saw, not the output it left behind.
+    /// Hashes a file as it stands now. Called before a write, because that
+    /// is what makes an entry reproducible: the ledger names the input the
+    /// actor saw, not the output it left behind. A file that does not exist
+    /// yet has no input to name.
+    pub fn hash_before(target: &std::path::Path) -> Vec<ledger::Input> {
+        ledger::hash_file(target)
+            .map(|input| vec![input])
+            .unwrap_or_default()
+    }
+
+    /// Records one config-file write, after the write has happened.
     pub fn ledger_write(
         app: &AppHandle,
         client: &str,
         action: &str,
-        target: &std::path::Path,
+        inputs: Vec<ledger::Input>,
         output: String,
         disposition: ledger::Disposition,
     ) {
         let Some(folder) = settings::load(app).folder else {
             return;
         };
-        let inputs = ledger::hash_file(target)
-            .map(|input| vec![input])
-            .unwrap_or_default();
         let entry = ledger::Entry {
             at: chrono::Local::now(),
             trigger: ledger::Trigger::Mcp {
@@ -277,6 +292,7 @@ pub mod writes {
 
     pub fn set_config(app: &AppHandle, patch: serde_json::Value, client: &str) -> Response {
         let dir = settings::config_dir(app);
+        let before = hash_before(&dir.join("settings.json"));
         let current = settings::load(app);
         let patched = match apply_patch(&current, patch.clone()) {
             Ok(patched) => patched,
@@ -285,7 +301,7 @@ pub mod writes {
                     app,
                     client,
                     "set_config",
-                    &dir.join("settings.json"),
+                    before,
                     patch.to_string(),
                     ledger::Disposition::Rejected {
                         reason: message.clone(),
@@ -294,17 +310,19 @@ pub mod writes {
                 return Response::err(code, message);
             }
         };
+        // The file first, the entry second: an entry claiming a change the
+        // save then failed to make is worse than no entry at all.
+        if let Err(error) = settings::save(app, &patched) {
+            return Response::err("io", error.to_string());
+        }
         ledger_write(
             app,
             client,
             "set_config",
-            &dir.join("settings.json"),
+            before,
             patch.to_string(),
             ledger::Disposition::Applied,
         );
-        if let Err(error) = settings::save(app, &patched) {
-            return Response::err("io", error.to_string());
-        }
         crate::apply_settings_change(app, &current, &patched);
         Response::Ok(serde_json::to_value(&patched).unwrap_or(serde_json::Value::Null))
     }
@@ -333,6 +351,7 @@ pub mod writes {
     {
         let dir = settings::config_dir(app);
         let target = dir.join("rules.json");
+        let before = hash_before(&target);
         let mut set = rules::load(&dir);
         if let Err(error) = mutate(&mut set) {
             let response = rule_refusal(error);
@@ -344,7 +363,7 @@ pub mod writes {
                 app,
                 client,
                 action,
-                &target,
+                before,
                 String::new(),
                 ledger::Disposition::Rejected { reason },
             );
@@ -360,24 +379,24 @@ pub mod writes {
                 app,
                 client,
                 action,
-                &target,
+                before,
                 String::new(),
                 ledger::Disposition::Rejected { reason },
             );
             return response;
         }
         let output = serde_json::to_string(&set).unwrap_or_default();
+        if let Err(error) = rules::save(&dir, &set) {
+            return Response::err("io", error.to_string());
+        }
         ledger_write(
             app,
             client,
             action,
-            &target,
+            before,
             output,
             ledger::Disposition::Applied,
         );
-        if let Err(error) = rules::save(&dir, &set) {
-            return Response::err("io", error.to_string());
-        }
         Response::Ok(serde_json::json!({
             "rules": set.rules,
             "built_ins": rules::built_ins(),
@@ -387,13 +406,14 @@ pub mod writes {
     pub fn set_prompt(app: &AppHandle, text: String, client: &str) -> Response {
         let dir = settings::config_dir(app);
         let target = dir.join("prompts").join("day-context.md");
+        let before = hash_before(&target);
         match prompt::set(&dir, &text) {
             Ok(()) => {
                 ledger_write(
                     app,
                     client,
                     "set_prompt",
-                    &target,
+                    before,
                     text.clone(),
                     ledger::Disposition::Applied,
                 );
@@ -407,7 +427,7 @@ pub mod writes {
                     app,
                     client,
                     "set_prompt",
-                    &target,
+                    before,
                     text,
                     ledger::Disposition::Rejected {
                         reason: reason.clone(),
@@ -424,7 +444,7 @@ pub mod writes {
                     app,
                     client,
                     "set_prompt",
-                    &target,
+                    before,
                     text,
                     ledger::Disposition::Rejected {
                         reason: reason.clone(),

@@ -514,36 +514,115 @@ fn job_status(state: tauri::State<jobs::JobState>) -> Option<jobs::Outcome> {
     state.last_outcome()
 }
 
+/// The login-shell environment, captured once and reused. Computing it
+/// spawns two interactive shells and costs about half a second, which is
+/// not a price to pay four times every time the Settings page opens. The
+/// cache is warmed on a background thread at startup and can be rebuilt
+/// from Settings after installing a CLI.
+#[derive(Default)]
+pub struct EngineEnv(std::sync::Mutex<Option<std::collections::HashMap<String, String>>>);
+
+impl EngineEnv {
+    fn get(&self) -> std::collections::HashMap<String, String> {
+        let mut slot = self.0.lock().expect("engine env");
+        if slot.is_none() {
+            *slot = Some(engine::login_shell_env());
+        }
+        slot.clone().unwrap_or_default()
+    }
+
+    fn refresh(&self) -> std::collections::HashMap<String, String> {
+        let fresh = engine::login_shell_env();
+        *self.0.lock().expect("engine env") = Some(fresh.clone());
+        fresh
+    }
+}
+
+pub(crate) fn engine_env(app: &tauri::AppHandle) -> std::collections::HashMap<String, String> {
+    app.state::<EngineEnv>().get()
+}
+
+/// Rebuilds the cached environment. Called from Settings after installing
+/// or moving an engine CLI, so a detect can find it without a relaunch.
 #[tauri::command]
-fn engine_detect() -> Vec<settings::Engine> {
-    engine::detect(&engine::login_shell_env())
+async fn refresh_engine_env(app: tauri::AppHandle) -> Vec<settings::Engine> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let env = app.state::<EngineEnv>().refresh();
+        engine::detect(&env)
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[tauri::command]
+fn engine_detect(app: tauri::AppHandle) -> Vec<settings::Engine> {
+    engine::detect(&engine_env(&app))
 }
 
 /// Proves the connection now, in front of someone who can fix it, rather
 /// than at 6am six weeks from now.
 #[tauri::command]
-async fn engine_test(engine_config: settings::Engine) -> Result<String, String> {
+async fn engine_test(
+    app: tauri::AppHandle,
+    engine_config: settings::Engine,
+) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let mut probe = engine_config;
         // A test must never park the window for ten minutes.
         probe.timeout_secs = probe.timeout_secs.min(60);
-        engine::run_with_env(
-            &probe,
-            "Reply with exactly the word: ok",
-            &engine::login_shell_env(),
-        )
-        .map_err(|e| e.to_string())
+        let result =
+            engine::run_with_env(&probe, "Reply with exactly the word: ok", &engine_env(&app))
+                .map_err(|e| e.to_string());
+        // A test spends a model call under the user's subscription, so it
+        // belongs in the record like any other engine run.
+        if let Some(folder) = settings::load(&app).folder {
+            ledger_engine_test(&folder, &probe, &result);
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
+/// One entry per engine test: what was run, what came back verbatim, and
+/// whether it worked.
+fn ledger_engine_test(
+    folder: &std::path::Path,
+    engine_config: &settings::Engine,
+    result: &Result<String, String>,
+) {
+    let (output, disposition) = match result {
+        Ok(text) => (Some(text.clone()), ledger::Disposition::Accepted),
+        Err(stderr) => (
+            None,
+            ledger::Disposition::Failed {
+                stderr: stderr.clone(),
+            },
+        ),
+    };
+    let entry = ledger::Entry {
+        at: chrono::Local::now(),
+        trigger: ledger::Trigger::OnDemand,
+        action: "engine_test".to_string(),
+        prompt_id: None,
+        prompt_sha256: None,
+        engine: Some(engine_config.label.clone()),
+        inputs: Vec::new(),
+        output,
+        reasoning: None,
+        disposition,
+    };
+    if let Err(error) = ledger::append(folder, &entry) {
+        eprintln!("[ledger] could not record the engine test: {error}");
+    }
+}
+
 /// Whether the engine is signed in, without spending a model call. Ten
 /// second cap inside `auth_state`; never called on the schedule.
 #[tauri::command]
-async fn engine_auth(engine_config: settings::Engine) -> engine::AuthState {
+async fn engine_auth(app: tauri::AppHandle, engine_config: settings::Engine) -> engine::AuthState {
     tauri::async_runtime::spawn_blocking(move || {
-        engine::auth_state(&engine_config, &engine::login_shell_env())
+        engine::auth_state(&engine_config, &engine_env(&app))
     })
     .await
     .unwrap_or(engine::AuthState::Unknown)
@@ -554,6 +633,42 @@ fn get_settings(app: tauri::AppHandle) -> settings::Settings {
     settings::load(&app)
 }
 
+/// Writes settings.json and records the write. The hash is taken before
+/// the file changes, because that is what makes the entry reproducible:
+/// the ledger names the input the actor saw. The entry is written after
+/// the save, so a failed save leaves no entry claiming otherwise.
+fn save_settings_recorded(
+    config_dir: &std::path::Path,
+    folder: Option<&std::path::Path>,
+    action: &str,
+    next: &settings::Settings,
+) -> Result<(), String> {
+    let path = config_dir.join("settings.json");
+    let inputs = ledger::hash_file(&path)
+        .map(|input| vec![input])
+        .unwrap_or_default();
+    settings::write_to(&path, next).map_err(|e| e.to_string())?;
+    let Some(folder) = folder else {
+        return Ok(());
+    };
+    let entry = ledger::Entry {
+        at: chrono::Local::now(),
+        trigger: ledger::Trigger::Settings,
+        action: action.to_string(),
+        prompt_id: None,
+        prompt_sha256: None,
+        engine: None,
+        inputs,
+        output: serde_json::to_string_pretty(next).ok(),
+        reasoning: None,
+        disposition: ledger::Disposition::Applied,
+    };
+    if let Err(error) = ledger::append(folder, &entry) {
+        eprintln!("[ledger] could not record {action}: {error}");
+    }
+    Ok(())
+}
+
 /// Saves and then applies, exactly as the MCP `set_config` handler does:
 /// a recording knob changed on the Settings page has to reach the running
 /// poll thread, not wait for the next launch. Async so the restart's wait
@@ -562,7 +677,13 @@ fn get_settings(app: tauri::AppHandle) -> settings::Settings {
 async fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let previous = settings::load(&app);
-        settings::save(&app, &next).map_err(|e| e.to_string())?;
+        let folder = next.folder.clone().or_else(|| previous.folder.clone());
+        save_settings_recorded(
+            &settings::config_dir(&app),
+            folder.as_deref(),
+            "set_settings",
+            &next,
+        )?;
         apply_settings_change(&app, &previous, &next);
         Ok(())
     })
@@ -572,18 +693,36 @@ async fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result
 
 /// The setting is the truth and the OS registration follows it. Writing one
 /// without the other is how a toggle ends up lying about what the machine
-/// will actually do.
-#[tauri::command]
-fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
-    let mut config = settings::load(&app);
+/// will actually do. Both the toggle and the MCP `set_config` handler come
+/// through here; `record_as` is None when the caller has already recorded
+/// the write, so the change is ledgered once rather than twice.
+pub(crate) fn set_launch_at_login_inner(
+    app: &tauri::AppHandle,
+    enabled: bool,
+    record_as: Option<&str>,
+) -> Result<(), String> {
+    let mut config = settings::load(app);
     config.launch_at_login = enabled;
-    settings::save(&app, &config).map_err(|e| e.to_string())?;
+    match record_as {
+        Some(action) => save_settings_recorded(
+            &settings::config_dir(app),
+            config.folder.clone().as_deref(),
+            action,
+            &config,
+        )?,
+        None => settings::save(app, &config).map_err(|e| e.to_string())?,
+    }
     let manager = app.autolaunch();
     if enabled {
         manager.enable().map_err(|e| e.to_string())
     } else {
         manager.disable().map_err(|e| e.to_string())
     }
+}
+
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    set_launch_at_login_inner(&app, enabled, Some("set_launch_at_login"))
 }
 
 #[cfg(test)]
@@ -611,6 +750,93 @@ mod tests {
     #[test]
     fn an_unknown_target_opens_nothing_rather_than_guessing() {
         assert_eq!(target_path(Path::new("/tmp/ac"), date(), "ledger"), None);
+    }
+
+    fn entries_in(folder: &Path) -> String {
+        let path = ledger::ledger_path(folder, chrono::Local::now().date_naive());
+        std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_settings_write_is_recorded_once_with_the_previous_file_as_its_input() {
+        let config = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let previous = settings::Settings::default();
+        settings::write_to(&config.path().join("settings.json"), &previous).unwrap();
+        let before = ledger::hash_file(&config.path().join("settings.json")).unwrap();
+
+        let next = settings::Settings {
+            interval_secs: 30,
+            ..previous
+        };
+        save_settings_recorded(config.path(), Some(folder.path()), "set_settings", &next).unwrap();
+
+        assert_eq!(
+            settings::read_from(&config.path().join("settings.json")).interval_secs,
+            30
+        );
+        let text = entries_in(folder.path());
+        assert_eq!(text.matches("\n## ").count(), 1, "exactly one entry");
+        assert!(text.contains("set_settings"));
+        assert!(text.contains("- trigger: settings"));
+        assert!(text.contains("- disposition: applied"));
+        assert!(
+            text.contains(&before.sha256),
+            "the input is the file as it was before the write"
+        );
+        assert!(text.contains("\"interval_secs\": 30"));
+    }
+
+    #[test]
+    fn the_launch_at_login_write_is_recorded_under_its_own_action() {
+        let config = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let next = settings::Settings {
+            launch_at_login: false,
+            ..settings::Settings::default()
+        };
+        save_settings_recorded(
+            config.path(),
+            Some(folder.path()),
+            "set_launch_at_login",
+            &next,
+        )
+        .unwrap();
+
+        let text = entries_in(folder.path());
+        assert_eq!(text.matches("\n## ").count(), 1);
+        assert!(text.contains("set_launch_at_login"));
+        // No file existed to hash, so the entry names no input rather than
+        // inventing one.
+        assert!(!text.contains("- input: "));
+    }
+
+    #[test]
+    fn an_engine_test_is_recorded_with_its_output_and_its_failures() {
+        let folder = tempfile::tempdir().unwrap();
+        let engine_config = settings::Engine {
+            label: "Claude Code".to_string(),
+            command: "/bin/echo".to_string(),
+            args: Vec::new(),
+            timeout_secs: 60,
+        };
+        ledger_engine_test(folder.path(), &engine_config, &Ok("ok".to_string()));
+        let text = entries_in(folder.path());
+        assert_eq!(text.matches("\n## ").count(), 1);
+        assert!(text.contains("engine_test"));
+        assert!(text.contains("- trigger: on demand"));
+        assert!(text.contains("- engine: Claude Code"));
+        assert!(text.contains("- disposition: accepted"));
+        assert!(text.contains("ok"));
+
+        ledger_engine_test(
+            folder.path(),
+            &engine_config,
+            &Err("not logged in".to_string()),
+        );
+        let text = entries_in(folder.path());
+        assert_eq!(text.matches("\n## ").count(), 2);
+        assert!(text.contains("failed: not logged in"));
     }
 
     #[test]
@@ -939,6 +1165,7 @@ pub fn run() {
             job_status,
             job_state,
             engine_detect,
+            refresh_engine_env,
             engine_test,
             engine_auth,
             get_settings,
@@ -969,6 +1196,15 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.manage(capture::CaptureState::new());
+            app.manage(EngineEnv::default());
+            {
+                // Warm the login-shell environment off the launch path: it
+                // costs about half a second and nothing needs it yet.
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let _ = engine_env(&handle);
+                });
+            }
             {
                 // The schedule's own memory: without it every launch looks
                 // overdue and fires the backfill a minute after startup.

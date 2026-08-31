@@ -161,6 +161,7 @@ fn record_in_ledger(folder: &Path, entry: &ledger::Entry) {
 /// validate, write, ledger. Every path through this function writes exactly
 /// one ledger entry, and every failure returns a sentence a person can act
 /// on.
+#[allow(clippy::too_many_arguments)]
 pub fn summarise_day(
     folder: &Path,
     engine_config: &settings::Engine,
@@ -168,6 +169,7 @@ pub fn summarise_day(
     date: NaiveDate,
     trigger: ledger::Trigger,
     reject_dir: &Path,
+    env: &std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
     let day_path = writer::file_path(folder, date);
     let day_markdown = std::fs::read_to_string(&day_path)
@@ -191,9 +193,8 @@ pub fn summarise_day(
     };
 
     let prompt = summarise::build_prompt(template, date, &day_markdown);
-    let env = engine::login_shell_env();
 
-    let output = match engine::run_with_env(engine_config, &prompt, &env) {
+    let output = match engine::run_with_env(engine_config, &prompt, env) {
         Ok(output) => output,
         Err(error) => {
             let message = error.to_string();
@@ -246,6 +247,7 @@ pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Re
         date,
         trigger,
         &reject_dir,
+        &crate::engine_env(app),
     )
 }
 
@@ -573,6 +575,12 @@ mod tests {
 
     use tempfile::tempdir;
 
+    /// A stub engine is an absolute path, so the environment only has to
+    /// be a plausible one rather than the user's own.
+    fn test_env() -> std::collections::HashMap<String, String> {
+        std::collections::HashMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())])
+    }
+
     fn stub_engine(command: &str, args: &[&str]) -> crate::settings::Engine {
         crate::settings::Engine {
             label: "stub".to_string(),
@@ -624,6 +632,7 @@ mod tests {
             day(2026, 8, 28),
             crate::ledger::Trigger::Schedule,
             rejects.path(),
+            &test_env(),
         )
         .unwrap_err();
 
@@ -650,6 +659,7 @@ mod tests {
             day(2026, 8, 28),
             crate::ledger::Trigger::Schedule,
             rejects.path(),
+            &test_env(),
         )
         .unwrap_err();
 
@@ -675,6 +685,7 @@ mod tests {
             day(2026, 8, 28),
             crate::ledger::Trigger::OnDemand,
             rejects.path(),
+            &test_env(),
         )
         .unwrap();
 
