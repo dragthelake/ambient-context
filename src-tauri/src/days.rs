@@ -63,6 +63,79 @@ pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
     std::fs::read_to_string(summarise::summary_path(folder, date)).ok()
 }
 
+pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
+    std::fs::read_to_string(summarise::summary_path(folder, date)).ok()
+}
+
+/// One block as the Raw view shows it. Times stay as the `HH:MM` strings
+/// the writer wrote, because that is what is displayed and reparsing them
+/// into a `DateTime` would need the day's date and gain nothing.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct RawBlock {
+    pub start: String,
+    pub end: String,
+    pub app: String,
+    pub title: Option<String>,
+    pub file: Option<String>,
+    pub url: Option<String>,
+    pub lines: Vec<String>,
+}
+
+/// Splits `## HH:MM–HH:MM · App · Title` on the separators the writer uses:
+/// an en dash between the times and a middle dot between the fields. The
+/// title is whatever is left after the app, separators and all, because a
+/// Slack window title contains middle dots of its own.
+fn parse_heading(line: &str) -> Option<(String, String, String, Option<String>)> {
+    let rest = line.strip_prefix("## ")?;
+    let mut fields = rest.splitn(3, '\u{00b7}');
+    let times = fields.next()?.trim();
+    let app = fields.next()?.trim();
+    let title = fields.next().map(str::trim).filter(|t| !t.is_empty());
+    let (start, end) = times.split_once('\u{2013}')?;
+    let start = start.trim();
+    let end = end.trim();
+    if start.len() != 5 || end.len() != 5 || app.is_empty() {
+        return None;
+    }
+    Some((
+        start.to_string(),
+        end.to_string(),
+        app.to_string(),
+        title.map(str::to_string),
+    ))
+}
+
+pub fn parse_blocks(day_text: &str) -> Vec<RawBlock> {
+    let mut blocks: Vec<RawBlock> = Vec::new();
+    for line in day_text.lines() {
+        if line.starts_with("## ") {
+            if let Some((start, end, app, title)) = parse_heading(line) {
+                blocks.push(RawBlock {
+                    start,
+                    end,
+                    app,
+                    title,
+                    file: None,
+                    url: None,
+                    lines: Vec::new(),
+                });
+            }
+            continue;
+        }
+        let Some(block) = blocks.last_mut() else {
+            continue; // frontmatter, or anything before the first heading
+        };
+        if let Some(path) = line.strip_prefix("file: ") {
+            block.file = Some(path.to_string());
+        } else if let Some(url) = line.strip_prefix("url: ") {
+            block.url = Some(url.to_string());
+        } else if !line.trim().is_empty() {
+            block.lines.push(line.to_string());
+        }
+    }
+    blocks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,5 +246,68 @@ mod tests {
     #[test]
     fn a_folder_that_does_not_exist_lists_nothing_rather_than_panicking() {
         assert!(list_days(std::path::Path::new("/nope/not/here")).is_empty());
+    }
+
+    const DAY: &str = "---\ndate: 2026-08-25\ncaptured_by: Ambient Context 0.3.0\n---\n\n## 09:14\u{2013}09:41 \u{00b7} Linear \u{00b7} YN-102 Proposal protocol\n\nfile: /Users/x/report.pdf\nurl: https://linear.app/empty/issue/YN-102\n\nread the issue\nwrote a comment\n\n## 09:41\u{2013}10:02 \u{00b7} Safari\n\nsome page text\n\n## 10:02\u{2013}10:20 \u{00b7} Slack \u{00b7} #empty-build \u{00b7} thread\n";
+
+    #[test]
+    fn parses_every_block_in_a_day() {
+        let blocks = parse_blocks(DAY);
+        assert_eq!(blocks.len(), 3);
+    }
+
+    #[test]
+    fn parses_the_heading_into_times_app_and_title() {
+        let block = &parse_blocks(DAY)[0];
+        assert_eq!(block.start, "09:14");
+        assert_eq!(block.end, "09:41");
+        assert_eq!(block.app, "Linear");
+        assert_eq!(block.title.as_deref(), Some("YN-102 Proposal protocol"));
+    }
+
+    #[test]
+    fn a_block_with_no_title_has_none() {
+        let block = &parse_blocks(DAY)[1];
+        assert_eq!(block.app, "Safari");
+        assert_eq!(block.title, None);
+    }
+
+    #[test]
+    fn a_title_containing_the_separator_is_kept_whole() {
+        let block = &parse_blocks(DAY)[2];
+        assert_eq!(block.app, "Slack");
+        assert_eq!(block.title.as_deref(), Some("#empty-build \u{00b7} thread"));
+    }
+
+    #[test]
+    fn references_are_lifted_out_of_the_body() {
+        let block = &parse_blocks(DAY)[0];
+        assert_eq!(block.file.as_deref(), Some("/Users/x/report.pdf"));
+        assert_eq!(
+            block.url.as_deref(),
+            Some("https://linear.app/empty/issue/YN-102")
+        );
+        assert_eq!(
+            block.lines,
+            vec!["read the issue".to_string(), "wrote a comment".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_headings_only_block_has_no_lines() {
+        let block = &parse_blocks(DAY)[2];
+        assert!(block.lines.is_empty());
+    }
+
+    #[test]
+    fn frontmatter_never_becomes_a_block() {
+        assert!(parse_blocks(DAY).iter().all(|b| !b.app.contains("captured_by")));
+    }
+
+    #[test]
+    fn an_empty_or_malformed_file_yields_no_blocks() {
+        assert!(parse_blocks("").is_empty());
+        assert!(parse_blocks("## not a heading we wrote\n\nbody\n").is_empty());
+        assert!(parse_blocks("## 09:14 \u{00b7} Linear\n").is_empty());
     }
 }
