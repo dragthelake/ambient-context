@@ -161,3 +161,61 @@ npm run build:
 303 tests total across the lib and two integration suites; zero failures, zero
 ignored (the two `tools/call` dispatch tests deferred in Task 6 were unignored
 in Task 9 as planned).
+
+## Fixes (fix/rust)
+
+The Rust half of the fix brief from [[Review - V1 build]], on branch
+`fix/rust` off `v1` at `ae81389`. One commit per numbered item, each gated by
+`cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
+against a clean tree. Nothing under `src/` was touched; the frontend half is
+another branch.
+
+| Item | Commit | What changed |
+|---|---|---|
+| 3 | `0fad84c` | `summarise_now` queues a job through `JobQueue` instead of calling `run_one`, so on-demand and scheduled runs are serial. New commands `summarise_now(date) -> { job_id }` and `job_state(job_id) -> { id, date, status, stderr }`; `job_status` (last outcome) is unchanged for the tray. The queue wakes the runner with a condvar, so a click starts in about a second rather than waiting out the tick, and `JobQueue::find` resolves any job id, queued or finished. `JobState.last_run` is now persisted to `<app_data_dir>/jobs.json` and read at startup. |
+| 7, 8 | `53a2791` | `capture::stop` returns only once the poll thread has left, waiting on a live-thread count and condvar with a five second bound and a line on stderr if it expires; `apply_settings_change` restarts only when the stop succeeded, and only for the three knobs the poll loop reads once (interval, dwell, similarity). `set_settings` now loads the previous settings, saves, and calls the same `apply_settings_change` the MCP path calls. |
+| 9, 10 | `416c1a6` | `set_settings` and `set_launch_at_login` write a `Trigger::Settings` entry through one helper, with the previous `settings.json` hashed as the input and the entry written after the save. `engine_test` writes a `Trigger::OnDemand` entry naming the engine, the output verbatim, and `accepted` or `failed`. `control.rs` now saves before it ledgers in `set_config` and `write_rules`, hashing the input beforehand, and `start_capture`/`stop_capture` only record a write they actually made. The login-shell environment is cached in `EngineEnv` managed state, warmed on a background thread at startup and rebuilt by a new `refresh_engine_env` command; `engine_detect`, `engine_test`, `engine_auth` and the job runner all read the cached copy. |
+| 11 | `9c3d549` | `rules::load_result` returns the parse failure; `load` stays as the lenient wrapper for capture, which now logs a broken file once per distinct error. `get_rules` returns `error: string \| null` beside an empty list, and every write path refuses with that same sentence rather than overwriting the file. |
+| 12 | `7bb9501` | `set_launch_at_login_inner` saves and registers, and both the Tauri command and the `set_config` handler call it. `set_config` passes `record_as: None` because its own entry already records the write, so it is ledgered once. |
+| 15 | `3a40680` | `day_prompt` removed from `Settings`, and so from `get_config`. It was not in `SETTABLE_KEYS` and not in `docs/mcp.md`. A settings file that still carries it loads with its other values intact. |
+| 5 | `d5a2679` | `heading_time` asks for its five bytes with `get(0..5)` instead of slicing, so a heading beginning with a multibyte character is not a time rather than a panic in the MCP process. |
+| 6 | `af0b504` | `PendingOpenDay` managed state holds the date `open_day` asked for; `open_main_window_on` stores it, opens or focuses the window and still emits `open-day` for the already-open case. New command `take_pending_day() -> Option<String>` returns and clears it. |
+| — | `2ab6320` | `ensure_agents_file` replaces only a file byte-identical to a bundled version (current, or one of the two hashes earlier releases shipped). Anything else is the user's: it stands, and the new version is written once to `AGENTS.md.new` beside it with a line on stderr. |
+| — | `ef04ffa` | Accepted control-socket connections get a ten second read timeout and a one megabyte line cap; a request over the cap is answered `bad_request` and the connection closed, because the tail of an oversized line cannot be told apart from the next request. |
+| — | `c3ad1dd` | New command `open_prompt_in_editor()`, sharing `open_path_in_editor` with `open_in_editor`. A customised prompt opens directly. With no customised prompt it opens a read-only copy of the bundled text in the temp directory instead of seeding the prompt file, because writing that file would make `prompt::is_customised` true without the user having changed anything and the Settings panel would then say they have their own prompt when they do not. Editing is done in Settings, through `set_prompt`. No ledger entry: it writes nothing the user did not already have. |
+
+### Testing note
+
+The three Tauri commands whose fixes are ledger writes cannot be invoked
+without an app handle, and a mock Tauri app resolves its config directory to
+the real one. Each command's body is therefore a function taking explicit
+paths (`save_settings_recorded`, `ledger_engine_test`, `change_rules`,
+`rules_payload`, `prompt_editor_target`), and the tests run those against
+tempdirs and assert on the ledger file. The capture handshake is tested
+through `spawn_tracked` with a fake body that blocks for 300ms, which is the
+behaviour of the real reader without needing a display.
+
+### Evidence
+
+Run at `c3ad1dd`, the last code commit; this document is the commit on top of
+it and changes no code.
+
+```
+git rev-parse HEAD
+c3ad1dd39a1b241f7bbb5a86efc6966c559b915b
+
+git status --porcelain
+(empty)
+
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+Finished `dev` profile [unoptimized + debuginfo] target(s)
+test result: ok. 326 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.19s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.82s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+```
+
+331 tests across the lib and the two integration suites, up from 303, with no
+test deleted, ignored or weakened. `npm run build` is not part of this gate:
+the frontend is another branch's work and this one changed no TypeScript.
