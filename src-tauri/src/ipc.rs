@@ -83,7 +83,7 @@ pub fn socket_path(app_data_dir: &Path) -> PathBuf {
     app_data_dir.join("control.sock")
 }
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::Arc;
@@ -129,14 +129,44 @@ where
     }
 }
 
+/// A client that opens a connection and then says nothing holds a thread
+/// forever. Ten seconds is longer than any request takes to arrive and
+/// short enough that a wedged client releases the thread; a client makes
+/// one connection per call, so this never cuts a live session short.
+pub const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// The longest request line the server will read. A megabyte is far more
+/// than any tool call needs and far less than a client can use to exhaust
+/// the app's memory.
+pub const MAX_LINE_BYTES: u64 = 1024 * 1024;
+
 fn serve_connection<H: Fn(Request) -> Response>(stream: UnixStream, handler: &H) {
     let Ok(clone) = stream.try_clone() else {
         return;
     };
-    let reader = BufReader::new(clone);
+    let _ = clone.set_read_timeout(Some(READ_TIMEOUT));
+    let mut reader = BufReader::new(clone);
     let mut writer = stream;
-    for line in reader.lines() {
-        let Ok(line) = line else { return };
+    loop {
+        let mut line = String::new();
+        let read = (&mut reader).take(MAX_LINE_BYTES + 1).read_line(&mut line);
+        let Ok(count) = read else { return };
+        if count == 0 {
+            return;
+        }
+        if count as u64 > MAX_LINE_BYTES {
+            // The rest of the oversized line is still in the stream and
+            // cannot be told apart from the next request, so answer and
+            // close rather than guess.
+            let _ = write_response(
+                &mut writer,
+                &Response::err(
+                    "bad_request",
+                    format!("A request may be at most {MAX_LINE_BYTES} bytes."),
+                ),
+            );
+            return;
+        }
         if line.trim().is_empty() {
             continue;
         }
@@ -144,16 +174,20 @@ fn serve_connection<H: Fn(Request) -> Response>(stream: UnixStream, handler: &H)
             Ok(request) => handler(request),
             Err(error) => Response::err("bad_request", error.to_string()),
         };
-        let mut body = serde_json::to_string(&response).unwrap_or_else(|_| {
-            r#"{"status":"err","body":{"code":"io","message":"the response could not be serialised"}}"#
-                .to_string()
-        });
-        body.push('\n');
-        if writer.write_all(body.as_bytes()).is_err() {
+        if write_response(&mut writer, &response).is_err() {
             return;
         }
-        let _ = writer.flush();
     }
+}
+
+fn write_response(writer: &mut UnixStream, response: &Response) -> std::io::Result<()> {
+    let mut body = serde_json::to_string(response).unwrap_or_else(|_| {
+        r#"{"status":"err","body":{"code":"io","message":"the response could not be serialised"}}"#
+            .to_string()
+    });
+    body.push('\n');
+    writer.write_all(body.as_bytes())?;
+    writer.flush()
 }
 
 #[derive(Debug)]
@@ -392,6 +426,23 @@ mod tests {
         let _socket = echo_server(dir.path());
         let error = bind(&socket_path(dir.path())).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::AddrInUse);
+    }
+
+    #[test]
+    fn a_request_over_the_line_cap_is_refused_rather_than_read_whole() {
+        use std::io::{BufRead, BufReader, Write};
+        let dir = tempfile::tempdir().unwrap();
+        let socket = echo_server(dir.path());
+        let stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut writer = stream;
+        let huge = vec![b'x'; (MAX_LINE_BYTES + 16) as usize];
+        // A client that never sends a newline must not be able to grow the
+        // server's memory a byte at a time.
+        let _ = writer.write_all(&huge);
+        let mut answer = String::new();
+        reader.read_line(&mut answer).unwrap();
+        assert!(answer.contains("bad_request"), "{answer}");
     }
 
     #[test]
