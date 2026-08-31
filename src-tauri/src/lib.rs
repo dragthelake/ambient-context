@@ -1,4 +1,5 @@
 mod capture;
+mod control;
 mod days;
 mod engine;
 mod ipc;
@@ -17,7 +18,7 @@ mod tray;
 mod writer;
 
 use serde::Serialize;
-use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
@@ -626,6 +627,43 @@ fn sync_activation_policy(app: &tauri::AppHandle, opening: bool) {
     let _ = (app, opening);
 }
 
+/// Opens the browsing window on a given day, for MCP `open_day` and any
+/// later handoff that ends "check it looks right". The window is told which
+/// day to show through an event the Day view listens for.
+pub fn open_main_window_on(app: &tauri::AppHandle, date: chrono::NaiveDate) {
+    open_main_window(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.emit("open-day", date.to_string());
+    }
+}
+
+/// Applies a settings change written by any surface: capture restarts with
+/// the new recording knobs if it is running, and nothing else needs a
+/// restart because every other consumer re-reads settings as it goes.
+pub fn apply_settings_change(
+    app: &tauri::AppHandle,
+    previous: &settings::Settings,
+    next: &settings::Settings,
+) {
+    let recording_changed = previous.interval_secs != next.interval_secs
+        || previous.min_dwell_secs != next.min_dwell_secs
+        || previous.similarity_threshold != next.similarity_threshold
+        || previous.max_block_chars != next.max_block_chars
+        || previous.write_references != next.write_references
+        || previous.extra_redaction_patterns != next.extra_redaction_patterns;
+    if !recording_changed {
+        return;
+    }
+    let state = app.state::<capture::CaptureState>().inner().clone();
+    if state.is_running() && next.folder.is_some() {
+        capture::stop(&state);
+        // The poll thread notices the stop within about 100ms; start
+        // refuses to run until it has, so give it that moment.
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        capture::start(app.clone(), &state, next.clone());
+    }
+}
+
 pub fn open_setup_window(app: &tauri::AppHandle) {
     sync_activation_policy(app, true);
     if let Some(window) = app.get_webview_window("setup") {
@@ -771,8 +809,26 @@ pub fn run() {
 
             app.manage(capture::CaptureState::new());
             app.manage(jobs::JobState::new());
+            app.manage(jobs::JobQueue::default());
             app.manage(ProposalStore::default());
             jobs::start(app.handle().clone());
+            // The control socket, for the mcp subcommand. A failure to bind is
+            // reported to stderr and nothing else: an app that will not start
+            // because an MCP socket is busy is worse than an app with no MCP.
+            {
+                let handle = app.handle().clone();
+                let data_dir = handle.path().app_data_dir().expect("app data dir");
+                match ipc::bind(&ipc::socket_path(&data_dir)) {
+                    Ok(listener) => {
+                        std::thread::spawn(move || {
+                            ipc::serve(listener, move |request| {
+                                control::handle(&handle, request)
+                            });
+                        });
+                    }
+                    Err(error) => eprintln!("control socket unavailable: {error}"),
+                }
+            }
             tray::build(app.handle())?;
 
             let config = settings::load(app.handle());

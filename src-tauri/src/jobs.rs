@@ -236,7 +236,9 @@ fn tick(app: &AppHandle) {
         &summarise::list_captured(&folder),
         &summarise::list_summarised(&folder),
     );
-    if pending.is_empty() {
+
+    let queued: Vec<QueuedJob> = app.state::<JobQueue>().drain();
+    if pending.is_empty() && queued.is_empty() {
         return;
     }
 
@@ -259,14 +261,145 @@ fn tick(app: &AppHandle) {
             break;
         }
     }
+    // Queued on-demand runs, from the window and from MCP clients named in
+    // each job's trigger. A queued failure only stops its own job.
+    for job in queued {
+        let date = job.date;
+        app.state::<JobQueue>().record(&job.id, JobStatus::Running);
+        let result = run_one(app, date, job.trigger);
+        let status = match &result {
+            Ok(()) => JobStatus::Done,
+            Err(stderr) => JobStatus::Failed {
+                stderr: stderr.clone(),
+            },
+        };
+        app.state::<JobQueue>().record(&job.id, status);
+        let outcome = Outcome {
+            when: Local::now(),
+            date,
+            ok: result.is_ok(),
+            message: match &result {
+                Ok(()) => format!("Summarised {date}"),
+                Err(message) => format!("{date} failed: {message}"),
+            },
+        };
+        state.record(outcome);
+    }
     state.set_running(false);
     crate::tray::refresh(app, app.state::<crate::capture::CaptureState>().is_running());
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JobStatus {
+    Queued,
+    Running,
+    Done,
+    Failed { stderr: String },
+}
+
+/// Identifies one queued run. A newtype over the string the wire carries.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct JobId(pub String);
+
+impl std::fmt::Display for JobId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct JobSummary {
+    pub id: String,
+    pub date: NaiveDate,
+    pub status: JobStatus,
+}
+
+#[derive(Debug)]
+struct QueuedJob {
+    id: String,
+    date: NaiveDate,
+    trigger: ledger::Trigger,
+}
+
+/// The on-demand queue. Control and MCP surfaces push into it; the tick
+/// drains it when nothing else is running, so engine work stays serial and
+/// off the capture thread.
+#[derive(Default)]
+pub struct JobQueue {
+    queue: Mutex<std::collections::VecDeque<QueuedJob>>,
+    history: Mutex<Vec<JobSummary>>,
+    counter: std::sync::atomic::AtomicU64,
+}
+
+impl JobQueue {
+    pub fn for_test() -> Self {
+        Self::default()
+    }
+
+    fn push(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
+        use std::sync::atomic::Ordering;
+        let n = self.counter.fetch_add(1, Ordering::SeqCst);
+        let id = format!("job-{n}");
+        self.queue
+            .lock()
+            .expect("job queue")
+            .push_back(QueuedJob {
+                id: id.clone(),
+                date,
+                trigger,
+            });
+        self.history
+            .lock()
+            .expect("job history")
+            .push(JobSummary {
+                id: id.clone(),
+                date,
+                status: JobStatus::Queued,
+            });
+        JobId(id)
+    }
+
+    /// The trigger travels with the job because the runner writes the ledger
+    /// entry, and an MCP-triggered summary must name the client that asked.
+    pub fn enqueue_summarise_with(
+        &self,
+        date: NaiveDate,
+        trigger: ledger::Trigger,
+    ) -> JobId {
+        self.push(date, trigger)
+    }
+
+    pub fn enqueue_summarise(&self, date: NaiveDate) -> JobId {
+        self.enqueue_summarise_with(date, ledger::Trigger::OnDemand)
+    }
+
+    /// The eight most recent jobs, newest first. Eight because it is more than
+    /// a day's worth of catch-up and short enough to put in a tool result.
+    pub fn recent(&self) -> Vec<JobSummary> {
+        let history = self.history.lock().expect("job history");
+        history.iter().rev().take(8).cloned().collect()
+    }
+
+    /// Takes every queued job, leaving the queue empty. Called by the tick
+    /// when the runner is idle.
+    fn drain(&self) -> Vec<QueuedJob> {
+        let mut queue = self.queue.lock().expect("job queue");
+        std::mem::take(&mut *queue).into_iter().collect()
+    }
+
+    fn record(&self, id: &str, status: JobStatus) {
+        let mut history = self.history.lock().expect("job history");
+        if let Some(job) = history.iter_mut().find(|job| job.id == id) {
+            job.status = status;
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Local, NaiveDate, TimeZone};
+    use chrono::{Datelike, Local, NaiveDate, TimeZone};
 
     fn at(y: i32, m: u32, d: u32, hh: u32, mm: u32) -> chrono::DateTime<Local> {
         Local.with_ymd_and_hms(y, m, d, hh, mm, 0).unwrap()
@@ -477,5 +610,25 @@ mod tests {
         assert!(text.contains("Kept the long block."));
         assert!(text.contains("- trigger: on demand"));
         assert!(text.contains("sha256 "), "inputs are pinned by hash");
+    }
+
+    #[test]
+    fn the_bare_enqueue_records_an_on_demand_trigger() {
+        let queue = JobQueue::for_test();
+        let id = queue.enqueue_summarise(chrono::NaiveDate::from_ymd_opt(2026, 8, 30).unwrap());
+        let recent = queue.recent();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, id.to_string());
+    }
+
+    #[test]
+    fn recent_returns_the_newest_first_and_caps_at_eight() {
+        let queue = JobQueue::for_test();
+        for day in 1..=10 {
+            queue.enqueue_summarise(chrono::NaiveDate::from_ymd_opt(2026, 8, day).unwrap());
+        }
+        let recent = queue.recent();
+        assert_eq!(recent.len(), 8);
+        assert_eq!(recent[0].date.day(), 10);
     }
 }
