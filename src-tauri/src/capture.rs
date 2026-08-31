@@ -14,6 +14,32 @@ use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
+/// Loads the rules for a poll, reporting a broken file to stderr once per
+/// distinct error rather than on every poll. Returns the rules in force
+/// and whether this call was the one that reported.
+fn load_rules_for_capture(
+    config_dir: &Path,
+    reported: &mut Option<String>,
+) -> (rules::Rules, bool) {
+    match rules::load_result(config_dir) {
+        Ok(set) => {
+            *reported = None;
+            (set, false)
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let fresh = reported.as_deref() != Some(message.as_str());
+            if fresh {
+                eprintln!(
+                    "[capture] rules.json cannot be read, so no user rules are in force: {message}"
+                );
+                *reported = Some(message);
+            }
+            (rules::Rules::default(), fresh)
+        }
+    }
+}
+
 fn rules_mtime(config_dir: &Path) -> Option<std::time::SystemTime> {
     std::fs::metadata(crate::rules::rules_path(config_dir))
         .and_then(|m| m.modified())
@@ -103,7 +129,8 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         let mut failed_reads: u32 = 0;
         let mut counter_day = Local::now().date_naive();
         let config_dir = settings::config_dir(&app);
-        let mut rules = rules::load(&config_dir);
+        let mut rules_error: Option<String> = None;
+        let (mut rules, _) = load_rules_for_capture(&config_dir, &mut rules_error);
         let mut rules_stamp = rules_mtime(&config_dir);
         let mut extra = redact::compile_extra(&settings.extra_redaction_patterns);
         let mut extra_source = settings.extra_redaction_patterns.clone();
@@ -144,7 +171,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             let stamp = rules_mtime(&config_dir);
             if stamp != rules_stamp {
                 rules_stamp = stamp;
-                rules = rules::load(&config_dir);
+                (rules, _) = load_rules_for_capture(&config_dir, &mut rules_error);
             }
             let current = settings::load(&app);
             if current.extra_redaction_patterns != extra_source {
@@ -288,6 +315,25 @@ fn wait_until_stopped(state: &CaptureState, timeout: Duration) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broken_rules_file_is_reported_once_and_leaves_capture_running() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(crate::rules::rules_path(dir.path()), "{ not json").unwrap();
+        let mut reported = None;
+
+        let (set, fresh) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(set.rules.is_empty());
+        assert!(fresh, "the first poll reports it");
+
+        let (_, again) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(!again, "the same error is not reported on every poll");
+
+        crate::rules::save(dir.path(), &crate::rules::Rules::default()).unwrap();
+        let (_, after_fix) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(!after_fix);
+        assert!(reported.is_none(), "a fixed file clears the reported error");
+    }
 
     #[test]
     fn a_new_state_is_not_running_and_has_no_blocks() {

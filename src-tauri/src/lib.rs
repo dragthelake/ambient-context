@@ -216,16 +216,50 @@ struct RulesPayload {
     rules: Vec<rules::Rule>,
     built_ins: Vec<rules::BuiltIn>,
     next_id: String,
+    /// Why rules.json could not be read, when it could not. The list is
+    /// empty in that case, and it is not empty because the user has no
+    /// rules: Settings has to be able to tell those two apart.
+    error: Option<String>,
+}
+
+fn rules_payload(config_dir: &std::path::Path) -> RulesPayload {
+    match rules::load_result(config_dir) {
+        Ok(loaded) => RulesPayload {
+            next_id: rules::new_id(&loaded),
+            rules: loaded.rules,
+            built_ins: rules::built_ins(),
+            error: None,
+        },
+        Err(error) => RulesPayload {
+            next_id: rules::new_id(&rules::Rules::default()),
+            rules: Vec::new(),
+            built_ins: rules::built_ins(),
+            error: Some(error.to_string()),
+        },
+    }
 }
 
 #[tauri::command]
 fn get_rules(app: tauri::AppHandle) -> RulesPayload {
-    let loaded = rules::load(&settings::config_dir(&app));
-    RulesPayload {
-        next_id: rules::new_id(&loaded),
-        rules: loaded.rules,
-        built_ins: rules::built_ins(),
-    }
+    rules_payload(&settings::config_dir(&app))
+}
+
+/// Loads, mutates, validates and saves. A rules.json that will not parse
+/// refuses the write rather than being overwritten: the file may be the
+/// only copy of rules the user wrote by hand, and a typo in it is not
+/// permission to delete them.
+fn change_rules(
+    config_dir: &std::path::Path,
+    change: impl FnOnce(&mut rules::Rules) -> Result<(), rules::RuleError>,
+) -> Result<(rules::Rules, Vec<ledger::Input>), String> {
+    let mut loaded = rules::load_result(config_dir).map_err(|e| e.to_string())?;
+    change(&mut loaded).map_err(|e| e.to_string())?;
+    rules::validate(&loaded).map_err(|e| e.to_string())?;
+    let before = ledger::hash_file(&rules::rules_path(config_dir))
+        .map(|input| vec![input])
+        .unwrap_or_default();
+    rules::save(config_dir, &loaded).map_err(|e| e.to_string())?;
+    Ok((loaded, before))
 }
 
 /// One write path for all three verbs: mutate, validate, save, ledger.
@@ -235,13 +269,7 @@ fn write_rules(
     change: impl FnOnce(&mut rules::Rules) -> Result<(), rules::RuleError>,
 ) -> Result<RulesPayload, String> {
     let config_dir = settings::config_dir(app);
-    let mut loaded = rules::load(&config_dir);
-    change(&mut loaded).map_err(|e| e.to_string())?;
-    rules::validate(&loaded).map_err(|e| e.to_string())?;
-    let before = ledger::hash_file(&rules::rules_path(&config_dir))
-        .map(|input| vec![input])
-        .unwrap_or_default();
-    rules::save(&config_dir, &loaded).map_err(|e| e.to_string())?;
+    let (loaded, before) = change_rules(&config_dir, change)?;
     if let Some(folder) = settings::load(app).folder {
         let _ = ledger::append(
             &folder,
@@ -263,6 +291,7 @@ fn write_rules(
         next_id: rules::new_id(&loaded),
         rules: loaded.rules,
         built_ins: rules::built_ins(),
+        error: None,
     })
 }
 
@@ -755,6 +784,47 @@ mod tests {
     fn entries_in(folder: &Path) -> String {
         let path = ledger::ledger_path(folder, chrono::Local::now().date_naive());
         std::fs::read_to_string(path).unwrap_or_default()
+    }
+
+    #[test]
+    fn a_rules_file_that_will_not_parse_is_reported_rather_than_read_as_no_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(rules::rules_path(dir.path()), "{ not json").unwrap();
+
+        let payload = rules_payload(dir.path());
+        assert!(payload.rules.is_empty());
+        let error = payload.error.expect("the parse failure");
+        assert!(error.contains("not a rules file"), "{error}");
+        assert!(!payload.built_ins.is_empty(), "the built-ins still show");
+
+        // And a write refuses with the same sentence rather than replacing
+        // the file the user may have hand-edited.
+        let rule = rules::Rule {
+            id: "r1".to_string(),
+            target: rules::Target::App("Linear".to_string()),
+            action: rules::Action::Exclude,
+            note: None,
+        };
+        let refusal = change_rules(dir.path(), |set| set.add(rule)).unwrap_err();
+        assert_eq!(refusal, error);
+        assert_eq!(
+            std::fs::read_to_string(rules::rules_path(dir.path())).unwrap(),
+            "{ not json"
+        );
+    }
+
+    #[test]
+    fn a_write_against_a_readable_rules_file_still_goes_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let rule = rules::Rule {
+            id: "r1".to_string(),
+            target: rules::Target::App("Linear".to_string()),
+            action: rules::Action::Exclude,
+            note: None,
+        };
+        let (saved, _) = change_rules(dir.path(), |set| set.add(rule)).unwrap();
+        assert_eq!(saved.rules.len(), 1);
+        assert!(rules_payload(dir.path()).error.is_none());
     }
 
     #[test]

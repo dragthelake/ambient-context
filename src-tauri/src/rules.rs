@@ -81,15 +81,25 @@ pub fn rules_path(config_dir: &Path) -> PathBuf {
     config_dir.join("rules.json")
 }
 
-/// A missing or unreadable file is an empty rule set. Rules only ever
-/// narrow what is captured, so failing open here loses a protection the
-/// user asked for; that is why `save` writes atomically and why the
-/// settings page shows the parse failure rather than hiding it.
+/// The rules as written, or why they could not be read. A missing file is
+/// an empty rule set, which is the shipped state; a file that will not
+/// parse is an error, because failing open there loses a protection the
+/// user asked for and must be visible rather than silent.
+pub fn load_result(config_dir: &Path) -> Result<Rules, RuleError> {
+    match std::fs::read_to_string(rules_path(config_dir)) {
+        Ok(raw) => parse(&raw),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Rules::default()),
+        Err(error) => Err(RuleError::Invalid(format!(
+            "rules.json could not be read: {error}"
+        ))),
+    }
+}
+
+/// The lenient form, for capture: a broken file means no user rules for
+/// this poll. Every caller that can show the failure to someone uses
+/// `load_result` instead, and capture logs it.
 pub fn load(config_dir: &Path) -> Rules {
-    std::fs::read_to_string(rules_path(config_dir))
-        .ok()
-        .and_then(|raw| parse(&raw).ok())
-        .unwrap_or_default()
+    load_result(config_dir).unwrap_or_default()
 }
 
 pub fn parse(json: &str) -> Result<Rules, RuleError> {
@@ -345,6 +355,39 @@ pub fn decide(rules: &Rules, app: &str, title: Option<&str>, url: Option<&str>) 
         Some(Action::Exclude) => Decision::Exclude,
         Some(Action::HeadingsOnly) => Decision::HeadingsOnly,
         Some(Action::Full) | None => Decision::Full,
+    }
+}
+
+#[cfg(test)]
+mod load_result_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn a_missing_file_is_an_empty_rule_set_rather_than_an_error() {
+        let dir = tempdir().unwrap();
+        assert_eq!(load_result(dir.path()).unwrap(), Rules::default());
+    }
+
+    #[test]
+    fn a_file_that_will_not_parse_is_an_error_rather_than_silence() {
+        let dir = tempdir().unwrap();
+        std::fs::write(rules_path(dir.path()), "{ not json").unwrap();
+        let error = load_result(dir.path()).unwrap_err();
+        assert!(error.to_string().contains("not a rules file"), "{error}");
+        // Capture still has to run, so the lenient form keeps working.
+        assert_eq!(load(dir.path()), Rules::default());
+    }
+
+    #[test]
+    fn a_file_whose_rules_are_invalid_is_also_an_error() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            rules_path(dir.path()),
+            r#"{"rules":[{"id":"","target":{"app":"Linear"},"action":"exclude"}]}"#,
+        )
+        .unwrap();
+        assert!(load_result(dir.path()).is_err());
     }
 }
 

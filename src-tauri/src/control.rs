@@ -352,7 +352,24 @@ pub mod writes {
         let dir = settings::config_dir(app);
         let target = dir.join("rules.json");
         let before = hash_before(&target);
-        let mut set = rules::load(&dir);
+        // A rules.json that will not parse is not permission to replace it.
+        let mut set = match rules::load_result(&dir) {
+            Ok(set) => set,
+            Err(error) => {
+                let reason = error.to_string();
+                ledger_write(
+                    app,
+                    client,
+                    action,
+                    before,
+                    String::new(),
+                    ledger::Disposition::Rejected {
+                        reason: reason.clone(),
+                    },
+                );
+                return Response::err("invalid", reason);
+            }
+        };
         if let Err(error) = mutate(&mut set) {
             let response = rule_refusal(error);
             let reason = match &response {
