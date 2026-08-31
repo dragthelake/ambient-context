@@ -261,6 +261,93 @@ impl Rules {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Decision {
+    Exclude,
+    HeadingsOnly,
+    Full,
+}
+
+/// The host of a URL, lowercased, with any `www.` prefix dropped. Written
+/// by hand rather than pulled in as a crate: the input is a browser's own
+/// address and the parts that matter are the scheme separator, the
+/// credentials, the port and the first path character.
+pub fn domain_of(url: &str) -> Option<String> {
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest)?;
+    let authority = after_scheme
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or(after_scheme);
+    let host = authority
+        .rsplit_once('@')
+        .map(|(_, h)| h)
+        .unwrap_or(authority);
+    let host = host.split(':').next().unwrap_or(host).to_lowercase();
+    if host.is_empty() {
+        return None;
+    }
+    Some(host.strip_prefix("www.").unwrap_or(&host).to_string())
+}
+
+fn host_matches(domain: &str, host: &str) -> bool {
+    let domain = domain.trim().to_lowercase();
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
+fn matches(target: &Target, app: &str, title: Option<&str>, url: Option<&str>) -> bool {
+    let contains = |haystack: &str, needle: &str| {
+        haystack
+            .to_lowercase()
+            .contains(&needle.trim().to_lowercase())
+    };
+    match target {
+        Target::App(pattern) => contains(app, pattern),
+        Target::Title(pattern) => title.is_some_and(|t| contains(t, pattern)),
+        Target::Website(domain) => match url.and_then(domain_of) {
+            Some(host) => host_matches(domain, &host),
+            // No URL was captured, so the title carries the only site
+            // signal available. This can only narrow capture.
+            None => title.is_some_and(|t| contains(t, domain)),
+        },
+    }
+}
+
+/// Higher is more specific. A website or a title names something inside an
+/// application, so both outrank an application rule; a longer pattern is a
+/// narrower substring than a shorter one.
+fn specificity(target: &Target) -> (u8, usize) {
+    let kind = match target {
+        Target::Website(_) => 3,
+        Target::Title(_) => 2,
+        Target::App(_) => 1,
+    };
+    (kind, target.pattern().trim().len())
+}
+
+/// How protective an action is, used only to break an exact specificity
+/// tie. Capturing less on a tie is the safe direction.
+fn protection(action: Action) -> u8 {
+    match action {
+        Action::Exclude => 2,
+        Action::HeadingsOnly => 1,
+        Action::Full => 0,
+    }
+}
+
+pub fn decide(rules: &Rules, app: &str, title: Option<&str>, url: Option<&str>) -> Decision {
+    let winner = rules
+        .rules
+        .iter()
+        .filter(|rule| matches(&rule.target, app, title, url))
+        .max_by_key(|rule| (specificity(&rule.target), protection(rule.action)));
+    match winner.map(|rule| rule.action) {
+        Some(Action::Exclude) => Decision::Exclude,
+        Some(Action::HeadingsOnly) => Decision::HeadingsOnly,
+        Some(Action::Full) | None => Decision::Full,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,5 +513,180 @@ mod tests {
         set.add(rule("r1", Target::App("Slack".to_string()), Action::Exclude))
             .unwrap();
         assert_eq!(new_id(&set), "r2");
+    }
+
+    fn set(rules: Vec<Rule>) -> Rules {
+        let mut out = Rules::default();
+        for r in rules {
+            out.add(r).unwrap();
+        }
+        out
+    }
+
+    #[test]
+    fn no_rules_means_full_capture() {
+        assert_eq!(
+            decide(&Rules::default(), "Linear", Some("YN-102"), None),
+            Decision::Full
+        );
+    }
+
+    #[test]
+    fn an_application_rule_matches_case_insensitively_as_a_substring() {
+        let rules = set(vec![rule(
+            "r1",
+            Target::App("slack".to_string()),
+            Action::Exclude,
+        )]);
+        assert_eq!(
+            decide(&rules, "Slack", Some("#empty-build"), None),
+            Decision::Exclude
+        );
+        assert_eq!(
+            decide(&rules, "Linear", Some("YN-102"), None),
+            Decision::Full
+        );
+    }
+
+    #[test]
+    fn a_website_rule_matches_the_host_and_its_subdomains() {
+        let rules = set(vec![rule(
+            "r1",
+            Target::Website("example.com".to_string()),
+            Action::HeadingsOnly,
+        )]);
+        assert_eq!(
+            decide(
+                &rules,
+                "Safari",
+                Some("Docs"),
+                Some("https://app.example.com/x?y=1")
+            ),
+            Decision::HeadingsOnly
+        );
+        assert_eq!(
+            decide(
+                &rules,
+                "Safari",
+                Some("Docs"),
+                Some("https://notexample.com/x")
+            ),
+            Decision::Full
+        );
+    }
+
+    #[test]
+    fn a_website_rule_falls_back_to_the_title_when_no_url_was_captured() {
+        let rules = set(vec![rule(
+            "r1",
+            Target::Website("example.com".to_string()),
+            Action::Exclude,
+        )]);
+        assert_eq!(
+            decide(&rules, "Arc", Some("Dashboard - example.com"), None),
+            Decision::Exclude
+        );
+        assert_eq!(decide(&rules, "Arc", Some("Dashboard"), None), Decision::Full);
+    }
+
+    #[test]
+    fn a_title_rule_matches_case_insensitively_as_a_substring() {
+        let rules = set(vec![rule(
+            "r1",
+            Target::Title("payroll".to_string()),
+            Action::Exclude,
+        )]);
+        assert_eq!(
+            decide(&rules, "Chrome", Some("Xero Payroll"), None),
+            Decision::Exclude
+        );
+        assert_eq!(decide(&rules, "Chrome", None, None), Decision::Full);
+    }
+
+    #[test]
+    fn a_website_rule_beats_a_broader_application_exclusion() {
+        let rules = set(vec![
+            rule("r1", Target::App("Safari".to_string()), Action::Exclude),
+            rule(
+                "r2",
+                Target::Website("v2.tauri.app".to_string()),
+                Action::Full,
+            ),
+        ]);
+        assert_eq!(
+            decide(
+                &rules,
+                "Safari",
+                Some("Tauri"),
+                Some("https://v2.tauri.app/start/")
+            ),
+            Decision::Full
+        );
+        assert_eq!(
+            decide(&rules, "Safari", Some("Bank"), Some("https://bank.example/")),
+            Decision::Exclude
+        );
+    }
+
+    #[test]
+    fn a_title_rule_beats_a_broader_application_rule() {
+        let rules = set(vec![
+            rule("r1", Target::App("Slack".to_string()), Action::HeadingsOnly),
+            rule("r2", Target::Title("#empty-build".to_string()), Action::Full),
+        ]);
+        assert_eq!(
+            decide(&rules, "Slack", Some("#empty-build"), None),
+            Decision::Full
+        );
+        assert_eq!(
+            decide(&rules, "Slack", Some("#random"), None),
+            Decision::HeadingsOnly
+        );
+    }
+
+    #[test]
+    fn the_longer_pattern_wins_within_the_same_kind_of_target() {
+        let rules = set(vec![
+            rule("r1", Target::Title("Xero".to_string()), Action::Full),
+            rule("r2", Target::Title("Xero Payroll".to_string()), Action::Exclude),
+        ]);
+        assert_eq!(
+            decide(&rules, "Chrome", Some("Xero Payroll"), None),
+            Decision::Exclude
+        );
+        assert_eq!(
+            decide(&rules, "Chrome", Some("Xero Invoices"), None),
+            Decision::Full
+        );
+    }
+
+    #[test]
+    fn an_exact_tie_takes_the_more_protective_action() {
+        // Equal kind, equal pattern length, both matching: capture less.
+        let rules = set(vec![
+            rule("r1", Target::Title("alpha".to_string()), Action::Full),
+            rule("r2", Target::Title("omega".to_string()), Action::Exclude),
+        ]);
+        assert_eq!(
+            decide(&rules, "Notes", Some("alpha omega"), None),
+            Decision::Exclude
+        );
+    }
+
+    #[test]
+    fn domain_of_strips_scheme_credentials_port_and_path() {
+        assert_eq!(
+            domain_of("https://example.com/a/b"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            domain_of("http://user:pw@Example.COM:8080/x"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(
+            domain_of("https://www.example.com"),
+            Some("example.com".to_string())
+        );
+        assert_eq!(domain_of("not a url"), None);
     }
 }
