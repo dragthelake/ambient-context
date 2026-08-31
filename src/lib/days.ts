@@ -19,7 +19,6 @@ export type Settings = {
   similarity_threshold: number;
   engine: Engine | null;
   schedule_hhmm: string | null;
-  day_prompt: string | null;
   editor: string | null;
   launch_at_login: boolean;
   max_block_chars: number;
