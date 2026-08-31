@@ -26,13 +26,12 @@ export function EngineSettings() {
     void (async () => {
       const loaded = await readSettings();
       const found = await invoke<Engine[]>("engine_detect");
+      // Every row starts unprobed, including the saved one: an engine that
+      // has since been logged out must not be shown as fine.
       setDetected(
         found.map((engine) => ({
           engine,
-          auth:
-            loaded.engine?.command === engine.command
-              ? { state: "ok" as const }
-              : null,
+          auth: null,
           test: { status: "untested" as const },
         })),
       );
@@ -65,25 +64,34 @@ export function EngineSettings() {
     [settings],
   );
 
-  // Whether the engine is signed in, asked once per page open, never on a
+  const detectedCommands = detected.map((d) => d.engine.command).join("\n");
+
+  // Whether each engine is signed in, asked once per detection, never on a
   // schedule. Never offers to sign in; names the command that fixes it.
+  // Keyed on the detected commands so it runs after detection has landed.
   useEffect(() => {
+    if (detectedCommands === "") return;
+    let cancelled = false;
     void (async () => {
-      for (const entry of detected) {
-        if (entry.auth !== null) continue;
+      for (const command of detectedCommands.split("\n")) {
+        const entry = detected.find((d) => d.engine.command === command);
+        if (!entry) continue;
         const auth = await invoke<AuthState>("engine_auth", {
           engineConfig: entry.engine,
         });
+        if (cancelled) return;
         setDetected((current) =>
-          current.map((d) =>
-            d.engine.command === entry.engine.command ? { ...d, auth } : d,
-          ),
+          current.map((d) => (d.engine.command === command ? { ...d, auth } : d)),
         );
       }
     })();
-    // Run once per settings page open.
+    return () => {
+      cancelled = true;
+    };
+    // Reruns only when the set of detected engines changes, not when a probe
+    // writes its answer back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [detectedCommands]);
 
   const chosenEngine = useCallback((): Engine | null => {
     if (selected === null) return null;
@@ -263,8 +271,8 @@ export function EngineSettings() {
           }
         />
         <p className="settings-note">
-          Turning this on summarises the last seven captured days, one at a
-          time. Older days can be summarised one at a time from the Day view.
+          Turning this on summarises up to seven recent captured days, one
+          at a time. Older days can be summarised from the Day view.
         </p>
 
         <h3 className="settings-heading">Launch at login</h3>
@@ -289,23 +297,9 @@ export function EngineSettings() {
 
         <h3 className="settings-heading">Prompt</h3>
         <p className="settings-note">
-          {settings.day_prompt
-            ? `Using your own prompt at ${settings.day_prompt}`
-            : "Using the built-in prompt."}
+          The prompt the engine is given is in the Daily summary prompt
+          section further down this page.
         </p>
-        <div className="button-row">
-          {settings.day_prompt ? (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={async () =>
-                await save((next) => ({ ...next, day_prompt: null }))
-              }
-            >
-              Revert to built-in
-            </button>
-          ) : null}
-        </div>
       </fieldset>
     </section>
   );

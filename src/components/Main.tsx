@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DayView } from "./DayView";
 import { EngineSettings } from "./EngineSettings";
 import { McpSettings } from "./McpSettings";
+import { PromptSettings } from "./PromptSettings";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
 import "../main-window.css";
@@ -33,6 +34,7 @@ export function Main() {
           <div className="settings-stack">
             <EngineSettings />
             <RulesSettings />
+            <PromptSettings />
             <RecordingSettings />
             <McpSettings />
           </div>

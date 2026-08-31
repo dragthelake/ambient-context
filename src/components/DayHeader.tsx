@@ -44,7 +44,11 @@ export function DayHeader({
 
   const onOpen = async () => {
     try {
-      await invoke("open_in_editor", { date, which: mode });
+      // The raw view is the day file; "raw" is not a file the backend knows.
+      await invoke("open_in_editor", {
+        date,
+        which: mode === "raw" ? "day" : "summary",
+      });
       setActionError(null);
     } catch (error) {
       setActionError(String(error));
@@ -64,8 +68,10 @@ export function DayHeader({
     switch (summary.kind) {
       case "none":
         return "No summary yet";
+      case "queued":
+        return "Queued";
       case "running":
-        return "Summarising now";
+        return "Summarising…";
       case "generated":
         return summary.at ? `Generated at ${summary.at.slice(11, 16)}` : "Generated";
       case "failed":

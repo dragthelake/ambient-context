@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useState } from "react";
 import { HighlightPill } from "./HighlightPill";
 import type { ReactNode } from "react";
 import type { Selection } from "../lib/rules";
@@ -67,7 +67,9 @@ export function SummaryPane({
   onSummarise,
   date,
 }: SummaryPaneProps) {
-  const paneRef = useRef<HTMLElement | null>(null);
+  // Held in state, not a ref: the pill needs the element on the render it
+  // is given, and assigning a ref does not schedule one.
+  const [pane, setPane] = useState<HTMLElement | null>(null);
 
   const buildSelection = useCallback((): Selection | null => {
     const active = window.getSelection();
@@ -108,11 +110,11 @@ export function SummaryPane({
       <section
         className="summary-pane reading"
         ref={(element) => {
-          paneRef.current = element;
+          setPane(element);
         }}
       >
         <HighlightPill
-          container={paneRef.current}
+          container={pane}
           buildSelection={buildSelection}
           hasEngine={hasEngine}
         />

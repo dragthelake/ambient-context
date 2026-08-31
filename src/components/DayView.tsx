@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { CalendarRail } from "./CalendarRail";
 import { DayHeader } from "./DayHeader";
 import { RawPane } from "./RawPane";
@@ -10,8 +11,38 @@ export type { DayEntry };
 
 export type DayStats = { blocks: number; hours: number };
 
+export type Outcome = {
+  when: string;
+  date: string;
+  ok: boolean;
+  message: string;
+};
+
+/// Compare two outcomes by value: `job_status` returns a fresh object every
+/// call, and setting an equal-but-new one re-renders the whole day for nothing.
+function sameOutcome(a: Outcome | null, b: Outcome | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.when === b.when &&
+    a.date === b.date &&
+    a.ok === b.ok &&
+    a.message === b.message
+  );
+}
+
+export type JobStatus = "queued" | "running" | "done" | "failed";
+
+export type JobState = {
+  id: string;
+  date: string;
+  status: JobStatus;
+  stderr: string | null;
+};
+
 export type SummaryState =
   | { kind: "none" }
+  | { kind: "queued" }
   | { kind: "running" }
   | { kind: "generated"; at: string }
   | { kind: "failed"; message: string };
@@ -58,15 +89,50 @@ export function DayView() {
   const [days, setDays] = useState<DayEntry[]>([]);
   const [dayMarkdown, setDayMarkdown] = useState<string | null>(null);
   const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{
-    when: string;
-    date: string;
-    ok: boolean;
-    message: string;
-  } | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [hasEngine, setHasEngine] = useState(false);
-  const [running, setRunning] = useState(false);
-  const [mode, setMode] = useState<"raw" | "summary">("summary");
+  const [job, setJob] = useState<JobState | null>(null);
+  // A run you started yourself, and the message it failed with. The
+  // scheduler's last outcome is a different fact about a possibly different
+  // day, and must never stand in for this one.
+  const [manualFailure, setManualFailure] = useState<{
+    date: string;
+    message: string;
+    when: string;
+  } | null>(null);
+  // Raw is the default for today: today is what you are still recording.
+  const [mode, setMode] = useState<"raw" | "summary">(() =>
+    selected === todayIso() ? "raw" : "summary",
+  );
+
+  // Selecting a day always brings the calendar with it, so the rail and the
+  // pane never disagree about which day you are looking at.
+  const selectDate = useCallback((date: string) => {
+    setSelected(date);
+    const [year, month] = date.split("-").map(Number);
+    if (year && month) setMonth({ year, month });
+  }, []);
+
+  // The window can be opened for a particular day, by the tray or by an
+  // agent over MCP. Taken once on mount, and listened for while open.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const pending = await invoke<string | null>("take_pending_day");
+        if (!cancelled && pending) selectDate(pending);
+      } catch {
+        // An older build without the command: today is the right answer.
+      }
+    })();
+    const unlisten = listen<string>("open-day", (event) => {
+      if (event.payload) selectDate(event.payload);
+    });
+    return () => {
+      cancelled = true;
+      void unlisten.then((off) => off()).catch(() => undefined);
+    };
+  }, [selectDate]);
 
   const refreshMonth = useCallback(async () => {
     const entries = await invoke<DayEntry[]>("days_in_month", {
@@ -80,28 +146,46 @@ export function DayView() {
     void refreshMonth();
   }, [refreshMonth]);
 
+  // The last completed run, read on its own schedule. It is deliberately not
+  // a dependency of the day load: that is what made the two re-enter each
+  // other once any run had recorded an outcome.
+  const refreshOutcome = useCallback(async () => {
+    const status = await invoke<Outcome | null>("job_status");
+    setOutcome((current) => (sameOutcome(current, status) ? current : status));
+    // A later run for the same day supersedes the manual failure; a run for
+    // any other day leaves it alone.
+    setManualFailure((current) =>
+      current && status && status.date === current.date && status.when > current.when
+        ? null
+        : current,
+    );
+  }, []);
+
+  useEffect(() => {
+    void refreshOutcome();
+  }, [refreshOutcome]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [day, summary, settings, status] = await Promise.all([
+      const [day, summary, settings] = await Promise.all([
         invoke<string | null>("read_day", { date: selected }),
         invoke<string | null>("read_summary", { date: selected }),
         invoke<{ engine: unknown }>("get_settings"),
-        invoke<{ when: string; date: string; ok: boolean; message: string } | null>(
-          "job_status",
-        ),
       ]);
       if (cancelled) return;
       setDayMarkdown(day);
       setSummaryMarkdown(summary);
       setHasEngine(settings.engine !== null);
-      setOutcome(status);
       // Raw is the default for today; Summary for a past day that has one.
       setMode((current) =>
         selected === todayIso() ? current : summary ? "summary" : "raw",
       );
     })();
-  }, [selected, outcome]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   // Today's file grows while you look at it; refresh it live.
   useEffect(() => {
@@ -109,18 +193,20 @@ export function DayView() {
     const id = setInterval(async () => {
       const day = await invoke<string | null>("read_day", { date: selected });
       setDayMarkdown(day);
+      void refreshOutcome();
     }, 5000);
     return () => clearInterval(id);
-  }, [selected]);
+  }, [selected, refreshOutcome]);
 
-  const onPrev = useCallback(() => setSelected((d) => shift(d, -1)), []);
-  const onNext = useCallback(() => setSelected((d) => shift(d, 1)), []);
-  const onToday = useCallback(() => {
-    const today = todayIso();
-    setSelected(today);
-    const now = new Date();
-    setMonth({ year: now.getFullYear(), month: now.getMonth() + 1 });
-  }, []);
+  const onPrev = useCallback(
+    () => selectDate(shift(selected, -1)),
+    [selectDate, selected],
+  );
+  const onNext = useCallback(
+    () => selectDate(shift(selected, 1)),
+    [selectDate, selected],
+  );
+  const onToday = useCallback(() => selectDate(todayIso()), [selectDate]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -133,30 +219,80 @@ export function DayView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [onPrev, onNext, onToday]);
 
+  const reloadDay = useCallback(async () => {
+    const [day, summary] = await Promise.all([
+      invoke<string | null>("read_day", { date: selected }),
+      invoke<string | null>("read_summary", { date: selected }),
+    ]);
+    setDayMarkdown(day);
+    setSummaryMarkdown(summary);
+    await refreshOutcome();
+    void refreshMonth();
+  }, [selected, refreshMonth, refreshOutcome]);
+
+  // Runs are queued and serial. The command returns a job id straight away;
+  // the view follows that one job and nobody else's.
   const onSummarise = useCallback(async () => {
     setMode("summary");
-    setRunning(true);
     try {
-      await invoke("summarise_now", { date: selected });
+      const started = await invoke<{ job_id: string }>("summarise_now", {
+        date: selected,
+      });
+      setJob({ id: started.job_id, date: selected, status: "queued", stderr: null });
+      setManualFailure((current) =>
+        current && current.date === selected ? null : current,
+      );
     } catch (error) {
-      setOutcome({ when: new Date().toISOString(), date: selected, ok: false, message: String(error) });
-    }
-    const summary = await invoke<string | null>("read_summary", { date: selected });
-    setSummaryMarkdown(summary);
-    const status = await invoke<{ when: string; date: string; ok: boolean; message: string } | null>(
-      "job_status",
-    );
-    if (status) {
-      setOutcome({
-        when: status.when,
-        date: status.date,
-        ok: status.ok,
-        message: status.message,
+      setJob({
+        id: "",
+        date: selected,
+        status: "failed",
+        stderr: String(error),
+      });
+      setManualFailure({
+        date: selected,
+        message: String(error),
+        when: new Date().toISOString(),
       });
     }
-    setRunning(false);
-    void refreshMonth();
-  }, [selected, refreshMonth]);
+  }, [selected]);
+
+  const jobId = job && job.date === selected ? job.id : null;
+  const jobStatus = job && job.date === selected ? job.status : null;
+  const pending = jobStatus === "queued" || jobStatus === "running";
+
+  useEffect(() => {
+    if (!jobId || !pending) return;
+    let cancelled = false;
+    const id = setInterval(() => {
+      void (async () => {
+        const state = await invoke<JobState | null>("job_state", { jobId });
+        if (cancelled || !state) return;
+        setJob((current) =>
+          current && current.id === state.id && current.status === state.status
+            ? current
+            : { id: state.id, date: state.date, status: state.status, stderr: state.stderr },
+        );
+        if (state.status === "failed") {
+          setManualFailure({
+            date: state.date,
+            message: state.stderr ?? "The run failed.",
+            when: new Date().toISOString(),
+          });
+        }
+        if (state.status === "done") {
+          setManualFailure((current) =>
+            current && current.date === state.date ? null : current,
+          );
+          await reloadDay();
+        }
+      })();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [jobId, pending, reloadDay]);
 
   const entry = useMemo(
     () => days.find((d) => d.date === selected) ?? null,
@@ -164,9 +300,13 @@ export function DayView() {
   );
   const stats = useMemo(() => dayStats(dayMarkdown), [dayMarkdown]);
 
+  const running = pending;
+
   const summary: SummaryState = useMemo(() => {
-    if (running) {
-      return { kind: "running" };
+    if (jobStatus === "queued") return { kind: "queued" };
+    if (jobStatus === "running") return { kind: "running" };
+    if (manualFailure && manualFailure.date === selected) {
+      return { kind: "failed", message: manualFailure.message };
     }
     if (summaryMarkdown) {
       const at = outcome && outcome.date === selected ? outcome.when : "";
@@ -176,7 +316,7 @@ export function DayView() {
       return { kind: "failed", message: outcome.message };
     }
     return { kind: "none" };
-  }, [summaryMarkdown, outcome, selected, running]);
+  }, [summaryMarkdown, outcome, selected, jobStatus, manualFailure]);
 
   const onMonthChange = useCallback((year: number, month: number) => {
     setMonth({ year, month });
@@ -189,7 +329,7 @@ export function DayView() {
         month={month.month}
         days={days}
         selected={selected}
-        onSelect={setSelected}
+        onSelect={selectDate}
         onMonthChange={onMonthChange}
       />
       <div className="day-main">

@@ -56,6 +56,28 @@ const FILE_HINTS: Record<Client, string> = {
   Generic: "For anything else that speaks stdio MCP.",
 };
 
+/// When a write happened, in words. Anything not from today says its date:
+/// the panel used to call every timestamp "today".
+function whenLabel(at: string): string {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return at;
+  const time = when.toLocaleTimeString("en-AU", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const now = new Date();
+  const sameDay =
+    when.getFullYear() === now.getFullYear() &&
+    when.getMonth() === now.getMonth() &&
+    when.getDate() === now.getDate();
+  if (sameDay) return `at ${time} today`;
+  const date = when.toLocaleDateString("en-AU", {
+    day: "numeric",
+    month: "long",
+  });
+  return `at ${time} on ${date}`;
+}
+
 export function McpSettings() {
   const [registration, setRegistration] = useState<Registration | null>(null);
   const [client, setClient] = useState<Client>("Claude Code");
@@ -119,7 +141,7 @@ export function McpSettings() {
         {!registration.running
           ? "Not connected. Reading days and summaries works anyway; changing settings needs Ambient Context open."
           : registration.last_write
-            ? `Connected. Last change from ${registration.last_write.client} at ${registration.last_write.at.slice(11, 16)} today: ${registration.last_write.action}.`
+            ? `Connected. Last change from ${registration.last_write.client} ${whenLabel(registration.last_write.at)}: ${registration.last_write.action}.`
             : "Connected. No agent has changed anything yet."}
       </p>
     </fieldset>

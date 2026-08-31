@@ -75,7 +75,17 @@ export function RulesSettings() {
     <fieldset>
       <legend>Capture rules</legend>
       {error ? <p className="warn">{error}</p> : null}
-      {payload.rules.length === 0 ? (
+      {payload.error ? (
+        <div className="rules-unreadable">
+          <p className="warn">
+            Your rules file could not be read, so none of your own rules are
+            in force. The built-in protections below still apply. Fix the file
+            and reopen this page.
+          </p>
+          <pre className="day-error">{payload.error}</pre>
+          {payload.path ? <p className="settings-note">{payload.path}</p> : null}
+        </div>
+      ) : payload.rules.length === 0 ? (
         <p className="settings-note">
           No rules yet. Everything not built in is recorded in full.
         </p>
@@ -101,7 +111,7 @@ export function RulesSettings() {
         </ul>
       )}
 
-      {adding ? (
+      {adding && payload.error === null ? (
         <div className="rule-add">
           <label>
             Matches
@@ -142,7 +152,11 @@ export function RulesSettings() {
           </div>
         </div>
       ) : (
-        <button type="button" onClick={() => setAdding(true)}>
+        <button
+          type="button"
+          disabled={payload.error !== null}
+          onClick={() => setAdding(true)}
+        >
           Add a rule
         </button>
       )}
