@@ -240,16 +240,126 @@ pub fn exists(name: &str) -> bool {
     defs().iter().any(|def| def.name == name)
 }
 
-// Replaced by the real dispatcher in Task 8.
-pub fn call(
-    _server: &mut crate::mcp::Server,
-    _name: &str,
-    _arguments: &serde_json::Value,
-) -> serde_json::Value {
-    serde_json::json!({
-        "content": [{ "type": "text", "text": "not yet implemented" }],
-        "isError": true
+use crate::mcp::{files, Server};
+
+pub fn ok_text(text: impl Into<String>) -> serde_json::Value {
+    json!({ "content": [{ "type": "text", "text": text.into() }], "isError": false })
+}
+
+/// Structured content with the JSON also serialised into a text block, which
+/// the specification asks for so clients that ignore structuredContent still
+/// see the data.
+pub fn ok_json(value: serde_json::Value) -> serde_json::Value {
+    let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| value.to_string());
+    json!({
+        "content": [{ "type": "text", "text": text }],
+        "structuredContent": value,
+        "isError": false
     })
+}
+
+/// A tool execution error: a normal result the model can read and act on,
+/// not a JSON-RPC error. Protocol errors are for unknown tools only.
+pub fn tool_error(text: impl Into<String>) -> serde_json::Value {
+    json!({ "content": [{ "type": "text", "text": text.into() }], "isError": true })
+}
+
+fn required_str<'a>(
+    arguments: &'a serde_json::Value,
+    key: &str,
+) -> Result<&'a str, serde_json::Value> {
+    arguments[key]
+        .as_str()
+        .ok_or_else(|| tool_error(format!("The {key} argument is required and must be a string.")))
+}
+
+fn required_date(arguments: &serde_json::Value) -> Result<chrono::NaiveDate, serde_json::Value> {
+    let raw = required_str(arguments, "date")?;
+    chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+        .map_err(|_| tool_error(format!("{raw} is not a date. Use YYYY-MM-DD, for example 2026-08-30.")))
+}
+
+fn folder(server: &Server) -> Result<std::path::PathBuf, serde_json::Value> {
+    files::folder_from(&server.config_dir).map_err(|error| tool_error(error.to_string()))
+}
+
+pub fn call(server: &mut Server, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+    match read_call(server, name, arguments) {
+        Some(result) => result,
+        // Non-read tools go to the socket client in Task 9; the interim
+        // answer is the stub Task 6 defined, and the two dispatch tests that
+        // exercise it stay ignored until then.
+        None => json!({
+            "content": [{ "type": "text", "text": "not yet implemented" }],
+            "isError": true
+        }),
+    }
+}
+
+/// The tools that never need the app. `None` means "not a read tool", which
+/// sends the call to the socket client instead.
+fn read_call(server: &Server, name: &str, arguments: &serde_json::Value) -> Option<serde_json::Value> {
+    let out = match name {
+        "list_days" => match folder(server) {
+            Ok(dir) => ok_json(files::list_days(&dir)),
+            Err(error) => error,
+        },
+        "read_day" => {
+            let run = || -> Result<serde_json::Value, serde_json::Value> {
+                let dir = folder(server)?;
+                let date = required_date(arguments)?;
+                let from = arguments["from"].as_str();
+                let to = arguments["to"].as_str();
+                files::read_day(&dir, date, from, to)
+                    .map(ok_text)
+                    .map_err(|error| tool_error(error.to_string()))
+            };
+            run().unwrap_or_else(|error| error)
+        }
+        "read_summary" => {
+            let run = || -> Result<serde_json::Value, serde_json::Value> {
+                let dir = folder(server)?;
+                let date = required_date(arguments)?;
+                files::read_summary(&dir, date)
+                    .map(ok_text)
+                    .map_err(|error| tool_error(error.to_string()))
+            };
+            run().unwrap_or_else(|error| error)
+        }
+        "read_ledger" => {
+            let run = || -> Result<serde_json::Value, serde_json::Value> {
+                let dir = folder(server)?;
+                let date = required_date(arguments)?;
+                files::read_ledger(&dir, date)
+                    .map(ok_text)
+                    .map_err(|error| tool_error(error.to_string()))
+            };
+            run().unwrap_or_else(|error| error)
+        }
+        "search_record" => {
+            let run = || -> Result<serde_json::Value, serde_json::Value> {
+                let dir = folder(server)?;
+                let query = required_str(arguments, "query")?;
+                let limit = arguments["limit"].as_u64().unwrap_or(50).clamp(1, 200) as usize;
+                let hits = files::search_record(&dir, query, limit);
+                Ok(ok_json(json!({
+                    "query": query,
+                    "hits": hits,
+                    "truncated": hits_len_reached(&hits, limit),
+                })))
+            };
+            run().unwrap_or_else(|error| error)
+        }
+        "list_rules" => ok_json(files::list_rules(&server.config_dir)),
+        "get_prompt" => ok_json(files::get_prompt(&server.config_dir)),
+        "get_config" => ok_json(files::get_config(&server.config_dir)),
+        _ => return None,
+    };
+    Some(out)
+}
+
+fn hits_len_reached(hits: &[files::Hit], limit: usize) -> bool {
+    hits.len() >= limit
 }
 
 #[cfg(test)]
@@ -343,5 +453,90 @@ mod tests {
     fn exists_answers_for_a_real_name_and_a_made_up_one() {
         assert!(exists("read_summary"));
         assert!(!exists("delete_day"));
+    }
+
+    fn server_on(config_dir: &std::path::Path) -> crate::mcp::Server {
+        crate::mcp::Server {
+            config_dir: config_dir.to_path_buf(),
+            app_data_dir: config_dir.to_path_buf(),
+            client: "test".to_string(),
+        }
+    }
+
+    /// A config directory pointing at a capture folder with one day in it.
+    fn set_up() -> (tempfile::TempDir, tempfile::TempDir) {
+        let config = tempfile::tempdir().unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        std::fs::write(
+            folder.path().join("2026-08-30.md"),
+            "## 09:00\u{2013}09:20 \u{b7} Safari \u{b7} Postgres docs\n\nIndex-only scans.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            config.path().join("settings.json"),
+            format!(r#"{{"folder":"{}"}}"#, folder.path().display()),
+        )
+        .unwrap();
+        (config, folder)
+    }
+
+    #[test]
+    fn read_day_returns_the_text_as_one_content_block() {
+        let (config, _folder) = set_up();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "read_day", &json!({ "date": "2026-08-30" }));
+        assert_eq!(out["isError"], false);
+        assert!(out["content"][0]["text"].as_str().unwrap().contains("Index-only scans"));
+    }
+
+    #[test]
+    fn read_day_with_a_missing_date_is_a_tool_error_with_advice() {
+        let (config, _folder) = set_up();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "read_day", &json!({ "date": "2026-08-29" }));
+        assert_eq!(out["isError"], true);
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("no capture"));
+    }
+
+    #[test]
+    fn a_missing_required_argument_is_a_tool_error_naming_it() {
+        let (config, _folder) = set_up();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "read_day", &json!({}));
+        assert_eq!(out["isError"], true);
+        assert!(out["content"][0]["text"].as_str().unwrap().contains("date"));
+    }
+
+    #[test]
+    fn list_days_returns_structured_content_as_well_as_text() {
+        let (config, _folder) = set_up();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "list_days", &json!({}));
+        assert_eq!(out["structuredContent"]["days"][0]["date"], "2026-08-30");
+        assert!(out["content"][0]["text"].as_str().unwrap().contains("2026-08-30"));
+    }
+
+    #[test]
+    fn search_record_defaults_to_fifty_hits() {
+        let (config, _folder) = set_up();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "search_record", &json!({ "query": "postgres" }));
+        assert_eq!(out["isError"], false);
+        assert_eq!(out["structuredContent"]["hits"][0]["layer"], "day");
+    }
+
+    #[test]
+    fn a_read_tool_with_no_folder_set_says_what_to_do() {
+        let config = tempfile::tempdir().unwrap();
+        let mut server = server_on(config.path());
+        let out = call(&mut server, "list_days", &json!({}));
+        assert_eq!(out["isError"], true);
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("capture folder"));
     }
 }
