@@ -161,3 +161,71 @@ npm run build:
 303 tests total across the lib and two integration suites; zero failures, zero
 ignored (the two `tools/call` dispatch tests deferred in Task 6 were unignored
 in Task 9 as planned).
+
+## Fixes (fix/frontend)
+
+The frontend half of the fix brief, on branch `fix/frontend` off `v1`. One
+commit per item, each gated with `npx tsc --noEmit && npm run build && npm test`
+against a clean tree.
+
+| Item | Commit | What changed |
+|---|---|---|
+| 1 | `30212fe` | The Day view read effect no longer depends on the job outcome. The outcome is read on its own (mount, after a run, and on the live tick), compared by value before it is set, and the effect's `cancelled` cleanup is back. |
+| 2 | `7cc145d` | The auth probe is keyed on the detected commands, so it runs after detection. No row is seeded with a fabricated `ok`: the saved engine is probed like the rest. |
+| 3 | `5aa9336` | Summarise calls `summarise_now`, keeps the `job_id`, polls `job_state` every two seconds while queued or running, shows "Queued" then "Summarising…", reloads the day on `done` and shows stderr behind the existing disclosure on `failed`. Polling stops when the selected date changes. |
+| 4 | `a41bebb` | A manual run's failure lives in its own state and is replaced only by a later run for the same date. |
+| 6 | `c766127` | `take_pending_day` on mount and an `open-day` listener, both selecting the date and moving the calendar month. The listener is dropped on unmount. |
+| 14 | `0e2d30d` | New `src/components/PromptSettings.tsx`, mounted in `Main.tsx` beside `RulesSettings`: the current state line, the path, an inline editor with Save over `set_prompt` showing validation errors verbatim, and Reset to bundled over `reset_prompt` behind a one-line confirmation. `EngineSettings` keeps a one-line pointer to it. |
+| 15 | `c9413bd` | `day_prompt` is gone from the `Settings` type and from every read. |
+| 11 | `4d9eb79` | `RulesSettings` renders `get_rules`'s `error` in place of the rule list, with the path when the payload carries one, and disables Add. |
+| should-fix | `b0e558c` | Open in editor sends `which: "day"` from Raw mode. |
+| should-fix | `2519448` | The day arrows, Today and the rail all move the calendar month with the selected day. |
+| should-fix | `c05692b` | The "Rule added" confirmation reads the id back from the rules the write returned and shows on the block it came from; "Redact text like this" follows `selectionchange`. |
+| should-fix | `4bcc1a7` | `RawPane` and `SummaryPane` hold the pane element in state, so the highlight pill is given a container instead of `null`. |
+| should-fix | `06d5843` | `DiffView` shows Apply and Discard errors beside the buttons. |
+| should-fix | `003588a` | The schedule note says "one at a time" once. |
+| should-fix | `eef3329` | The MCP panel dates a change that was not made today. |
+| should-fix | `c3aae02` | `mode` initialises to Raw for today, Summary for a past day with a summary. |
+| tests | `0e40f32` | Vitest render tests: the Day view makes a bounded number of calls once an outcome exists and selects the date `take_pending_day` returns, `EngineSettings` probes each detected engine once and renders the not-signed-in line, `RawPane` enables Redact after a selection change. All four fail against the pre-fix components. |
+
+### Dev dependencies added
+
+- `vitest` — the test runner, sharing the existing Vite config so the tests
+  resolve modules exactly as the build does.
+- `jsdom` — the DOM these render tests run against.
+- `@testing-library/react` — renders components and queries them the way a
+  person reads the screen.
+- `@testing-library/dom` — its required peer, pinned here so npm does not pick
+  a different one.
+
+`src/test/tauri-mock.ts` replaces `invoke` from `@tauri-apps/api/core` and
+`listen` from `@tauri-apps/api/event`. Each test installs its own command
+handler; an unnamed command throws rather than returning undefined.
+
+### Evidence
+
+At `0e40f320704bd798d0429987452cb93bd67b1155`, with `git status --porcelain`
+empty:
+
+```
+$ npx tsc --noEmit
+(no output)
+
+$ npm run build
+✓ built in 376ms
+
+$ npm test
+ Test Files  3 passed (3)
+      Tests  4 passed (4)
+```
+
+### Not done
+
+`Open in editor` for the prompt file. No command opens an arbitrary path:
+`open_in_editor` takes a date and `"day" | "summary"`, `reveal_day` takes a
+date, and `open_link` requires an `https://` prefix. The section offers Copy
+path beside the inline editor instead. A one-line Rust command taking a path
+would close it.
+
+`refresh_engine_env` is not wired to a "Detect again" button. Optional in the
+brief, and it is a visual addition to a page a person is about to work on.
