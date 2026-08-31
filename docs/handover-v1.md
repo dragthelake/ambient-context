@@ -148,7 +148,7 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 218 filtered out; fi
 ✓ built in 413ms
 ```
 
-### Plan C (0.4.0), final pass on build/0.4.0 at e31c68e
+### Plan C (0.4.0), final pass on build/0.4.0 at 4d6def0
 ```
 cd src-tauri && cargo test:
 test result: ok. 298 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.26s
