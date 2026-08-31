@@ -100,7 +100,10 @@ export function DayView() {
     message: string;
     when: string;
   } | null>(null);
-  const [mode, setMode] = useState<"raw" | "summary">("summary");
+  // Raw is the default for today: today is what you are still recording.
+  const [mode, setMode] = useState<"raw" | "summary">(() =>
+    selected === todayIso() ? "raw" : "summary",
+  );
 
   // Selecting a day always brings the calendar with it, so the rail and the
   // pane never disagree about which day you are looking at.
