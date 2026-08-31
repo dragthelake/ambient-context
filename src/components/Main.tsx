@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DayView } from "./DayView";
 import "../main-window.css";
 
 type View = "day" | "settings";
@@ -23,7 +24,7 @@ export function Main() {
         </button>
       </nav>
       <main className="pane">
-        {view === "day" && <p>The Day view arrives in Task 11.</p>}
+        {view === "day" && <DayView />}
         {view === "settings" && <p>Settings arrive in Task 13.</p>}
       </main>
     </div>

@@ -1,14 +1,399 @@
+/* Ambient Context main window: the same Windows 98 dialog as the setup
+   card, stretched into a document window. Grey chrome, bevels, Funnel. */
+
+@import "./setup.css";
+
 .main-window {
   display: flex;
   height: 100vh;
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+  padding: 3px;
+  gap: 3px;
 }
 
+/* Left rail */
+
 .rail {
-  width: 180px;
+  width: 140px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0;
+}
+
+.rail-item {
+  text-align: left;
+  padding: 6px 10px;
+  min-width: 0;
+}
+
+.rail-item.is-current {
+  box-shadow: var(--bevel-in);
+  font-weight: 700;
 }
 
 .pane {
   flex: 1;
   overflow-y: auto;
+  background: var(--chrome-light);
+  box-shadow: var(--bevel-in);
+  margin: 4px 4px 4px 0;
+  padding: 0;
+}
+
+.pane::-webkit-scrollbar {
+  width: 14px;
+}
+.pane::-webkit-scrollbar-track {
+  background: repeating-conic-gradient(
+      var(--chrome-light) 0% 25%,
+      var(--chrome-lighter) 0% 50%
+    )
+    0 0 / 4px 4px;
+}
+.pane::-webkit-scrollbar-thumb {
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+}
+
+/* Day view */
+
+.day-view {
+  display: flex;
+  height: 100%;
+}
+
+.day-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Calendar rail */
+
+.calendar-rail {
+  width: 220px;
+  flex-shrink: 0;
+  padding: 10px;
+  border-right: 2px solid;
+  border-image: linear-gradient(
+      var(--chrome-dark),
+      var(--chrome-dark)
+    )
+    1;
+  background: var(--chrome);
+}
+
+.calendar-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.calendar-month {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.calendar-arrow {
+  min-width: 0;
+  padding: 2px 8px;
+  font-size: 10px;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.calendar-weekday {
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--chrome-dark);
+  padding: 2px 0;
+}
+
+.calendar-cell {
+  min-width: 0;
+  padding: 3px 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  font-weight: 600;
+  font-size: 12px;
+  box-shadow: none;
+  background: transparent;
+}
+
+.calendar-cell:not(.is-blank):hover {
+  box-shadow: var(--bevel-out);
+  background: var(--chrome);
+}
+
+.calendar-cell.is-today {
+  box-shadow: var(--bevel-in);
+  background: var(--chrome-light);
+}
+
+.calendar-cell.is-selected {
+  background: var(--title-a);
+  color: var(--chrome-lighter);
+  box-shadow: var(--bevel-in);
+}
+
+.calendar-cell.is-blank {
+  pointer-events: none;
+}
+
+.calendar-daynum {
+  line-height: 1;
+}
+
+/* The two marks: capture is a filled dot, summary a hollow ring, so they
+   stay distinct in light and dark without relying on colour alone. */
+.mark-capture,
+.mark-summary {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.mark-capture {
+  background: var(--led-green);
+}
+
+.mark-summary {
+  background: var(--title-b);
+  outline: 1px solid var(--chrome-lighter);
+  outline-offset: -2px;
+}
+
+.calendar-cell.is-selected .mark-capture {
+  background: var(--chrome-lighter);
+}
+
+.calendar-legend {
+  margin: 10px 0 0;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--chrome-dark);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.calendar-legend .mark-summary {
+  margin-left: 8px;
+}
+
+/* Day header */
+
+.day-header {
+  flex: none;
+  padding: 10px 14px 8px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-dark);
+}
+
+.day-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.day-nav button {
+  min-width: 0;
+  padding: 3px 10px;
+}
+
+.day-date {
+  margin: 0;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  flex: 1;
+  min-width: 0;
+}
+
+.day-today {
+  min-width: 0;
+}
+
+.day-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 6px 0;
+  flex-wrap: wrap;
+}
+
+.day-stats {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+}
+
+.day-summary-state {
+  font-weight: 600;
+}
+
+.day-summary-state.failed {
+  color: var(--warn-ink);
+}
+
+.day-summary-state.generated {
+  color: var(--led-green);
+}
+
+.day-error {
+  margin: 6px 0 0;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.link-button {
+  appearance: none;
+  border: none;
+  background: none;
+  box-shadow: none;
+  min-width: 0;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--title-b);
+  text-decoration: underline;
+}
+
+.link-button:active {
+  box-shadow: none;
+}
+
+.day-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.day-actions button {
+  min-width: 0;
+}
+
+.segmented {
+  display: inline-flex;
+  box-shadow: var(--bevel-in);
+  background: var(--chrome-light);
+}
+
+.segment {
+  box-shadow: none;
+  background: transparent;
+  min-width: 0;
+  padding: 4px 14px 5px;
+}
+
+.segment.is-current {
+  box-shadow: var(--bevel-in);
+  background: var(--chrome);
+}
+
+.day-title {
+  margin: 6px 0 0;
+  font-weight: 600;
+  color: var(--chrome-dark);
+}
+
+/* Summary pane */
+
+.summary-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  margin: 10px 12px 12px;
+}
+
+.empty-state {
+  margin: 0;
+  color: var(--chrome-dark);
+  font-weight: 600;
+}
+
+.empty-state.is-running {
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+}
+
+.summarise-now {
+  margin-top: 10px;
+}
+
+.reading {
+  max-width: 78ch;
+}
+
+.reading h1 {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  margin: 4px 0 10px;
+}
+
+.reading h2 {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  margin: 16px 0 4px;
+  color: var(--title-a);
+}
+
+.reading p,
+.reading li {
+  margin: 0 0 7px;
+  line-height: 1.55;
+}
+
+.reading ul {
+  margin: 0 0 7px;
+  padding-left: 4px;
+  list-style: none;
+}
+
+.reading li {
+  padding-left: 14px;
+  position: relative;
+}
+
+.reading li::before {
+  content: "■";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 8px;
+  line-height: 2.2;
+  color: var(--title-b);
 }
