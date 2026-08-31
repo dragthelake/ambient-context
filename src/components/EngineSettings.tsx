@@ -297,23 +297,9 @@ export function EngineSettings() {
 
         <h3 className="settings-heading">Prompt</h3>
         <p className="settings-note">
-          {settings.day_prompt
-            ? `Using your own prompt at ${settings.day_prompt}`
-            : "Using the built-in prompt."}
+          The prompt the engine is given is in the Daily summary prompt
+          section further down this page.
         </p>
-        <div className="button-row">
-          {settings.day_prompt ? (
-            <button
-              type="button"
-              disabled={saving}
-              onClick={async () =>
-                await save((next) => ({ ...next, day_prompt: null }))
-              }
-            >
-              Revert to built-in
-            </button>
-          ) : null}
-        </div>
       </fieldset>
     </section>
   );
