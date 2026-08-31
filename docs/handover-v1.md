@@ -48,6 +48,11 @@ Anything you did differently from the written step, with the reason. Empty is th
   only `date`, but the declared variant carries `client` as well, so the
   plan's test as written does not compile against the plan's own type. The
   test was fixed to carry both fields.
+- (0.4.0) Plan C Task 5: the plan's search fixture contains
+  `url: https://www.postgresql.org/docs`, whose host matches the "POSTGRES"
+  query, giving three hits against the test's expected two. The fixture URL
+  was changed to `example.org` so the intended one-day-hit, one-summary-hit
+  shape holds.
 
 - (0.3.0) Plan B Task 7: the plan's tests assert the ledger renders dispositions
   capitalised ("Accepted", "Applied", "Discarded", "Failed", "Rejected"), but
