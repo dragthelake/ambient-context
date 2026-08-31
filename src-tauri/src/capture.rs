@@ -268,4 +268,32 @@ mod tests {
         };
         assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"), day()));
     }
+
+    #[test]
+    fn a_summary_the_app_wrote_is_own_output() {
+        let snap = Snapshot {
+            app: "Obsidian".to_string(),
+            document: Some("/Users/x/Ambient Context/Summaries/2026-08-25.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
+    }
+
+    #[test]
+    fn a_ledger_entry_the_app_wrote_is_own_output() {
+        let snap = Snapshot {
+            app: "TextEdit".to_string(),
+            document: Some("/Users/x/Ambient Context/Ledger/2026-08-25.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(
+            &snap,
+            Path::new("/Users/x/Ambient Context"),
+            day()
+        ));
+    }
 }
