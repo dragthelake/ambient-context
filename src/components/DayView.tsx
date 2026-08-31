@@ -10,6 +10,26 @@ export type { DayEntry };
 
 export type DayStats = { blocks: number; hours: number };
 
+export type Outcome = {
+  when: string;
+  date: string;
+  ok: boolean;
+  message: string;
+};
+
+/// Compare two outcomes by value: `job_status` returns a fresh object every
+/// call, and setting an equal-but-new one re-renders the whole day for nothing.
+function sameOutcome(a: Outcome | null, b: Outcome | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.when === b.when &&
+    a.date === b.date &&
+    a.ok === b.ok &&
+    a.message === b.message
+  );
+}
+
 export type SummaryState =
   | { kind: "none" }
   | { kind: "running" }
@@ -58,12 +78,7 @@ export function DayView() {
   const [days, setDays] = useState<DayEntry[]>([]);
   const [dayMarkdown, setDayMarkdown] = useState<string | null>(null);
   const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<{
-    when: string;
-    date: string;
-    ok: boolean;
-    message: string;
-  } | null>(null);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
   const [hasEngine, setHasEngine] = useState(false);
   const [running, setRunning] = useState(false);
   const [mode, setMode] = useState<"raw" | "summary">("summary");
@@ -80,28 +95,39 @@ export function DayView() {
     void refreshMonth();
   }, [refreshMonth]);
 
+  // The last completed run, read on its own schedule. It is deliberately not
+  // a dependency of the day load: that is what made the two re-enter each
+  // other once any run had recorded an outcome.
+  const refreshOutcome = useCallback(async () => {
+    const status = await invoke<Outcome | null>("job_status");
+    setOutcome((current) => (sameOutcome(current, status) ? current : status));
+  }, []);
+
+  useEffect(() => {
+    void refreshOutcome();
+  }, [refreshOutcome]);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
-      const [day, summary, settings, status] = await Promise.all([
+      const [day, summary, settings] = await Promise.all([
         invoke<string | null>("read_day", { date: selected }),
         invoke<string | null>("read_summary", { date: selected }),
         invoke<{ engine: unknown }>("get_settings"),
-        invoke<{ when: string; date: string; ok: boolean; message: string } | null>(
-          "job_status",
-        ),
       ]);
       if (cancelled) return;
       setDayMarkdown(day);
       setSummaryMarkdown(summary);
       setHasEngine(settings.engine !== null);
-      setOutcome(status);
       // Raw is the default for today; Summary for a past day that has one.
       setMode((current) =>
         selected === todayIso() ? current : summary ? "summary" : "raw",
       );
     })();
-  }, [selected, outcome]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   // Today's file grows while you look at it; refresh it live.
   useEffect(() => {
@@ -109,9 +135,10 @@ export function DayView() {
     const id = setInterval(async () => {
       const day = await invoke<string | null>("read_day", { date: selected });
       setDayMarkdown(day);
+      void refreshOutcome();
     }, 5000);
     return () => clearInterval(id);
-  }, [selected]);
+  }, [selected, refreshOutcome]);
 
   const onPrev = useCallback(() => setSelected((d) => shift(d, -1)), []);
   const onNext = useCallback(() => setSelected((d) => shift(d, 1)), []);
@@ -143,20 +170,10 @@ export function DayView() {
     }
     const summary = await invoke<string | null>("read_summary", { date: selected });
     setSummaryMarkdown(summary);
-    const status = await invoke<{ when: string; date: string; ok: boolean; message: string } | null>(
-      "job_status",
-    );
-    if (status) {
-      setOutcome({
-        when: status.when,
-        date: status.date,
-        ok: status.ok,
-        message: status.message,
-      });
-    }
+    await refreshOutcome();
     setRunning(false);
     void refreshMonth();
-  }, [selected, refreshMonth]);
+  }, [selected, refreshMonth, refreshOutcome]);
 
   const entry = useMemo(
     () => days.find((d) => d.date === selected) ?? null,
