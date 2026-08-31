@@ -14,6 +14,7 @@ mod writer;
 
 use serde::Serialize;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::UpdaterExt;
 
@@ -271,6 +272,22 @@ fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), S
     settings::save(&app, &next).map_err(|e| e.to_string())
 }
 
+/// The setting is the truth and the OS registration follows it. Writing one
+/// without the other is how a toggle ends up lying about what the machine
+/// will actually do.
+#[tauri::command]
+fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
+    let mut config = settings::load(&app);
+    config.launch_at_login = enabled;
+    settings::save(&app, &config).map_err(|e| e.to_string())?;
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())
+    } else {
+        manager.disable().map_err(|e| e.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -477,6 +494,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             permission_status,
@@ -496,6 +514,7 @@ pub fn run() {
             engine_auth,
             get_settings,
             set_settings,
+            set_launch_at_login,
             list_days,
             days_in_month,
             read_day,
@@ -513,6 +532,17 @@ pub fn run() {
             tray::build(app.handle())?;
 
             let config = settings::load(app.handle());
+            {
+                // A login item removed in System Settings must not leave the
+                // toggle claiming otherwise: reconcile once at startup.
+                let manager = app.autolaunch();
+                let registered = manager.is_enabled().unwrap_or(false);
+                if config.launch_at_login && !registered {
+                    let _ = manager.enable();
+                } else if !config.launch_at_login && registered {
+                    let _ = manager.disable();
+                }
+            }
             if reader::macos::permission_status() == reader::Permission::NotGranted
                 || config.folder.is_none()
             {

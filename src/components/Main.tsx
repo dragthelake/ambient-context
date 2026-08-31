@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { DayView } from "./DayView";
+import { EngineSettings } from "./EngineSettings";
 import "../main-window.css";
 
 type View = "day" | "settings";
@@ -25,7 +26,7 @@ export function Main() {
       </nav>
       <main className="pane">
         {view === "day" && <DayView />}
-        {view === "settings" && <p>Settings arrive in Task 13.</p>}
+        {view === "settings" && <EngineSettings />}
       </main>
     </div>
   );

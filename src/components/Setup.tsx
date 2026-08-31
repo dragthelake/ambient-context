@@ -191,7 +191,8 @@ export function Setup() {
           <p>
             Your files are plain markdown. The default folder sits outside
             Documents so iCloud will not upload them. You can move or delete
-            them at any time.
+            them at any time. Ambient Context also starts with your Mac,
+            which you can turn off in Settings.
           </p>
           {folder ? (
             <p className="status-line done">

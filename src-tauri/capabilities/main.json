@@ -6,6 +6,7 @@
   "permissions": [
     "core:default",
     "core:window:allow-close",
-    "dialog:default"
+    "dialog:default",
+    "autostart:default"
   ]
 }
