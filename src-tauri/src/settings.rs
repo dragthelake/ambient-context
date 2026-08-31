@@ -2,6 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
+/// A connected LLM, as a command the app can run. Never a key, never a
+/// hosted runtime: the user's own agent CLI, invoked one shot per job.
+/// `command` is an absolute path resolved at detection time, because the
+/// PATH an app inherits from the Dock is not the PATH the user has in a
+/// terminal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Engine {
+    pub label: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub timeout_secs: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -13,6 +26,19 @@ pub struct Settings {
     pub interval_secs: u64,
     pub min_dwell_secs: i64,
     pub similarity_threshold: f64,
+    /// None means no engine connected, which is the shipped state and
+    /// leaves the app a pure recorder.
+    pub engine: Option<Engine>,
+    /// Local time of day as "HH:MM". None means manual runs only.
+    pub schedule_hhmm: Option<String>,
+    /// None uses the prompt bundled with this version of the app.
+    pub day_prompt: Option<PathBuf>,
+    /// Absolute path to an application to open markdown with. None uses
+    /// the system handler.
+    pub editor: Option<String>,
+    /// Whether macOS starts the app at login. On by default: a record with
+    /// a hole in it where a reboot was is worth less than no record.
+    pub launch_at_login: bool,
 }
 
 impl Default for Settings {
@@ -26,6 +52,11 @@ impl Default for Settings {
             // blocks to a heading.
             min_dwell_secs: 10,
             similarity_threshold: 0.5,
+            engine: None,
+            schedule_hhmm: None,
+            day_prompt: None,
+            editor: None,
+            launch_at_login: true,
         }
     }
 }
@@ -109,5 +140,51 @@ mod tests {
         let settings = read_from(&path);
         assert_eq!(settings.interval_secs, 20);
         assert_eq!(settings.min_dwell_secs, 10);
+    }
+
+    #[test]
+    fn engine_and_schedule_default_to_off_and_login_launch_defaults_to_on() {
+        let settings = Settings::default();
+        assert_eq!(settings.engine, None);
+        assert_eq!(settings.schedule_hhmm, None);
+        assert_eq!(settings.day_prompt, None);
+        assert_eq!(settings.editor, None);
+        // An app whose value is a complete record cannot depend on being
+        // opened by hand after a reboot.
+        assert!(settings.launch_at_login);
+    }
+
+    #[test]
+    fn a_zero_one_settings_file_still_loads_and_keeps_its_values() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"folder":"/tmp/ambient","enabled":true,"interval_secs":5,"min_dwell_secs":10,"similarity_threshold":0.5}"#,
+        )
+        .unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.folder, Some(PathBuf::from("/tmp/ambient")));
+        assert_eq!(settings.interval_secs, 5);
+        assert_eq!(settings.engine, None);
+        assert_eq!(settings.schedule_hhmm, None);
+        assert!(settings.launch_at_login);
+    }
+
+    #[test]
+    fn engine_and_launch_at_login_round_trip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let mut settings = Settings::default();
+        settings.engine = Some(Engine {
+            label: "Claude Code".to_string(),
+            command: "/opt/homebrew/bin/claude".to_string(),
+            args: vec!["-p".to_string()],
+            timeout_secs: 600,
+        });
+        settings.schedule_hhmm = Some("06:00".to_string());
+        settings.launch_at_login = false;
+        write_to(&path, &settings).unwrap();
+        assert_eq!(read_from(&path), settings);
     }
 }
