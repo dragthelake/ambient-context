@@ -211,6 +211,232 @@ fn reveal_day(app: tauri::AppHandle, date: String) -> Result<(), String> {
     Ok(())
 }
 
+#[derive(serde::Serialize)]
+struct RulesPayload {
+    rules: Vec<rules::Rule>,
+    built_ins: Vec<rules::BuiltIn>,
+    next_id: String,
+}
+
+#[tauri::command]
+fn get_rules(app: tauri::AppHandle) -> RulesPayload {
+    let loaded = rules::load(&settings::config_dir(&app));
+    RulesPayload {
+        next_id: rules::new_id(&loaded),
+        rules: loaded.rules,
+        built_ins: rules::built_ins(),
+    }
+}
+
+/// One write path for all three verbs: mutate, validate, save, ledger.
+fn write_rules(
+    app: &tauri::AppHandle,
+    action: &str,
+    change: impl FnOnce(&mut rules::Rules) -> Result<(), rules::RuleError>,
+) -> Result<RulesPayload, String> {
+    let config_dir = settings::config_dir(app);
+    let mut loaded = rules::load(&config_dir);
+    change(&mut loaded).map_err(|e| e.to_string())?;
+    rules::validate(&loaded).map_err(|e| e.to_string())?;
+    let before = ledger::hash_file(&rules::rules_path(&config_dir))
+        .map(|input| vec![input])
+        .unwrap_or_default();
+    rules::save(&config_dir, &loaded).map_err(|e| e.to_string())?;
+    if let Some(folder) = settings::load(app).folder {
+        let _ = ledger::append(
+            &folder,
+            &ledger::Entry {
+                at: chrono::Local::now(),
+                trigger: ledger::Trigger::Settings,
+                action: action.to_string(),
+                prompt_id: None,
+                prompt_sha256: None,
+                engine: None,
+                inputs: before,
+                output: serde_json::to_string_pretty(&loaded).ok(),
+                reasoning: None,
+                disposition: ledger::Disposition::Applied,
+            },
+        );
+    }
+    Ok(RulesPayload {
+        next_id: rules::new_id(&loaded),
+        rules: loaded.rules,
+        built_ins: rules::built_ins(),
+    })
+}
+
+#[tauri::command]
+fn add_rule(app: tauri::AppHandle, rule: rules::Rule) -> Result<RulesPayload, String> {
+    write_rules(&app, "add_rule", |set| set.add(rule))
+}
+
+#[tauri::command]
+fn update_rule(app: tauri::AppHandle, rule: rules::Rule) -> Result<RulesPayload, String> {
+    write_rules(&app, "update_rule", |set| set.update(rule))
+}
+
+#[tauri::command]
+fn remove_rule(app: tauri::AppHandle, id: String) -> Result<RulesPayload, String> {
+    write_rules(&app, "remove_rule", |set| set.remove(&id))
+}
+
+#[derive(serde::Serialize)]
+struct PromptPayload {
+    text: String,
+    customised: bool,
+    path: String,
+}
+
+fn prompt_payload(app: &tauri::AppHandle) -> PromptPayload {
+    let config_dir = settings::config_dir(app);
+    PromptPayload {
+        text: prompt::current(&config_dir),
+        customised: prompt::is_customised(&config_dir),
+        path: prompt::prompt_path(&config_dir).to_string_lossy().to_string(),
+    }
+}
+
+#[tauri::command]
+fn get_prompt(app: tauri::AppHandle) -> PromptPayload {
+    prompt_payload(&app)
+}
+
+#[tauri::command]
+fn set_prompt(app: tauri::AppHandle, text: String) -> Result<PromptPayload, String> {
+    let config_dir = settings::config_dir(&app);
+    let before = ledger::hash_file(&prompt::prompt_path(&config_dir))
+        .map(|input| vec![input])
+        .unwrap_or_default();
+    prompt::set(&config_dir, &text).map_err(|e| e.to_string())?;
+    if let Some(folder) = settings::load(&app).folder {
+        let _ = ledger::append(
+            &folder,
+            &ledger::Entry {
+                at: chrono::Local::now(),
+                trigger: ledger::Trigger::Settings,
+                action: "set_prompt".to_string(),
+                prompt_id: None,
+                prompt_sha256: Some(ledger::sha256_of(text.as_bytes())),
+                engine: None,
+                inputs: before,
+                output: Some(text),
+                reasoning: None,
+                disposition: ledger::Disposition::Applied,
+            },
+        );
+    }
+    Ok(prompt_payload(&app))
+}
+
+#[tauri::command]
+fn reset_prompt(app: tauri::AppHandle) -> Result<PromptPayload, String> {
+    let config_dir = settings::config_dir(&app);
+    prompt::reset(&config_dir).map_err(|e| e.to_string())?;
+    if let Some(folder) = settings::load(&app).folder {
+        let _ = ledger::append(
+            &folder,
+            &ledger::Entry {
+                at: chrono::Local::now(),
+                trigger: ledger::Trigger::Settings,
+                action: "reset_prompt".to_string(),
+                prompt_id: None,
+                prompt_sha256: None,
+                engine: None,
+                inputs: Vec::new(),
+                output: None,
+                reasoning: None,
+                disposition: ledger::Disposition::Applied,
+            },
+        );
+    }
+    Ok(prompt_payload(&app))
+}
+
+/// The proposal store keeps a proposal between `propose` and the Apply the
+/// user has not clicked yet. It lives in memory only: an unapplied proposal
+/// is not worth persisting across a quit.
+#[derive(Default)]
+struct ProposalStore(std::sync::Mutex<std::collections::HashMap<String, propose::Proposal>>);
+
+#[tauri::command]
+fn read_day_blocks(app: tauri::AppHandle, date: String) -> Vec<days::RawBlock> {
+    let Some(folder) = settings::load(&app).folder else {
+        return Vec::new();
+    };
+    let Ok(date) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+        return Vec::new();
+    };
+    days::read_day(&folder, date)
+        .map(|text| days::parse_blocks(&text))
+        .unwrap_or_default()
+}
+
+/// Runs on the blocking pool: the engine can take minutes and must not
+/// park the webview.
+#[tauri::command]
+async fn propose(
+    app: tauri::AppHandle,
+    target: propose::ProposeTarget,
+    selection: propose::Selection,
+    instruction: String,
+) -> Result<propose::Proposal, propose::ProposeError> {
+    let loaded = settings::load(&app);
+    let engine = loaded.engine.ok_or(propose::ProposeError::NoEngine)?;
+    let folder = loaded.folder.ok_or(propose::ProposeError::NoEngine)?;
+    let config_dir = settings::config_dir(&app);
+    let handle = app.clone();
+    let proposal = tauri::async_runtime::spawn_blocking(move || {
+        propose::propose(&config_dir, &folder, &engine, target, selection, &instruction)
+    })
+    .await
+    .map_err(|e| propose::ProposeError::EngineFailed {
+        stderr: e.to_string(),
+    })??;
+    handle
+        .state::<ProposalStore>()
+        .0
+        .lock()
+        .expect("proposal store")
+        .insert(proposal.id.clone(), proposal.clone());
+    Ok(proposal)
+}
+
+#[tauri::command]
+fn apply_proposal(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let proposal = app
+        .state::<ProposalStore>()
+        .0
+        .lock()
+        .expect("proposal store")
+        .remove(&id)
+        .ok_or_else(|| "that proposal is no longer available".to_string())?;
+    let folder = settings::load(&app)
+        .folder
+        .ok_or_else(|| "no capture folder is set".to_string())?;
+    propose::apply(&settings::config_dir(&app), &folder, &proposal)
+}
+
+#[tauri::command]
+fn discard_proposal(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let proposal = app
+        .state::<ProposalStore>()
+        .0
+        .lock()
+        .expect("proposal store")
+        .remove(&id)
+        .ok_or_else(|| "that proposal is no longer available".to_string())?;
+    let folder = settings::load(&app)
+        .folder
+        .ok_or_else(|| "no capture folder is set".to_string())?;
+    propose::discard(&folder, &proposal).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn copy_context(selection: propose::Selection) -> String {
+    propose::copy_as_context(&selection)
+}
+
 /// Runs on the async pool: the engine can take minutes and this must not
 /// block the webview or the main thread.
 #[tauri::command]
@@ -498,6 +724,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             permission_status,
@@ -523,7 +750,19 @@ pub fn run() {
             read_day,
             read_summary,
             open_in_editor,
-            reveal_day
+            reveal_day,
+            get_rules,
+            add_rule,
+            update_rule,
+            remove_rule,
+            get_prompt,
+            set_prompt,
+            reset_prompt,
+            read_day_blocks,
+            propose,
+            apply_proposal,
+            discard_proposal,
+            copy_context
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -531,6 +770,7 @@ pub fn run() {
 
             app.manage(capture::CaptureState::new());
             app.manage(jobs::JobState::new());
+            app.manage(ProposalStore::default());
             jobs::start(app.handle().clone());
             tray::build(app.handle())?;
 
