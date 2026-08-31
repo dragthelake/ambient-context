@@ -120,9 +120,7 @@ export function DayHeader({
             role="tab"
             aria-selected={mode === "raw"}
             className={mode === "raw" ? "segment is-current" : "segment"}
-            disabled
-            title="Coming in 0.3"
-            tabIndex={-1}
+            onClick={() => onMode("raw")}
           >
             Raw
           </button>

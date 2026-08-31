@@ -397,3 +397,93 @@
   line-height: 2.2;
   color: var(--title-b);
 }
+
+/* Raw pane: the block timeline. The headings are the day's timeline and
+   the eye lands on them first; bodies collapse past a few lines. */
+
+.raw-pane {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  margin: 10px 12px 12px;
+}
+
+.raw-block {
+  margin-bottom: 10px;
+  background: var(--chrome-lighter);
+  box-shadow: var(--bevel-out);
+  padding: 6px 10px 8px;
+}
+
+.raw-block-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.raw-block-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--title-a);
+  font-weight: 700;
+}
+
+.raw-block-app {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.raw-block-title {
+  color: var(--chrome-dark);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.raw-ref {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--title-b);
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+
+.raw-body {
+  margin-top: 4px;
+}
+
+.raw-body p {
+  margin: 0 0 3px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+
+.raw-quiet {
+  margin: 4px 0 0;
+  color: var(--chrome-dark);
+  font-style: italic;
+}
+
+.raw-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.raw-actions button {
+  min-width: 0;
+  padding: 2px 8px 3px;
+  font-size: 11px;
+}

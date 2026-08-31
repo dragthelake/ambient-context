@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CalendarRail } from "./CalendarRail";
 import { DayHeader } from "./DayHeader";
+import { RawPane } from "./RawPane";
 import { SummaryPane } from "./SummaryPane";
 import type { DayEntry } from "./CalendarRail";
 
@@ -81,7 +82,7 @@ export function DayView() {
 
   useEffect(() => {
     let cancelled = false;
-    const read = async () => {
+    void (async () => {
       const [day, summary, settings, status] = await Promise.all([
         invoke<string | null>("read_day", { date: selected }),
         invoke<string | null>("read_summary", { date: selected }),
@@ -95,11 +96,11 @@ export function DayView() {
       setSummaryMarkdown(summary);
       setHasEngine(settings.engine !== null);
       setOutcome(status);
-      if (!summary) setMode("summary");    };
-    void read();
-    return () => {
-      cancelled = true;
-    };
+      // Raw is the default for today; Summary for a past day that has one.
+      setMode((current) =>
+        selected === todayIso() ? current : summary ? "summary" : "raw",
+      );
+    })();
   }, [selected, outcome]);
 
   // Today's file grows while you look at it; refresh it live.
@@ -204,13 +205,17 @@ export function DayView() {
           onToday={onToday}
           onSummarise={onSummarise}
         />
-        <SummaryPane
-          markdown={summaryMarkdown}
-          hasCapture={entry?.has_capture ?? false}
-          hasEngine={hasEngine}
-          running={running}
-          onSummarise={onSummarise}
-        />
+        {mode === "summary" ? (
+          <SummaryPane
+            markdown={summaryMarkdown}
+            hasCapture={entry?.has_capture ?? false}
+            hasEngine={hasEngine}
+            running={running}
+            onSummarise={onSummarise}
+          />
+        ) : (
+          <RawPane date={selected} mode={mode} />
+        )}
       </div>
     </div>
   );
