@@ -1,3 +1,4 @@
+pub mod client;
 pub mod files;
 pub mod tools;
 
@@ -253,9 +254,7 @@ mod tests {
         assert_eq!(answer["error"]["code"], -32601);
     }
 
-    // unignored in Task 9, when tools::call is real
     #[test]
-    #[ignore]
     fn an_unknown_tool_name_is_a_protocol_error_not_a_tool_error() {
         let mut server = server();
         let answer = dispatch(
@@ -270,9 +269,7 @@ mod tests {
         assert!(answer["error"]["message"].as_str().unwrap().contains("rm_rf"));
     }
 
-    // unignored in Task 9, when tools::call is real
     #[test]
-    #[ignore]
     fn a_tool_failure_is_a_result_with_is_error_so_the_model_can_read_it() {
         let mut server = server();
         // No app, no config: a control tool must fail as a tool error.

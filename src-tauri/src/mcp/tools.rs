@@ -286,13 +286,7 @@ fn folder(server: &Server) -> Result<std::path::PathBuf, serde_json::Value> {
 pub fn call(server: &mut Server, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
     match read_call(server, name, arguments) {
         Some(result) => result,
-        // Non-read tools go to the socket client in Task 9; the interim
-        // answer is the stub Task 6 defined, and the two dispatch tests that
-        // exercise it stay ignored until then.
-        None => json!({
-            "content": [{ "type": "text", "text": "not yet implemented" }],
-            "isError": true
-        }),
+        None => crate::mcp::client::call(server, name, arguments),
     }
 }
 
