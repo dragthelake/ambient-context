@@ -104,7 +104,7 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
 
 fn job_status(app: &AppHandle, id: &str) -> Response {
     let queue = app.state::<jobs::JobQueue>();
-    match queue.recent().into_iter().find(|job| job.id == id) {
+    match queue.find(id) {
         Some(job) => Response::Ok(serde_json::to_value(job).unwrap_or(serde_json::Value::Null)),
         None => Response::err("not_found", format!("No job with id {id}.")),
     }

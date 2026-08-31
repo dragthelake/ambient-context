@@ -84,9 +84,43 @@ struct Inner {
     last_outcome: Option<Outcome>,
 }
 
+/// Where the last completed run is remembered between launches. Without
+/// it every relaunch looks overdue and fires the backfill a minute in.
+pub fn state_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join("jobs.json")
+}
+
+pub fn read_last_run(data_dir: &Path) -> Option<DateTime<Local>> {
+    let raw = std::fs::read_to_string(state_path(data_dir)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let text = value.get("last_run")?.as_str()?;
+    DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|when| when.with_timezone(&Local))
+}
+
+pub fn write_last_run(data_dir: &Path, when: DateTime<Local>) {
+    let body = serde_json::json!({ "last_run": when.to_rfc3339() });
+    if let Some(parent) = state_path(data_dir).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = std::fs::write(
+        state_path(data_dir),
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    ) {
+        eprintln!("[jobs] could not record the last run: {error}");
+    }
+}
+
 impl JobState {
-    pub fn new() -> Self {
-        Self::default()
+    /// The state a relaunch starts from: whatever the last run was, read
+    /// back off disk.
+    pub fn with_last_run(last_run: Option<DateTime<Local>>) -> Self {
+        let state = Self::default();
+        if let Ok(mut inner) = state.inner.lock() {
+            inner.last_run = last_run;
+        }
+        state
     }
 
     pub fn is_running(&self) -> bool {
@@ -222,7 +256,10 @@ const TICK_SECS: u64 = 60;
 
 pub fn start(app: AppHandle) {
     std::thread::spawn(move || loop {
-        std::thread::sleep(std::time::Duration::from_secs(TICK_SECS));
+        // A click on Summarise must not wait up to a minute for the next
+        // tick, so the queue wakes this thread when something is pushed.
+        app.state::<JobQueue>()
+            .wait_for_work(std::time::Duration::from_secs(TICK_SECS));
         tick(&app);
     });
 }
@@ -246,7 +283,7 @@ fn tick(app: &AppHandle) {
         &summarise::list_summarised(&folder),
     );
 
-    let queued: Vec<QueuedJob> = app.state::<JobQueue>().drain();
+    let queued: Vec<QueuedJob> = app.state::<JobQueue>().drain_if_idle(&state);
     if pending.is_empty() && queued.is_empty() {
         return;
     }
@@ -264,6 +301,7 @@ fn tick(app: &AppHandle) {
             },
         };
         state.record(outcome);
+        persist_last_run(app);
         if result.is_err() {
             // One failure is usually the engine, and every following day
             // would fail the same way. Stop and let the user see it.
@@ -293,12 +331,21 @@ fn tick(app: &AppHandle) {
             },
         };
         state.record(outcome);
+        persist_last_run(app);
     }
     state.set_running(false);
     crate::tray::refresh(
         app,
         app.state::<crate::capture::CaptureState>().is_running(),
     );
+}
+
+/// Writes the moment of the run just finished, so a relaunch knows the
+/// schedule has already been served today.
+fn persist_last_run(app: &AppHandle) {
+    if let Ok(data_dir) = app.path().app_data_dir() {
+        write_last_run(&data_dir, Local::now());
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -342,6 +389,9 @@ pub struct JobQueue {
     queue: Mutex<std::collections::VecDeque<QueuedJob>>,
     history: Mutex<Vec<JobSummary>>,
     counter: std::sync::atomic::AtomicU64,
+    /// Wakes the runner when a job is pushed, so an on-demand run starts
+    /// within about a second rather than at the next tick.
+    work: std::sync::Condvar,
 }
 
 impl JobQueue {
@@ -364,7 +414,19 @@ impl JobQueue {
             date,
             status: JobStatus::Queued,
         });
+        self.work.notify_all();
         JobId(id)
+    }
+
+    /// Blocks until something is queued or the timeout expires, whichever
+    /// comes first. The runner's own pacing, so the tick is still a tick
+    /// when nothing is asking.
+    pub fn wait_for_work(&self, timeout: std::time::Duration) {
+        let queue = self.queue.lock().expect("job queue");
+        if !queue.is_empty() {
+            return;
+        }
+        let _ = self.work.wait_timeout(queue, timeout).expect("job queue");
     }
 
     /// The trigger travels with the job because the runner writes the ledger
@@ -385,9 +447,21 @@ impl JobQueue {
         history.iter().rev().take(8).cloned().collect()
     }
 
-    /// Takes every queued job, leaving the queue empty. Called by the tick
-    /// when the runner is idle.
-    fn drain(&self) -> Vec<QueuedJob> {
+    /// One job by id, queued or finished. The window polls this after
+    /// pressing Summarise, and a job that has not started yet must still be
+    /// findable.
+    pub fn find(&self, id: &str) -> Option<JobSummary> {
+        let history = self.history.lock().expect("job history");
+        history.iter().find(|job| job.id == id).cloned()
+    }
+
+    /// Takes every queued job when nothing is running, and nothing at all
+    /// when a run is in flight: that is what keeps on-demand and scheduled
+    /// runs serial. The queue is left intact for the next tick.
+    fn drain_if_idle(&self, state: &JobState) -> Vec<QueuedJob> {
+        if state.is_running() {
+            return Vec::new();
+        }
         let mut queue = self.queue.lock().expect("job queue");
         std::mem::take(&mut *queue).into_iter().collect()
     }
@@ -626,6 +700,60 @@ mod tests {
         let recent = queue.recent();
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].id, id.to_string());
+    }
+
+    #[test]
+    fn a_queued_job_waits_while_a_run_is_in_flight() {
+        // The on-demand path goes through the queue precisely so that a
+        // click cannot start a second engine run beside a scheduled one.
+        let queue = JobQueue::for_test();
+        let state = JobState::default();
+        queue.enqueue_summarise(day(2026, 8, 30));
+
+        state.set_running(true);
+        assert!(queue.drain_if_idle(&state).is_empty(), "nothing runs yet");
+
+        state.set_running(false);
+        let drained = queue.drain_if_idle(&state);
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].date, day(2026, 8, 30));
+    }
+
+    #[test]
+    fn a_job_is_findable_by_id_while_it_is_still_queued() {
+        let queue = JobQueue::for_test();
+        let id = queue.enqueue_summarise(day(2026, 8, 30));
+        let found = queue.find(&id.to_string()).expect("the queued job");
+        assert_eq!(found.status, JobStatus::Queued);
+        assert_eq!(found.date, day(2026, 8, 30));
+        assert!(queue.find("job-nope").is_none());
+    }
+
+    #[test]
+    fn pushing_a_job_wakes_the_runner_rather_than_letting_it_sleep_out_the_tick() {
+        let queue = std::sync::Arc::new(JobQueue::for_test());
+        let pusher = queue.clone();
+        let started = std::time::Instant::now();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            pusher.enqueue_summarise(day(2026, 8, 30));
+        });
+        queue.wait_for_work(std::time::Duration::from_secs(30));
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "the wait returned in {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_last_run_survives_a_relaunch() {
+        let dir = tempdir().unwrap();
+        assert!(read_last_run(dir.path()).is_none());
+        let when = at(2026, 8, 29, 6, 0);
+        write_last_run(dir.path(), when);
+        let state = JobState::with_last_run(read_last_run(dir.path()));
+        assert_eq!(state.last_run(), Some(when));
     }
 
     #[test]

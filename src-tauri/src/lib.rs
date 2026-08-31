@@ -446,20 +446,69 @@ fn copy_context(selection: propose::Selection) -> String {
     propose::copy_as_context(&selection)
 }
 
-/// Runs on the async pool: the engine can take minutes and this must not
-/// block the webview or the main thread.
-#[tauri::command]
-async fn summarise_now(app: tauri::AppHandle, date: String) -> Result<(), String> {
-    let parsed = parse_date(&date)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = jobs::run_one(&app, parsed, ledger::Trigger::OnDemand);
-        crate::tray::refresh(&app, app.state::<capture::CaptureState>().is_running());
-        result
-    })
-    .await
-    .map_err(|e| e.to_string())?
+#[derive(Serialize)]
+struct SummariseNowPayload {
+    job_id: String,
 }
 
+/// The wire shape of one job. Flat, because the window polls it by id and
+/// wants the failure text beside the status rather than nested inside it.
+#[derive(Serialize)]
+struct JobSummaryPayload {
+    id: String,
+    date: String,
+    status: String,
+    stderr: Option<String>,
+}
+
+impl From<jobs::JobSummary> for JobSummaryPayload {
+    fn from(job: jobs::JobSummary) -> Self {
+        let (status, stderr) = match job.status {
+            jobs::JobStatus::Queued => ("queued", None),
+            jobs::JobStatus::Running => ("running", None),
+            jobs::JobStatus::Done => ("done", None),
+            jobs::JobStatus::Failed { stderr } => ("failed", Some(stderr)),
+        };
+        JobSummaryPayload {
+            id: job.id,
+            date: job.date.to_string(),
+            status: status.to_string(),
+            stderr,
+        }
+    }
+}
+
+/// Queues the run rather than starting it. The queue is what keeps
+/// on-demand and scheduled runs serial: two engine processes writing the
+/// same summary is the failure this closes.
+#[tauri::command]
+fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayload, String> {
+    let parsed = parse_date(&date)?;
+    let config = settings::load(&app);
+    if config.folder.is_none() {
+        return Err("no capture folder is set".to_string());
+    }
+    if config.engine.is_none() {
+        return Err("no engine is connected".to_string());
+    }
+    let id = app
+        .state::<jobs::JobQueue>()
+        .enqueue_summarise_with(parsed, ledger::Trigger::OnDemand);
+    Ok(SummariseNowPayload {
+        job_id: id.to_string(),
+    })
+}
+
+/// One job by id, queued or finished, for the window to poll after it has
+/// pressed Summarise.
+#[tauri::command]
+fn job_state(app: tauri::AppHandle, job_id: String) -> Option<JobSummaryPayload> {
+    app.state::<jobs::JobQueue>()
+        .find(&job_id)
+        .map(JobSummaryPayload::from)
+}
+
+/// The last outcome of any run, scheduled or on demand. The tray reads it.
 #[tauri::command]
 fn job_status(state: tauri::State<jobs::JobState>) -> Option<jobs::Outcome> {
     state.last_outcome()
@@ -840,6 +889,7 @@ pub fn run() {
             open_link,
             summarise_now,
             job_status,
+            job_state,
             engine_detect,
             engine_test,
             engine_auth,
@@ -871,7 +921,16 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.manage(capture::CaptureState::new());
-            app.manage(jobs::JobState::new());
+            {
+                // The schedule's own memory: without it every launch looks
+                // overdue and fires the backfill a minute after startup.
+                let last_run = app
+                    .path()
+                    .app_data_dir()
+                    .ok()
+                    .and_then(|dir| jobs::read_last_run(&dir));
+                app.manage(jobs::JobState::with_last_run(last_run));
+            }
             app.manage(jobs::JobQueue::default());
             app.manage(ProposalStore::default());
             jobs::start(app.handle().clone());
