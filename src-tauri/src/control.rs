@@ -134,7 +134,7 @@ pub mod writes {
 
     /// Exactly the keys the Settings page exposes. There is deliberately no
     /// retention key: nothing in the product deletes captured content.
-    pub const SETTABLE_KEYS: &[&str] = &[
+    pub(crate) const SETTABLE_KEYS: &[&str] = &[
         "folder",
         "interval_secs",
         "min_dwell_secs",
