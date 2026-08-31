@@ -153,6 +153,74 @@ fn open_link(url: String) {
     }
 }
 
+fn parse_date(date: &str) -> Result<chrono::NaiveDate, String> {
+    chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("{date} is not a date"))
+}
+
+/// Runs on the async pool: the engine can take minutes and this must not
+/// block the webview or the main thread.
+#[tauri::command]
+async fn summarise_now(app: tauri::AppHandle, date: String) -> Result<(), String> {
+    let parsed = parse_date(&date)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = jobs::run_one(&app, parsed, ledger::Trigger::OnDemand);
+        crate::tray::refresh(&app, app.state::<capture::CaptureState>().is_running());
+        result
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn job_status(state: tauri::State<jobs::JobState>) -> Option<jobs::Outcome> {
+    state.last_outcome()
+}
+
+#[tauri::command]
+fn engine_detect() -> Vec<settings::Engine> {
+    engine::detect(&engine::login_shell_env())
+}
+
+/// Proves the connection now, in front of someone who can fix it, rather
+/// than at 6am six weeks from now.
+#[tauri::command]
+async fn engine_test(engine_config: settings::Engine) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut probe = engine_config;
+        // A test must never park the window for ten minutes.
+        probe.timeout_secs = probe.timeout_secs.min(60);
+        engine::run(
+            &probe,
+            "Reply with exactly the word: ok",
+            &engine::login_shell_env(),
+        )
+        .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Whether the engine is signed in, without spending a model call. Ten
+/// second cap inside `auth_state`; never called on the schedule.
+#[tauri::command]
+async fn engine_auth(engine_config: settings::Engine) -> engine::AuthState {
+    tauri::async_runtime::spawn_blocking(move || {
+        engine::auth_state(&engine_config, &engine::login_shell_env())
+    })
+    .await
+    .unwrap_or(engine::AuthState::Unknown)
+}
+
+#[tauri::command]
+fn get_settings(app: tauri::AppHandle) -> settings::Settings {
+    settings::load(&app)
+}
+
+#[tauri::command]
+fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
+    settings::save(&app, &next).map_err(|e| e.to_string())
+}
+
 pub fn open_setup_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("setup") {
         let _ = window.show();
@@ -261,7 +329,14 @@ pub fn run() {
             start_if_enabled,
             toggle_capture,
             census_snapshot,
-            open_link
+            open_link,
+            summarise_now,
+            job_status,
+            engine_detect,
+            engine_test,
+            engine_auth,
+            get_settings,
+            set_settings
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
