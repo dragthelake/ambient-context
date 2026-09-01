@@ -197,9 +197,9 @@ Errors: "There are no ledger entries for {date}."
 
 ### `summarise_day`
 
-Queues a summary for one day using the connected engine, replacing any
+Queues a summary for one day using the connected agent, replacing any
 existing summary. Returns a job id immediately; poll `capture_status` until
-the job reports done or failed. Needs the app running with an engine. Input:
+the job reports done or failed. Needs the app running with an agent. Input:
 `date` only. Result:
 
 ```json
@@ -207,7 +207,7 @@ the job reports done or failed. Needs the app running with an engine. Input:
   "note": "Poll capture_status and look for this job id under jobs." }
 ```
 
-Errors: `no_engine`, `not_found` (no capture for that date), `invalid`
+Errors: `no_agent`, `not_found` (no capture for that date), `invalid`
 (bad date or no folder), `not_running`.
 
 ### `list_rules`
@@ -327,12 +327,15 @@ Changes no files. Needs the app running. Input: `date` only. Result:
 Two mechanisms. An unknown tool name is a JSON-RPC protocol error, code
 `-32602`, named in the message. Everything else is a normal result with
 `isError: true` and one sentence in the content that says what to do next:
-a missing day, a refused rule, an unauthenticated engine, an app that is not
+a missing day, a refused rule, an unauthenticated agent, an app that is not
 running.
 
 The refusal codes the app can return over the control socket: `not_running`,
 `bad_request`, `unknown_key`, `invalid`, `duplicate`, `not_found`, `locked`,
-`no_engine` and `io`.
+`no_agent` and `io`.
+
+`no_agent` was called `no_engine` before 0.2.0. The app was unreleased at
+the time, so no client should be matching the old code.
 
 ## What there is no tool for
 

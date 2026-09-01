@@ -83,7 +83,7 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
     if config.agent.is_none() {
         return Response::err(
             "no_agent",
-            "No agent is connected. Connect one in Settings, then try again.",
+            "No agent is connected. Connect one on the Agent tab, then try again.",
         );
     }
     let Some(folder) = config.folder.clone() else {
