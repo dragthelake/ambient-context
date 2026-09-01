@@ -511,9 +511,6 @@ impl JobQueue {
     /// generation so the runner drops whatever it already drained. Returns
     /// how many it cleared, which is not the whole story: the runner may
     /// hold more. The caller counts its own jobs to report a total.
-    // Wired to the Overview Stop button in a follow-up task; until then
-    // the tests are its only caller.
-    #[allow(dead_code)]
     pub fn cancel_queued(&self) -> usize {
         use std::sync::atomic::Ordering;
         self.cancel_generation.fetch_add(1, Ordering::SeqCst);

@@ -600,6 +600,43 @@ fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayl
     })
 }
 
+/// Enqueues one summarise per date and hands back the job ids in the same
+/// order, so the window can poll the batch it just started.
+///
+/// The caller picks the set. The Overview map already holds the day list it
+/// draws, so deciding "has capture, has no summary" there avoids a second
+/// implementation of the same rule. A day summarised by something else in
+/// between is simply summarised twice.
+#[tauri::command]
+fn summarise_days(app: tauri::AppHandle, dates: Vec<String>) -> Result<Vec<String>, String> {
+    let config = settings::load(&app);
+    if config.folder.is_none() {
+        return Err("no capture folder is set".to_string());
+    }
+    if config.engine.is_none() {
+        return Err("no engine is connected".to_string());
+    }
+    let queue = app.state::<jobs::JobQueue>();
+    let mut ids = Vec::with_capacity(dates.len());
+    for date in &dates {
+        let parsed = parse_date(date)?;
+        ids.push(
+            queue
+                .enqueue_summarise_with(parsed, ledger::Trigger::OnDemand)
+                .to_string(),
+        );
+    }
+    Ok(ids)
+}
+
+/// Stops a batch. The day already in flight finishes; everything after it is
+/// dropped. Returns how many were still queued, which is informational: the
+/// runner may hold more, so the window counts its own cancelled ids.
+#[tauri::command]
+fn cancel_queued_summaries(app: tauri::AppHandle) -> usize {
+    app.state::<jobs::JobQueue>().cancel_queued()
+}
+
 /// One job by id, queued or finished, for the window to poll after it has
 /// pressed Summarise.
 #[tauri::command]
@@ -1426,6 +1463,8 @@ pub fn run() {
             census_snapshot,
             open_link,
             summarise_now,
+            summarise_days,
+            cancel_queued_summaries,
             job_status,
             job_state,
             engine_detect,
