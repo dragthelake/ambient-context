@@ -114,7 +114,7 @@ body:has(.main-window) {
      hard against them as a saturated navy edge. It is deliberately more
      than the 3px the status bar keeps below the pane: that gap is between
      two grey surfaces and needs less. */
-  padding: 6px 4px 0 8px;
+  padding: 6px 8px 0 8px;
   position: relative;
   z-index: 1;
 }
@@ -161,6 +161,14 @@ body:has(.main-window) {
   padding: 4px 13px 7px;
   margin-bottom: -3px;
   z-index: 2;
+}
+
+/* Settings sits hard against the right edge, apart from the tabs that are
+   places in the record. It is a drawer of preferences rather than another
+   view, and the gap says so without needing a separator. It is always the
+   last tab, so :last-child is the whole rule. */
+.tabstrip .tab:last-child {
+  margin-left: auto;
 }
 
 .tab:focus-visible {
@@ -1038,8 +1046,12 @@ body:has(.main-window) {
   position: relative;
   background: var(--well);
   box-shadow: var(--bevel-in);
-  /* Holds the grid inside the bevel, the same reason .tabpane carries it. */
-  padding: 2px;
+  /* Two pixels for the bevel to paint into, the same reason .tabpane carries
+     it, and two more so the first row does not sit against it. Without the
+     second pair the field is flush along the top and bottom: the space that
+     appears at the sides is not padding at all, it is leftover width from
+     centring the grid, and there is no vertical equivalent. */
+  padding: 4px;
   overflow: hidden;
 }
 
