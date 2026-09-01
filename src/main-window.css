@@ -1027,3 +1027,75 @@ body:has(.main-window) {
 
 
 
+
+/* The defrag map
+   Geometry and palette are measured from the reference screenshot in
+   docs/reference, not estimated: a 7x10 fill inside a 1px outline, so the
+   pitch is 9x12. Adjacent outlines touch, which is what makes the field
+   read as one black lattice rather than a scatter of tiles. */
+
+.defrag-well {
+  position: relative;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  /* Holds the grid inside the bevel, the same reason .tabpane carries it. */
+  padding: 2px;
+  overflow: hidden;
+}
+
+.defrag-grid {
+  display: grid;
+  /* No gap: the cells' own outlines meet to form the lattice. */
+  gap: 0;
+  justify-content: center;
+}
+
+.defrag-cell {
+  appearance: none;
+  width: 9px;
+  height: 12px;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #0a0a0a;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.defrag-cell.is-raw {
+  background: #8be2f8;
+}
+
+.defrag-cell.is-summarised {
+  background: #0308a3;
+}
+
+.defrag-cell.is-failed {
+  background: #d84a3a;
+}
+
+.defrag-cell:disabled {
+  /* Still drawn, just not a target. The default disabled treatment would
+     grey the fill and lose the colour the map exists to show. */
+  color: inherit;
+}
+
+/* The period's own info box, not a native title attribute: those arrive
+   after a delay, are styled by macOS, and cannot hold four lines. */
+.defrag-info {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  background: #ffffe1;
+  border: 1px solid var(--chrome-darker);
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.defrag-info-hint {
+  color: var(--chrome-dark);
+}
