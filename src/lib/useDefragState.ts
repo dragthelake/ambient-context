@@ -29,13 +29,25 @@ export function useDefragState() {
   const [failed, setFailed] = useState<Set<string>>(new Set());
   const [jobs, setJobs] = useState<string[]>([]);
   const [done, setDone] = useState<Set<string>>(new Set());
-  const [cancelled, setCancelled] = useState(0);
+  const [cancelled, setCancelled] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState("Ready");
   const running = jobs.length > 0 && done.size < jobs.length;
   const today = useRef(todayIso());
+  // Shared by every caller of reload, not just the poll effect's own local
+  // `live` flag: reload is also called from the mount effect and the focus
+  // listener, and any of those awaits can still be in flight at unmount.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const reload = useCallback(async () => {
-    setDays(await invoke<DayEntry[]>("list_days"));
+    const nextDays = await invoke<DayEntry[]>("list_days");
+    if (!mounted.current) return;
+    setDays(nextDays);
   }, []);
 
   useEffect(() => {
@@ -51,7 +63,7 @@ export function useDefragState() {
     const dates = pendingDates(days);
     if (dates.length === 0) return;
     setDone(new Set());
-    setCancelled(0);
+    setCancelled(new Set());
     setFailed(new Set());
     try {
       const ids = await invoke<string[]>("summarise_days", { dates });
@@ -80,6 +92,10 @@ export function useDefragState() {
           if (!live || !state) continue;
           if (state.status === "done") {
             setDone((current) => new Set(current).add(job));
+            // reload does its own invoke round trip; it guards its own
+            // setDays against the hook having unmounted meanwhile, since
+            // the `live` flag here only covers this tick, not that second
+            // await.
             await reload();
           }
           if (state.status === "failed") {
@@ -89,7 +105,10 @@ export function useDefragState() {
           }
           if (state.status === "cancelled") {
             setDone((current) => new Set(current).add(job));
-            setCancelled((n) => n + 1);
+            // A job id added twice, from overlapping ticks racing on the
+            // same job, is still one id: the count must come from the
+            // set's size, never from an increment that can double count.
+            setCancelled((current) => new Set(current).add(job));
           }
           if (state.status === "running") {
             setStatus(`Summarising ${state.date}`);
@@ -106,7 +125,7 @@ export function useDefragState() {
   // The batch has finished. Say how it went once, not every tick.
   useEffect(() => {
     if (jobs.length === 0 || done.size < jobs.length) return;
-    setStatus(cancelled > 0 ? `Stopped, ${cancelled} skipped` : "Ready");
+    setStatus(cancelled.size > 0 ? `Stopped, ${cancelled.size} skipped` : "Ready");
   }, [jobs, done, cancelled]);
 
   return {
