@@ -119,7 +119,7 @@ export function Main() {
             the bevel and never scrolls; this one scrolls inside it. */}
         <div className="tabpane-scroll">
           {tab === "overview" && (
-            <Overview status={status} onOpenDay={openDay} />
+            <Overview status={status} onOpenDay={openDay} onOpenAgent={() => setTab("agent")} />
           )}
           {tab === "context" && <DayView date={contextDate ?? undefined} />}
           {tab === "agent" && <AgentTab />}

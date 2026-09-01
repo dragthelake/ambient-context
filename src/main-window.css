@@ -149,7 +149,7 @@ body:has(.main-window) {
 
 .tab.is-current {
   /* The only tab that breaks the pane's top line: it stands 2px taller
-     and runs 3px into the sheet, which is the whole of how a notebook tab
+     and runs 2px into the sheet, which is the whole of how a notebook tab
      says it is the one in front.
 
      The padding is arithmetic, not taste. Horizontal is identical to an
@@ -157,9 +157,9 @@ body:has(.main-window) {
      it cannot shift. Vertically, the extra bottom padding is exactly the
      negative margin, which holds the label on the same line while the tab
      itself grows upward: text top = bottom - padding-bottom - line-height,
-     so adding 3 to both the overhang and the padding cancels out. */
-  padding: 4px 13px 7px;
-  margin-bottom: -3px;
+     so adding 2 to both the overhang and the padding cancels out. */
+  padding: 4px 13px 6px;
+  margin-bottom: -2px;
   z-index: 2;
 }
 
@@ -1103,4 +1103,14 @@ body:has(.main-window) {
 
 .defrag-spacer {
   flex: 1;
+}
+
+/* Sits above the controls, where the disabled Summarise button is, so it
+   appears exactly where the user would have reached for it. */
+.agent-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 12px;
 }

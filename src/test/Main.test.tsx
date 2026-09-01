@@ -236,4 +236,23 @@ describe("the main window's tab strip", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
     await waitFor(() => expect(screen.queryByText("Schedule")).toBe(null));
   });
+
+  it("prompts to set up an agent when none is connected", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+    expect(
+      await screen.findByText("No agent connected. Summarising needs one."),
+    ).toBeTruthy();
+  });
+
+  it("opens the Agent tab from that prompt", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+    fireEvent.click(await screen.findByRole("button", { name: "Set up an agent" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tab", { name: "Agent" }).getAttribute("aria-selected"),
+      ).toBe("true"),
+    );
+  });
 });

@@ -12,9 +12,11 @@ import type { Settings } from "../lib/days";
 export function Overview({
   status,
   onOpenDay,
+  onOpenAgent,
 }: {
   status: AppStatus;
   onOpenDay: (date: string) => void;
+  onOpenAgent: () => void;
 }) {
   const { capture, setCapture, ready } = status;
   const defrag = useDefragState();
@@ -38,6 +40,14 @@ export function Overview({
           today={defrag.today}
           onOpenDay={onOpenDay}
         />
+        {hasAgent ? null : (
+          <p className="agent-missing">
+            No agent connected. Summarising needs one.{" "}
+            <button type="button" onClick={onOpenAgent}>
+              Set up an agent
+            </button>
+          </p>
+        )}
         <DefragControls
           pending={defrag.pending}
           running={defrag.running}
