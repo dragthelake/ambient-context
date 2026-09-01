@@ -81,24 +81,18 @@ body:has(.main-window) {
   border-bottom-right-radius: var(--corner-inner-bottom);
 }
 
-/* Two buttons where Windows put its three. Grouped so the gap between
-   them stays even and the pair sits hard against the right edge. */
+/* Two buttons where Windows put its three. Grouped so the gap between them
+   stays even. They no longer sit hard against the right edge: the title bar
+   carries 4px of padding there so the navy runs past the close button. */
 
 .titlebar-buttons {
   display: flex;
   gap: 3px;
 }
 
-/* The close button keeps the reference's tight 2px inset from the edge,
-   which puts its top right corner exactly on the window's corner arc: at
-   the button's top edge the arc has reached precisely that x, so a square
-   corner gets shaved. Rounding the corner pulls it inside the curve
-   instead of moving the button inward, so the navy surround stays as
-   tight as the reference's. 4px against the window's 10px arc clears it
-   with a pixel and a half to spare. */
-.main-window .titlebar-button:last-child {
-  border-top-right-radius: 4px;
-}
+/* The close button used to need its top right corner rounded to clear the
+   window's corner arc, which its square corner sat exactly on. The buttons
+   are circles now, so the arc has nothing to shave. */
 
 /* Tab strip
 
@@ -116,9 +110,11 @@ body:has(.main-window) {
      sheet rather than continuing its edge. The reference lines them up;
      this does not, by choice.
 
-     The gap above matches the gap the status bar keeps below the pane, so
-     the dialog has one spacing rhythm top and bottom. */
-  padding: 3px 4px 0 8px;
+     The 6px above lets the tabs breathe under the title bar, which sits
+     hard against them as a saturated navy edge. It is deliberately more
+     than the 3px the status bar keeps below the pane: that gap is between
+     two grey surfaces and needs less. */
+  padding: 6px 4px 0 8px;
   position: relative;
   z-index: 1;
 }
@@ -178,16 +174,23 @@ body:has(.main-window) {
   flex: 1;
   min-height: 0;
   display: flex;
-  /* Flush with the window's padding box, which is where the status bar
-     sits too, so the two halves of the dialog share one left and right
-     edge. The tab strip is indented from this by choice; the pane and the
-     status bar are not. */
-  margin: 0;
+  /* Inset from the window's padding box on three sides, so the sheet reads
+     as an object laid on the dialog rather than as the dialog's own lining.
+     The status bar stays flush against the frame and carries the bottom
+     edge on its own. 4px each side puts the pane's left edge halfway
+     between the frame and the first tab, which is at 8px. */
+  margin: 0 4px 4px;
   /* The pane is the same face grey as the tab strip, as in the reference:
      a tabbed dialog is one sheet, and only the bevel says where it starts. */
   background: var(--chrome);
   box-shadow: var(--bevel-out);
-  /* The frame never scrolls, so nothing can be painted over it. */
+  /* The frame never scrolls, and this padding is what keeps it that way.
+     overflow: hidden clips descendants to the padding box, and an inset
+     box-shadow paints beneath them, so with no padding the scroller's clip
+     edge lands exactly on the 2px the bevel occupies and scrolled content
+     rides over it. Two pixels of padding hold the scroller inside the bevel.
+     Whatever comes off here goes back on .tabpane-scroll. */
+  padding: 2px;
   overflow: hidden;
 }
 
@@ -205,8 +208,9 @@ body:has(.main-window) {
   overflow-y: auto;
   overscroll-behavior: contain;
   /* Holds content off the bevel, as the reference's pane does. Each view
-     adds only what it needs on top of this. */
-  padding: 7px;
+     adds only what it needs on top of this. Two less than it reads, because
+     the frame now carries those two. */
+  padding: 5px;
 }
 
 .tabpane-scroll::-webkit-scrollbar {
@@ -525,6 +529,8 @@ body:has(.main-window) {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* Holds the scroller inside the bevel; see the note on .tabpane. */
+  padding: 2px;
   overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
@@ -536,7 +542,8 @@ body:has(.main-window) {
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 14px 18px;
+  /* Two less on each side than it reads: the frame carries those two. */
+  padding: 12px 16px;
 }
 
 
@@ -608,6 +615,8 @@ body:has(.main-window) {
   flex: 1;
   min-height: 0;
   display: flex;
+  /* Holds the scroller inside the bevel; see the note on .tabpane. */
+  padding: 2px;
   overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
@@ -620,7 +629,8 @@ body:has(.main-window) {
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 10px 12px;
+  /* Two less on each side than it reads: the frame carries those two. */
+  padding: 8px 10px;
 }
 
 .raw-block {

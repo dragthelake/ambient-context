@@ -145,6 +145,10 @@ Swift helpers were written to post real HID events. They live in `/tmp` and
 are **not** in the repo; worth keeping if this continues:
 
 - `press.swift x y` holds the mouse down, so `:active` can be photographed
+- `press2.swift x y` holds, then releases 300px away. A mouseup off the
+  element cancels the click, which is the only way to photograph `:active`
+  on a button that does something: holding the title bar `?` and releasing
+  in place opens the About window every time
 - `click.swift x y` a real down/up click, where System Events failed
 - `scroll.swift x y ticks` real scroll wheel events
 
@@ -167,12 +171,35 @@ osascript -e 'tell application "System Events" to set frontmost of \
 
 ## Open items
 
-1. **Sound is unverified by ear.** `cuelume` plays `ready` on starting
-   capture, `release` on stopping, `tick` on changing tab and `chime` on
-   opening About. Volume and on/off are in Settings.
+None.
 
 ## Since fixed
 
+- **Sound is verified by ear.** `cuelume` plays `ready` on starting capture,
+  `release` on stopping, `tick` on changing tab and `chime` on opening About.
+  Volume and on/off are in Settings.
+- The title bar `?` and `×` are circles: a flat `--chrome` disc with a 1px
+  `--chrome-darker` outline, darkening to `--chrome-dark` when pressed. Flat
+  because no bevel survives at 16px on a circle. An offset inset shadow
+  displaces the interior instead of making a ring, which is the same reason
+  the Settings radios are SVG arcs; a conic gradient painting a two-tone ring
+  notches where its light and dark halves meet and goes uneven in thickness
+  around the curve; and a radial gradient cannot size a 1px ring at all,
+  because its percentage colour stops measure along the ray to the farthest
+  corner rather than the radius, so a nominal 1px renders at 3px and soft.
+  Both were built and photographed before being discarded.
+- `box-shadow: none` on `.titlebar-button` is deliberate and must stay.
+  Dropping the property rather than setting it to none lets the generic
+  `button` rule's four-layer `--bevel-out` through, and on a circle that
+  reads as a smear. It cost an hour; `getComputedStyle` found it in one call
+  after three screenshots had not.
+- The pressed state no longer nudges the glyph. `padding: 1px 0 0 1px` on a
+  fixed-height button only ever moved it sideways: centring inside a content
+  box one pixel shorter resolves to the same row. Measured against a real HID
+  press at +1px horizontal, 0 vertical.
+- The close button no longer needs its top right corner rounded to clear the
+  window's corner arc. A circle has nothing to shave.
+- **The app icon** has its own section above.
 - `.raw-pane` and `.summary-pane` had the same scroll-layer defect as
   `.tabpane`: an inset bevel painted under scrolling content. Both are now
   a non-scrolling frame around a scrolling child. `SummaryPane` had five
@@ -180,8 +207,9 @@ osascript -e 'tell application "System Events" to set frontmost of \
   component now.
 - The About window has its own capability with only `core:default` and
   `core:window:allow-close`, rather than inheriting the default set.
-- Title bar glyphs are traced bitmaps in `src/components/PixelGlyph.tsx`,
-  and the buttons use the reference's own simpler bevel at 16x14.
+- Title bar glyphs are traced bitmaps in `src/components/PixelGlyph.tsx`.
+  The buttons that carry them started as the reference's 16x14 rectangles
+  with its own simpler bevel; they are circles now, as above.
 - `--bevel-in` had its two dark tones inverted. Windows puts the mid grey
   outside and the black inside; ours was the other way round, which made
   every sunken surface in the app read as drawn on rather than cut in.

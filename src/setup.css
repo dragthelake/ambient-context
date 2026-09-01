@@ -50,16 +50,17 @@
   --well: #ffffff;
   --led-green: #008000;
   /* The monitor is a lighter object than the dialog it sits on, lit from
-     the top left. Its screen is grey rather than teal, and simply dims
-     when capture stops: the same picture, unlit. */
+     the top left. Idle, its tube is the reference's near-black; recording
+     lights the glass to paper grey and the ink goes dark on it, the way a
+     terminal reads when it is actually on. */
   --crt-case: #d4d4d4;
   --crt-lit: #ffffff;
   --crt-shade: #9a9a9a;
-  --crt-cast: #8a8a8a;
+  --crt-dark: #3a3a3a;
   --crt-screen-on: #dcdcdc;
-  --crt-screen-off: #a6a6a6;
+  --crt-screen-off: #181818;
   --crt-ink: #141414;
-  --crt-ink-dim: #6f6f6f;
+  --crt-ink-dim: #5f5f5f;
   --warn-ink: #800000;
   --warn-bg: #dfdfdf;
   --mono: "Fira Code", "SF Mono", Menlo, Monaco, monospace;
@@ -119,7 +120,10 @@ body {
      gradient title bar if that is ever wanted. */
   background: var(--title-a);
   color: var(--chrome-lighter);
-  padding: 2px 2px 2px 6px;
+  /* 2px more than the reference on each side. Its buttons sit hard against
+     the frame; the round ones here need the navy to carry on past them, or
+     they read as clipped by the window edge rather than sitting in the bar. */
+  padding: 2px 4px 2px 8px;
 }
 
 .titlebar-text {
@@ -129,23 +133,30 @@ body {
   letter-spacing: 0.08em;
 }
 
-/* 16x14 with the reference's own bevel, which is simpler than the window's:
-   one pixel of white on the top and left, then one grey and one black on
-   the bottom and right. The four-layer --bevel-out belongs to windows and
-   push buttons, and reads too heavy at this size. */
+/* Circular, 16px, which is the reference's button width and fits the 22px
+   title bar with its 2px padding and a pixel to spare.
+
+   Flat on purpose. A bevel does not survive at this size on a circle. An
+   offset inset shadow displaces the interior instead of making a ring,
+   which is why the radios in Settings are SVG arcs; and a conic gradient
+   painting a two-tone ring notches visibly where its light and dark halves
+   meet, with the thickness going uneven around the curve. One flat disc
+   and one solid outline is what reads cleanly at 16px. */
 .titlebar-button {
   appearance: none;
-  border: none;
   width: 16px;
-  height: 14px;
+  height: 16px;
   min-width: 0;
   padding: 0;
   display: grid;
   place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--chrome-darker);
   background: var(--chrome);
   color: var(--ink);
-  box-shadow: inset -1px -1px var(--chrome-darker),
-    inset 1px 1px var(--chrome-lighter), inset -2px -2px var(--chrome-dark);
+  /* Explicitly off, not merely unset: the generic `button` rule below sets
+     --bevel-out, whose offset inset shadows smear on a circle. */
+  box-shadow: none;
 }
 
 /* The glyph inherits the button's ink, so pressed and disabled states
@@ -155,11 +166,12 @@ body {
   fill: currentColor;
 }
 
-/* Pressed: the bevel inverts and the glyph moves down and right by one,
-   as every Windows button of the period did. */
+/* Pressed: the disc darkens. No glyph nudge, which is the other half of
+   keeping this simple: `padding: 1px 0 0 1px` on a fixed-height button only
+   ever moved the glyph sideways, because centring inside a box one pixel
+   shorter resolves to the same row. */
 .titlebar-button:active {
-  box-shadow: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-lighter);
-  padding: 1px 0 0 1px;
+  background: var(--chrome-dark);
 }
 
 /* Body */
@@ -203,13 +215,13 @@ body {
   margin: 0 auto;
 }
 
-/* Every shape in the drawing is outlined, then filled and shaded. The
-   outline keeps it in the same idiom as the rest of the app; the fills are
-   what make it an object with a light on it rather than a diagram. */
+/* Nothing in the drawing carries a stroke. Every shape is a flat fill,
+   and the light comes from the offsets between them: white where a shape
+   steps back from the one beneath it toward the top left, dark where it
+   steps back toward the bottom right. It is the same construction as the
+   window bevels, so the object and the chrome share one idiom. */
 .crt-body {
   fill: var(--crt-case);
-  stroke: var(--ink);
-  stroke-width: 1.5;
 }
 
 .crt-lit {
@@ -220,18 +232,12 @@ body {
   fill: var(--crt-shade);
 }
 
-/* Cast shadows, offset down and right of whatever throws them. */
-.crt-shadow {
-  fill: var(--crt-cast);
+.crt-dark {
+  fill: var(--crt-dark);
 }
 
-/* A recess: the screen well and the moulded strip on the chin. */
-.crt-recess {
-  fill: var(--crt-shade);
-  stroke: var(--ink);
-  stroke-width: 1.5;
-}
-
+/* Idle the tube is dark glass; powered it lights to paper grey, and the
+   ink swaps from a pale murmur to dark-on-light with it. */
 .crt-screen-fill {
   fill: var(--crt-screen-off);
   transition: fill 140ms linear;
@@ -241,16 +247,15 @@ body {
   fill: var(--crt-screen-on);
 }
 
-.crt-vent {
-  stroke: var(--crt-shade);
-  stroke-width: 1.5;
-  fill: none;
+/* The switch on the pedestal, and the power light beside it. */
+.crt-button {
+  fill: var(--crt-lit);
+  stroke: var(--crt-dark);
+  stroke-width: 1;
 }
 
 .crt-led {
-  fill: var(--crt-shade);
-  stroke: var(--ink);
-  stroke-width: 1.5;
+  fill: var(--crt-dark);
   transition: fill 140ms linear;
 }
 

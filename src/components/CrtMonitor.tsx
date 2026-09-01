@@ -1,14 +1,15 @@
 import type { ReactNode } from "react";
 
-// A CRT drawn the way the reference figure draws one: not line art, but a
-// shaded object. One light, high and to the left, which decides every
-// value in here. Top and left edges take the highlight, bottom and right
-// take the shading, and both the case and the base cast a shadow down and
-// to the right.
+// A CRT drawn the way the reference figure draws one: offset fills, not
+// outlines. Three concentric rounded rects, each stepped 3px toward the
+// top-left light, leave a white band on the lit edges and a dark band on
+// the shaded ones, which is the same construction as every bevel in the
+// chrome. Nothing in the drawing carries a stroke, and nothing casts a
+// shadow: the reference monitor sits on the dialog face by its own
+// bottom-right shading alone.
 //
-// The case, neck and base touch. A monitor whose stand floats below it
-// reads as three shapes rather than one object, which was the main thing
-// wrong with the earlier drawing.
+// The tube is near-black even when idle. What changes with power is the
+// ink on it, plus the little switch on the pedestal.
 //
 // The screen is a foreignObject so whatever it frames stays ordinary HTML,
 // which is how the ASCII eye keeps animating without knowing it is inside
@@ -23,67 +24,80 @@ export function CrtMonitor({
   return (
     <svg
       className="crt"
-      viewBox="0 0 300 250"
+      viewBox="0 0 300 234"
       role="img"
       aria-label="A computer monitor"
       preserveAspectRatio="xMidYMid meet"
     >
-      {/* Cast shadows go down first, so everything else sits on them. */}
-      <rect className="crt-shadow" x="98" y="239" width="126" height="6" rx="2" />
-      <rect className="crt-shadow" x="42" y="200" width="234" height="8" rx="2" />
+      {/* The case bevel, four fills deep. Each rect is anchored at the
+          same top-left corner and shrunk a little more than the one below
+          it, so the lower layers surface only along the bottom and right:
+          a near-black hairline at the very edge, then a mid-grey band,
+          which is the reference's soft ramp from face to outline. The
+          white rect shrinks less than the face does, so it surfaces along
+          the top and left instead. */}
+      <rect className="crt-dark" x="30" y="8" width="240" height="184" rx="6" />
+      <rect className="crt-shade" x="30" y="8" width="238.8" height="182.8" rx="5.5" />
+      <rect className="crt-lit" x="30" y="8" width="236.5" height="180.5" rx="5.5" />
+      <rect className="crt-body" x="33" y="11" width="233.5" height="177.5" rx="4.5" />
 
-      {/* Base slab, then the neck, then the case over the top of both, so
-          the joins are covered rather than drawn. */}
-      <g className="crt-body">
-        <rect x="88" y="224" width="124" height="13" rx="2" />
-        <path d="M132 194 h36 l14 30 h-64 z" />
-      </g>
-      <path className="crt-lit" d="M88 224 h124 v3 h-124 z" />
-      <path className="crt-shade" d="M88 234 h124 v3 h-124 z" />
-
-      {/* The case. A 3px corner, not the soft 8px it had: a moulded plastic
-          bezel of this era is very nearly square. The tube behind it is
-          4:3, so the case is nearly square too rather than widescreen. */}
-      <rect className="crt-body" x="30" y="8" width="240" height="192" rx="3" />
-
-      {/* The light: two bands inside the top and left edges. */}
-      <path className="crt-lit" d="M33 11 h234 v4 h-230 v182 h-4 z" />
-      {/* And the shading it implies, inside the bottom and right. */}
-      <path className="crt-shade" d="M267 11 v186 h-234 v-4 h230 v-182 z" />
-
-      {/* The screen sits in a recess, so its shadow falls on the top and
-          left inside edges: the opposite of the case, and what makes it
-          read as cut into the bezel rather than stuck on. */}
-      <rect className="crt-recess" x="48" y="24" width="204" height="153" />
-      <rect className="crt-lit" x="50" y="175" width="204" height="2" />
-      <rect className="crt-lit" x="252" y="24" width="2" height="153" />
+      {/* The screen recess is sunken, so its bevel runs opposite to the
+          case's: shade falls on the tube's top and left, and a white
+          sliver surfaces along its bottom and right, which is what the
+          reference shows at the screen's corner. */}
+      <rect className="crt-lit" x="44" y="26" width="212" height="150" rx="6" />
+      <rect className="crt-shade" x="44" y="26" width="210.5" height="148.5" rx="5.5" />
       <rect
         className="crt-screen-fill"
-        x="50"
-        y="26"
-        width="200"
-        height="149"
+        x="46"
+        y="28"
+        width="208"
+        height="146"
+        rx="5"
         data-on={glowing ? "true" : "false"}
       />
-      <foreignObject x="52" y="28" width="196" height="145">
+      <foreignObject x="50" y="32" width="200" height="138">
         <div className={glowing ? "crt-screen is-on" : "crt-screen"}>
           {children}
         </div>
       </foreignObject>
 
-      {/* Chin: vents on the left, a moulded strip and the power light on
-          the right, each with its own one-pixel light and shade. */}
-      <g className="crt-vent">
-        <path d="M60 185 h46" />
-        <path d="M60 190 h46" />
-      </g>
-      <rect className="crt-recess" x="194" y="183" width="24" height="9" rx="1" />
-      <circle
-        className={glowing ? "crt-led is-on" : "crt-led"}
-        cx="234"
-        cy="187"
-        r="4.5"
+      {/* The stand steps down in three pieces: a pedestal slab with
+          rounded bottom corners, a narrower neck, and a thin pill foot.
+          Each is the dark shape with the body fill inset a hairline
+          inside it, so the outline follows every contour instead of
+          being drawn on; and each piece butts the one above it, so the
+          joins are covered rather than drawn.
+
+          The neck comes first: its top hides behind the slab, and only
+          its hairlined sides show between slab and foot. */}
+      <rect className="crt-dark" x="94" y="200" width="112" height="17" />
+      <rect className="crt-body" x="95.2" y="200" width="109.6" height="17" />
+
+      <path
+        className="crt-dark"
+        d="M85 192 v8.5 q0 5 5 5 h120 q5 0 5 -5 v-8.5 z"
       />
+      <path
+        className="crt-body"
+        d="M86.2 192 v7.3 q0 4 3.8 4 h120 q3.8 0 3.8 -4 v-7.3 z"
+      />
+
+      {/* The switch on the pedestal's right: a raised pill, and the small
+          power light beside it, which is the one part of the object that
+          answers the recording state. */}
+      <rect className="crt-button" x="176" y="194.5" width="24" height="6" rx="3" />
+      <rect
+        className={glowing ? "crt-led is-on" : "crt-led"}
+        x="168.5"
+        y="196"
+        width="3.5"
+        height="3.5"
+      />
+
+      <rect className="crt-dark" x="75" y="216" width="150" height="9.5" rx="4.75" />
+      <rect className="crt-lit" x="76" y="217" width="148" height="7.5" rx="3.75" />
+      <rect className="crt-body" x="76" y="218.5" width="148" height="6" rx="3" />
     </svg>
   );
 }
