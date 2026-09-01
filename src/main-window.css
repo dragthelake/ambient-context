@@ -1045,15 +1045,19 @@ body:has(.main-window) {
 
 .defrag-grid {
   display: grid;
-  /* No gap: the cells' own outlines meet to form the lattice. */
-  gap: 0;
+  /* One pixel of white between cells, as the reference has. Without it the
+     outlines of adjacent cells meet and a run of summarised days reads as
+     one navy slab rather than a row of separate days. */
+  gap: 1px;
   justify-content: center;
 }
 
 .defrag-cell {
   appearance: none;
-  width: 9px;
-  height: 12px;
+  /* 6x9 of fill inside a 1px outline. With the grid's 1px gap that makes
+     the pitch 9x12, which is what the reference measures. */
+  width: 8px;
+  height: 11px;
   min-width: 0;
   padding: 0;
   margin: 0;
@@ -1189,8 +1193,8 @@ body:has(.main-window) {
 }
 
 .defrag-swatch {
-  width: 9px;
-  height: 12px;
+  width: 8px;
+  height: 11px;
   border: 1px solid #0a0a0a;
   background: #ffffff;
 }

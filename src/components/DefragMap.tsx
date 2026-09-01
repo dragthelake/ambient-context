@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { buildCells, CELL_W, type Cell } from "../lib/defrag";
+import { buildCells, CELL_GAP, CELL_W, PITCH_W, type Cell } from "../lib/defrag";
 import type { DayEntry } from "../lib/days";
 
 const STATE_WORDS: Record<Cell["state"], string> = {
@@ -51,7 +51,11 @@ export function DefragMap({
     const node = field.current;
     if (!node) return;
     const measure = () =>
-      setColumns(Math.max(1, Math.floor(node.clientWidth / CELL_W)));
+      // n columns occupy n boxes plus n-1 gaps, so the available width
+      // gains one gap before dividing by the pitch.
+      setColumns(
+        Math.max(1, Math.floor((node.clientWidth + CELL_GAP) / PITCH_W)),
+      );
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(node);

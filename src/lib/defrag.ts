@@ -1,10 +1,21 @@
 import type { DayEntry } from "./days";
 
-/// Measured from the reference screenshot: a 7x10 fill inside a 1px
-/// outline. Adjacent outlines touch rather than leaving a gutter, which is
-/// what makes the grid read as one black lattice rather than loose tiles.
-export const CELL_W = 9;
-export const CELL_H = 12;
+/// Measured from the reference screenshot, reading the actual pixel run
+/// across a cell boundary at 2x: white 2, black 2, fill 12, black 2, then
+/// white again. Halved, that is a 1px outline around a 6x9 fill, with a 1px
+/// white gap to the next cell.
+///
+/// The gap is the whole character of the thing. Without it the outlines of
+/// adjacent cells meet and a run of summarised days fuses into one navy
+/// slab with hairlines through it. With it, every day reads as its own
+/// small box sitting on white, which is what the reference shows.
+export const CELL_W = 8;
+export const CELL_H = 11;
+export const CELL_GAP = 1;
+
+/// Box plus gap. What one day occupies, and so what the column count
+/// divides by.
+export const PITCH_W = CELL_W + CELL_GAP;
 
 /// A floor, not a target. It keeps the panel's shape when only a few days
 /// have been recorded. At the Overview's width that is several years of
