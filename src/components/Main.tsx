@@ -89,6 +89,10 @@ export function Main() {
             className={tab === id ? "tab is-current" : "tab"}
             onClick={() => {
               if (id !== tab) play("tick");
+              // A tab pressed directly is not a request for a particular day, so
+              // drop any day the map asked for. Without this the Context tab would
+              // keep reopening the last cell clicked, for the rest of the session.
+              setContextDate(null);
               setTab(id);
             }}
           >

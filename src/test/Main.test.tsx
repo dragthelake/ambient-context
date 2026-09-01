@@ -21,6 +21,50 @@ const RECORDED_LABEL = new Date(`${RECORDED_DATE}T00:00:00Z`).toLocaleDateString
   { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" },
 );
 
+// A second recorded day, far enough back to land in an earlier month than
+// today for any day of the year, and used by the tab-reset and cross-month
+// tests below. Ninety days keeps it clear of a run happening near the
+// start of a month, which forty or so days back would not.
+const OLDER_DATE = (() => {
+  const now = new Date();
+  now.setDate(now.getDate() - 90);
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+})();
+
+const OLDER_LABEL = new Date(`${OLDER_DATE}T00:00:00Z`).toLocaleDateString(
+  "en-AU",
+  { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" },
+);
+
+// DayHeader's own date heading, which includes the weekday CalendarRail's
+// month title does not; used to prove which day the Context pane landed on.
+function dayHeading(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-AU", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+const TODAY_HEADING = dayHeading(RECORDED_DATE);
+const OLDER_HEADING = dayHeading(OLDER_DATE);
+
+// CalendarRail's own month title, "Month Year", to prove a cross-month
+// click moves the rail rather than leaving it on today's month.
+function monthTitle(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+const OLDER_MONTH_TITLE = monthTitle(OLDER_DATE);
+
 vi.mock("@tauri-apps/api/core", async () => {
   const mock = await import("./tauri-mock");
   return { invoke: mock.invoke };
@@ -55,6 +99,13 @@ function handler(command: string) {
           has_capture: true,
           has_summary: false,
           bytes: 128,
+          title: null,
+        } satisfies DayEntry,
+        {
+          date: OLDER_DATE,
+          has_capture: true,
+          has_summary: false,
+          bytes: 96,
           title: null,
         } satisfies DayEntry,
       ];
@@ -121,5 +172,47 @@ describe("the main window's tab strip", () => {
         screen.getByRole("tab", { name: "Context" }).getAttribute("aria-selected"),
       ).toBe("true"),
     );
+  });
+
+  it("does not reopen a clicked day when the Context tab is pressed directly afterwards", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+
+    // Open OLDER_DATE from the map, and confirm the Context pane landed on it.
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: OLDER_LABEL }).length,
+      ).toBeGreaterThan(0),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: OLDER_LABEL })[0]);
+    await waitFor(() =>
+      expect(screen.getByText(OLDER_HEADING)).toBeTruthy(),
+    );
+
+    // Leave, then come back to Context by pressing its tab directly, not
+    // through the map. The day that click opened must not still be sticking.
+    fireEvent.click(screen.getByRole("tab", { name: "Overview" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Context" }));
+
+    await waitFor(() => expect(screen.getByText(TODAY_HEADING)).toBeTruthy());
+    expect(screen.queryByText(OLDER_HEADING)).toBe(null);
+  });
+
+  it("moves the calendar rail to the clicked day's month when it differs from today's", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: OLDER_LABEL }).length,
+      ).toBeGreaterThan(0),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: OLDER_LABEL })[0]);
+
+    // CalendarRail's month title has no accessible role of its own, so this
+    // proves what it renders (a "Month Year" title) rather than anything
+    // about the rail's internal state; there is nothing more specific to
+    // query it by.
+    await waitFor(() => expect(screen.getByText(OLDER_MONTH_TITLE)).toBeTruthy());
   });
 });

@@ -135,10 +135,13 @@ export function DayView({ date }: { date?: string } = {}) {
   }, [selectDate]);
 
   // The same effect the open-day event has, on an internal route: the
-  // Overview map opens a day without going through Tauri.
+  // Overview map opens a day without going through Tauri. Routed through
+  // selectDate, not setSelected directly, so the rail's month follows a
+  // cross-month click instead of leaving the calendar on the month it
+  // already had.
   useEffect(() => {
-    if (date) setSelected(date);
-  }, [date]);
+    if (date) selectDate(date);
+  }, [date, selectDate]);
 
   const refreshMonth = useCallback(async () => {
     const entries = await invoke<DayEntry[]>("days_in_month", {
