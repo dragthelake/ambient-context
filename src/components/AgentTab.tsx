@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AuthState, Agent, Settings } from "../lib/days";
+import { PromptSettings } from "./PromptSettings";
 
 type Detected = {
   agent: Agent;
@@ -8,7 +9,7 @@ type Detected = {
   test: { status: "untested" | "testing" | "ok" | "failed"; text?: string };
 };
 
-export function AgentSettings() {
+export function AgentTab() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [detected, setDetected] = useState<Detected[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -127,9 +128,9 @@ export function AgentSettings() {
   if (!settings) return null;
 
   return (
-    <section className="settings-section">
+    <>
       <fieldset>
-        <legend>Daily summary</legend>
+        <legend>Agent</legend>
         <p>
           Once a day, at a time you choose, Ambient Context hands the day's
           file to a program already on this computer and saves what it writes
@@ -274,34 +275,9 @@ export function AgentSettings() {
           Turning this on summarises up to seven recent captured days, one
           at a time. Older days can be summarised from the Day view.
         </p>
-
-        <h3 className="settings-heading">Launch at login</h3>
-        <label className="schedule-row">
-          <input
-            type="checkbox"
-            checked={settings.launch_at_login}
-            onChange={(event) =>
-              void invoke("set_launch_at_login", {
-                enabled: event.target.checked,
-              })
-                .then(readSettings)
-                .catch(() => undefined)
-            }
-          />
-          Ambient Context opens when you log in
-        </label>
-        <p className="settings-note">
-          The app starts with the Mac so the daily summary runs whether or not
-          you opened it.
-        </p>
-
-        <h3 className="settings-heading">Prompt</h3>
-        <p className="settings-note">
-          The prompt the agent is given is in the Daily summary prompt
-          section further down this page.
-        </p>
       </fieldset>
-    </section>
+      <PromptSettings />
+    </>
   );
 }
 

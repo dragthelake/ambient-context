@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { AgentTab } from "./AgentTab";
 import { DayView } from "./DayView";
-import { AgentSettings } from "./EngineSettings";
 import { McpSettings } from "./McpSettings";
 import { Overview } from "./Overview";
 import { CLOSE_GLYPH, HELP_GLYPH, PixelGlyph } from "./PixelGlyph";
@@ -123,7 +123,7 @@ export function Main() {
           {tab === "context" && <DayView date={contextDate ?? undefined} />}
           {tab === "settings" && (
             <div className="settings-stack">
-              <AgentSettings />
+              <AgentTab />
               <RulesSettings />
               <PromptSettings />
               <RecordingSettings />
