@@ -1153,13 +1153,16 @@ pub fn open_about_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
-    if let Ok(window) =
-        WebviewWindowBuilder::new(app, "about", WebviewUrl::App("index.html?view=about".into()))
-            .title("About Ambient Context")
-            .inner_size(380.0, 400.0)
-            .resizable(false)
-            .decorations(false)
-            .build()
+    if let Ok(window) = WebviewWindowBuilder::new(
+        app,
+        "about",
+        WebviewUrl::App("index.html?view=about".into()),
+    )
+    .title("About Ambient Context")
+    .inner_size(380.0, 400.0)
+    .resizable(false)
+    .decorations(false)
+    .build()
     {
         let _ = window.set_focus();
     }
