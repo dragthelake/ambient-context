@@ -65,4 +65,12 @@ describe("DefragControls", () => {
     fireEvent.click(screen.getByRole("button", { name: "Legend" }));
     expect(screen.getByText("Raw context")).toBeTruthy();
   });
+
+  it("announces legend state with aria-expanded", () => {
+    render(<DefragControls {...base} />);
+    const legend = screen.getByRole("button", { name: "Legend" });
+    expect(legend.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(legend);
+    expect(legend.getAttribute("aria-expanded")).toBe("true");
+  });
 });

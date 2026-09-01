@@ -51,7 +51,7 @@ export function DefragControls({
       <p className="defrag-percent">{percent}% Complete</p>
 
       {legend ? (
-        <ul className="defrag-legend">
+        <ul className="defrag-legend" id="defrag-legend">
           {LEGEND.map((item) => (
             <li key={item.state}>
               <span className={`defrag-swatch is-${item.state}`} aria-hidden="true" />
@@ -62,7 +62,12 @@ export function DefragControls({
       ) : null}
 
       <div className="defrag-buttons">
-        <button type="button" onClick={() => setLegend((on) => !on)}>
+        <button
+          type="button"
+          aria-expanded={legend}
+          aria-controls="defrag-legend"
+          onClick={() => setLegend((on) => !on)}
+        >
           Legend
         </button>
         <span className="defrag-spacer" />
