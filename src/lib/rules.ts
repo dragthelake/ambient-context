@@ -73,6 +73,6 @@ export type Proposal = {
 };
 
 export type ProposeError =
-  | { kind: "no_engine" }
-  | { kind: "engine_failed"; stderr: string }
+  | { kind: "no_agent" }
+  | { kind: "agent_failed"; stderr: string }
   | { kind: "invalid"; reason: string; raw: string };

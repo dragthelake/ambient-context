@@ -18,11 +18,11 @@ export function Overview({
 }) {
   const { capture, setCapture, ready } = status;
   const defrag = useDefragState();
-  const [hasEngine, setHasEngine] = useState(false);
+  const [hasAgent, setHasAgent] = useState(false);
 
   useEffect(() => {
     void invoke<Settings>("get_settings").then((saved) =>
-      setHasEngine(saved.engine !== null),
+      setHasAgent(saved.agent !== null),
     );
   }, []);
 
@@ -44,7 +44,7 @@ export function Overview({
           finished={defrag.finished}
           total={defrag.total}
           status={defrag.status}
-          hasEngine={hasEngine}
+          hasAgent={hasAgent}
           onStart={() => void defrag.start()}
           onStop={() => void defrag.stop()}
         />

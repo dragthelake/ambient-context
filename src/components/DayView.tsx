@@ -85,7 +85,7 @@ export function DayView({ date }: { date?: string } = {}) {
   const [dayMarkdown, setDayMarkdown] = useState<string | null>(null);
   const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [hasEngine, setHasEngine] = useState(false);
+  const [hasAgent, setHasAgent] = useState(false);
   const [job, setJob] = useState<JobState | null>(null);
   // A run you started yourself, and the message it failed with. The
   // scheduler's last outcome is a different fact about a possibly different
@@ -171,12 +171,12 @@ export function DayView({ date }: { date?: string } = {}) {
       const [day, summary, settings] = await Promise.all([
         invoke<string | null>("read_day", { date: selected }),
         invoke<string | null>("read_summary", { date: selected }),
-        invoke<{ engine: unknown }>("get_settings"),
+        invoke<{ agent: unknown }>("get_settings"),
       ]);
       if (cancelled) return;
       setDayMarkdown(day);
       setSummaryMarkdown(summary);
-      setHasEngine(settings.engine !== null);
+      setHasAgent(settings.agent !== null);
       // Raw is the default for today; Summary for a past day that has one.
       setMode((current) =>
         selected === todayIso() ? current : summary ? "summary" : "raw",
@@ -337,7 +337,7 @@ export function DayView({ date }: { date?: string } = {}) {
           <SummaryPane
             markdown={summaryMarkdown}
             hasCapture={entry?.has_capture ?? false}
-            hasEngine={hasEngine}
+            hasAgent={hasAgent}
             running={running}
             onSummarise={onSummarise}
             date={selected}

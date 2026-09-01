@@ -1,4 +1,4 @@
-export type Engine = {
+export type Agent = {
   label: string;
   command: string;
   args: string[];
@@ -17,7 +17,7 @@ export type Settings = {
   interval_secs: number;
   min_dwell_secs: number;
   similarity_threshold: number;
-  engine: Engine | null;
+  agent: Agent | null;
   schedule_hhmm: string | null;
   editor: string | null;
   launch_at_login: boolean;

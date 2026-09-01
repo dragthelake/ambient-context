@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AuthState, Engine, Settings } from "../lib/days";
+import type { AuthState, Agent, Settings } from "../lib/days";
 
 type Detected = {
-  engine: Engine;
+  agent: Agent;
   auth: AuthState | null;
   test: { status: "untested" | "testing" | "ok" | "failed"; text?: string };
 };
 
-export function EngineSettings() {
+export function AgentSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [detected, setDetected] = useState<Detected[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
@@ -25,24 +25,24 @@ export function EngineSettings() {
   useEffect(() => {
     void (async () => {
       const loaded = await readSettings();
-      const found = await invoke<Engine[]>("engine_detect");
-      // Every row starts unprobed, including the saved one: an engine that
+      const found = await invoke<Agent[]>("agent_detect");
+      // Every row starts unprobed, including the saved one: an agent that
       // has since been logged out must not be shown as fine.
       setDetected(
-        found.map((engine) => ({
-          engine,
+        found.map((agent) => ({
+          agent,
           auth: null,
           test: { status: "untested" as const },
         })),
       );
-      if (loaded.engine && !found.some((e) => e.command === loaded.engine?.command)) {
-        setManualCommand(loaded.engine.command);
-        setManualArgs(loaded.engine.args.join(" "));
+      if (loaded.agent && !found.some((a) => a.command === loaded.agent?.command)) {
+        setManualCommand(loaded.agent.command);
+        setManualArgs(loaded.agent.args.join(" "));
       }
-      if (loaded.engine) {
+      if (loaded.agent) {
         setSelected(
-          found.some((e) => e.command === loaded.engine?.command)
-            ? loaded.engine.command
+          found.some((a) => a.command === loaded.agent?.command)
+            ? loaded.agent.command
             : "manual",
         );
       }
@@ -64,9 +64,9 @@ export function EngineSettings() {
     [settings],
   );
 
-  const detectedCommands = detected.map((d) => d.engine.command).join("\n");
+  const detectedCommands = detected.map((d) => d.agent.command).join("\n");
 
-  // Whether each engine is signed in, asked once per detection, never on a
+  // Whether each agent is signed in, asked once per detection, never on a
   // schedule. Never offers to sign in; names the command that fixes it.
   // Keyed on the detected commands so it runs after detection has landed.
   useEffect(() => {
@@ -74,37 +74,37 @@ export function EngineSettings() {
     let cancelled = false;
     void (async () => {
       for (const command of detectedCommands.split("\n")) {
-        const entry = detected.find((d) => d.engine.command === command);
+        const entry = detected.find((d) => d.agent.command === command);
         if (!entry) continue;
-        const auth = await invoke<AuthState>("engine_auth", {
-          engineConfig: entry.engine,
+        const auth = await invoke<AuthState>("agent_auth", {
+          agentConfig: entry.agent,
         });
         if (cancelled) return;
         setDetected((current) =>
-          current.map((d) => (d.engine.command === command ? { ...d, auth } : d)),
+          current.map((d) => (d.agent.command === command ? { ...d, auth } : d)),
         );
       }
     })();
     return () => {
       cancelled = true;
     };
-    // Reruns only when the set of detected engines changes, not when a probe
+    // Reruns only when the set of detected agents changes, not when a probe
     // writes its answer back.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detectedCommands]);
 
-  const chosenEngine = useCallback((): Engine | null => {
+  const chosenAgent = useCallback((): Agent | null => {
     if (selected === null) return null;
     if (selected === "manual") {
       if (!manualCommand.trim()) return null;
       return {
-        label: "Custom engine",
+        label: "Custom agent",
         command: manualCommand.trim(),
         args: manualArgs.trim() ? manualArgs.trim().split(/\s+/) : [],
         timeout_secs: 600,
       };
     }
-    return detected.find((d) => d.engine.command === selected)?.engine ?? null;
+    return detected.find((d) => d.agent.command === selected)?.agent ?? null;
   }, [selected, manualCommand, manualArgs, detected]);
 
   const [test, setTest] = useState<{ status: "untested" | "testing" | "ok" | "failed"; text?: string }>({
@@ -112,17 +112,17 @@ export function EngineSettings() {
   });
 
   const runTest = useCallback(async () => {
-    const engine = chosenEngine();
-    if (!engine) return;
+    const agent = chosenAgent();
+    if (!agent) return;
     setTest({ status: "testing" });
     try {
-      const out = await invoke<string>("engine_test", { engineConfig: engine });
+      const out = await invoke<string>("agent_test", { agentConfig: agent });
       setTest({ status: "ok", text: out });
     } catch (error) {
       setTest({ status: "failed", text: String(error) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosenEngine]);
+  }, [chosenAgent]);
 
   if (!settings) return null;
 
@@ -139,48 +139,48 @@ export function EngineSettings() {
           summarising, and every run is written to that day's ledger.
         </p>
 
-        <h3 className="settings-heading">Engine</h3>
+        <h3 className="settings-heading">Agent</h3>
         {detected.length === 0 ? (
           <p className="settings-note">
             No known agent CLI was found on this computer. You can still point
             the app at any program that reads a prompt on standard input.
           </p>
         ) : (
-          <ul className="engine-list">
+          <ul className="agent-list">
             {detected.map((entry) => (
-              <li key={entry.engine.command}>
-                <label className="engine-row">
+              <li key={entry.agent.command}>
+                <label className="agent-row">
                   <input
                     type="radio"
-                    name="engine"
-                    checked={selected === entry.engine.command}
-                    onChange={() => setSelected(entry.engine.command)}
+                    name="agent"
+                    checked={selected === entry.agent.command}
+                    onChange={() => setSelected(entry.agent.command)}
                   />
-                  <span className="engine-label">{entry.engine.label}</span>
-                  <span className="engine-path">{entry.engine.command}</span>
-                  <EngineAuth state={entry.auth} />
+                  <span className="agent-label">{entry.agent.label}</span>
+                  <span className="agent-path">{entry.agent.command}</span>
+                  <AgentAuth state={entry.auth} />
                 </label>
               </li>
             ))}
             <li>
-              <label className="engine-row">
+              <label className="agent-row">
                 <input
                   type="radio"
-                  name="engine"
+                  name="agent"
                   checked={selected === "manual"}
                   onChange={() => setSelected("manual")}
                 />
-                <span className="engine-label">Something else</span>
+                <span className="agent-label">Something else</span>
               </label>
               {selected === "manual" ? (
-                <div className="manual-engine">
+                <div className="manual-agent">
                   <label>
                     Command
                     <input
                       type="text"
                       value={manualCommand}
                       onChange={(event) => setManualCommand(event.target.value)}
-                      placeholder="/usr/local/bin/my-engine"
+                      placeholder="/usr/local/bin/my-agent"
                     />
                   </label>
                   <label>
@@ -201,29 +201,29 @@ export function EngineSettings() {
         <div className="button-row">
           <button
             type="button"
-            disabled={!chosenEngine() || test.status === "testing"}
+            disabled={!chosenAgent() || test.status === "testing"}
             onClick={() => void runTest()}
           >
-            {test.status === "testing" ? "Testing…" : "Test engine"}
+            {test.status === "testing" ? "Testing…" : "Test agent"}
           </button>
           <button
             type="button"
-            disabled={saving || chosenEngine() === null}
+            disabled={saving || chosenAgent() === null}
             onClick={async () => {
-              const engine = chosenEngine();
-              if (!engine) return;
-              await save((next) => ({ ...next, engine }));
+              const agent = chosenAgent();
+              if (!agent) return;
+              await save((next) => ({ ...next, agent }));
               setTest({ status: "untested" });
             }}
           >
-            {settings.engine ? "Update engine" : "Connect engine"}
+            {settings.agent ? "Update agent" : "Connect agent"}
           </button>
-          {settings.engine ? (
+          {settings.agent ? (
             <button
               type="button"
               disabled={saving}
               onClick={async () => {
-                await save((next) => ({ ...next, engine: null }));
+                await save((next) => ({ ...next, agent: null }));
                 setSelected(null);
               }}
             >
@@ -240,8 +240,8 @@ export function EngineSettings() {
         {test.status === "failed" ? (
           <p className="warn">Test failed: {test.text}</p>
         ) : null}
-        {test.status === "untested" && settings.engine ? (
-          <p className="settings-note">This engine has not passed a test yet.</p>
+        {test.status === "untested" && settings.agent ? (
+          <p className="settings-note">This agent has not passed a test yet.</p>
         ) : null}
 
         <h3 className="settings-heading">Schedule</h3>
@@ -249,7 +249,7 @@ export function EngineSettings() {
           <input
             type="checkbox"
             checked={settings.schedule_hhmm !== null}
-            disabled={!settings.engine}
+            disabled={!settings.agent}
             onChange={(event) =>
               void save((next) => ({
                 ...next,
@@ -262,7 +262,7 @@ export function EngineSettings() {
         <input
           type="time"
           value={settings.schedule_hhmm ?? "06:00"}
-          disabled={!settings.engine || settings.schedule_hhmm === null}
+          disabled={!settings.agent || settings.schedule_hhmm === null}
           onChange={(event) =>
             void save((next) => ({
               ...next,
@@ -297,7 +297,7 @@ export function EngineSettings() {
 
         <h3 className="settings-heading">Prompt</h3>
         <p className="settings-note">
-          The prompt the engine is given is in the Daily summary prompt
+          The prompt the agent is given is in the Daily summary prompt
           section further down this page.
         </p>
       </fieldset>
@@ -305,20 +305,20 @@ export function EngineSettings() {
   );
 }
 
-function EngineAuth({ state }: { state: AuthState | null }) {
+function AgentAuth({ state }: { state: AuthState | null }) {
   if (state === null) return null;
   switch (state.state) {
     case "ok":
       return null;
     case "not_logged_in":
       return (
-        <span className="engine-auth">
+        <span className="agent-auth">
           Not signed in. {state.fix}
         </span>
       );
     case "no_provider":
       return (
-        <span className="engine-auth">
+        <span className="agent-auth">
           No provider configured, opencode will answer with a free model.{" "}
           {state.fix}
         </span>

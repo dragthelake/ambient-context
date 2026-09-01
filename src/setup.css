@@ -321,7 +321,7 @@ ul {
   list-style: none;
 }
 
-/* Prose lists only. Control lists (the engine radios, the rules rows) carry a
+/* Prose lists only. Control lists (the agent radios, the rules rows) carry a
    class and are laid out by main-window.css; a bullet beside a radio is not
    something the reference dialogs ever do. */
 ul:not([class]) > li {

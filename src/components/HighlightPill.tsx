@@ -11,7 +11,7 @@ type HighlightPillProps = {
   /** Builds the Selection for the current window selection, or null when
    * the highlighted text cannot be attributed to a block. */
   buildSelection: () => Selection | null;
-  hasEngine: boolean;
+  hasAgent: boolean;
   onApplied?: () => void;
 };
 
@@ -23,7 +23,7 @@ type PillState =
 export function HighlightPill({
   container,
   buildSelection,
-  hasEngine,
+  hasAgent,
   onApplied,
 }: HighlightPillProps) {
   const [state, setState] = useState<PillState>({ status: "closed" });
@@ -87,7 +87,7 @@ export function HighlightPill({
       <ProposePopover
         target={state.target}
         selection={selection}
-        hasEngine={hasEngine}
+        hasAgent={hasAgent}
         onClose={() => setState({ status: "closed" })}
         onApplied={onApplied}
       />
@@ -107,7 +107,7 @@ export function HighlightPill({
       }}
     >
       <Verbs
-        hasEngine={hasEngine}
+        hasAgent={hasAgent}
         copied={copied}
         onRules={() => setState({ status: "popover", target: "rules" })}
         onPrompt={() => setState({ status: "popover", target: "prompt" })}
@@ -118,13 +118,13 @@ export function HighlightPill({
 }
 
 export function Verbs({
-  hasEngine,
+  hasAgent,
   copied,
   onRules,
   onPrompt,
   onCopy,
 }: {
-  hasEngine: boolean;
+  hasAgent: boolean;
   copied: boolean;
   onRules: () => void;
   onPrompt: () => void;
@@ -134,16 +134,16 @@ export function Verbs({
     <>
       <button
         type="button"
-        disabled={!hasEngine}
-        title={hasEngine ? undefined : "Connect an engine in Settings to use this."}
+        disabled={!hasAgent}
+        title={hasAgent ? undefined : "Connect an agent on the Agent tab to use this."}
         onClick={onRules}
       >
         Update capture rules…
       </button>
       <button
         type="button"
-        disabled={!hasEngine}
-        title={hasEngine ? undefined : "Connect an engine in Settings to use this."}
+        disabled={!hasAgent}
+        title={hasAgent ? undefined : "Connect an agent on the Agent tab to use this."}
         onClick={onPrompt}
       >
         Update summary prompt…

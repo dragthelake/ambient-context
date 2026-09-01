@@ -153,7 +153,7 @@ describe("useDefragState", () => {
           return ["job-0", "job-1"];
         case "job_state":
           return args?.jobId === "job-0"
-            ? { id: "job-0", date: "2026-08-31", status: "failed", stderr: "engine died" }
+            ? { id: "job-0", date: "2026-08-31", status: "failed", stderr: "agent died" }
             : { id: "job-1", date: "2026-09-01", status: "failed", stderr: "and again" };
         default:
           throw new Error(`unexpected ${command}`);
@@ -178,7 +178,7 @@ describe("useDefragState", () => {
     // failure quoted is the first, which is the one that explains the run.
     expect(screen.getByTestId("progress").textContent).toBe("2/2");
     expect(screen.getByTestId("status").textContent).toBe(
-      "Finished, 2 failed: engine died",
+      "Finished, 2 failed: agent died",
     );
     vi.useRealTimers();
   });
@@ -192,7 +192,7 @@ describe("useDefragState", () => {
         case "running_batch":
           return [];
         case "summarise_days":
-          if (rejecting) throw new Error("no engine is connected");
+          if (rejecting) throw new Error("no agent is connected");
           return ["job-0"];
         case "job_state":
           return { id: "job-0", date: "2026-09-01", status: "queued", stderr: null };
@@ -218,7 +218,7 @@ describe("useDefragState", () => {
     });
     expect(screen.getByTestId("progress").textContent).toBe("0/0");
     expect(screen.getByTestId("running").textContent).toBe("false");
-    expect(screen.getByTestId("status").textContent).toContain("no engine is connected");
+    expect(screen.getByTestId("status").textContent).toContain("no agent is connected");
   });
 
   it("adopts a batch that is still running when the window opens", async () => {

@@ -25,7 +25,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
   );
   const [selectionText, setSelectionText] = useState("");
   const [scrollY, setScrollY] = useState(0);
-  const [hasEngine, setHasEngine] = useState(false);
+  const [hasAgent, setHasAgent] = useState(false);
   // Held in state, not a ref: the pill needs the element on the render it
   // is given, and assigning a ref does not schedule one.
   const [pane, setPane] = useState<HTMLElement | null>(null);
@@ -36,7 +36,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
     return payload;
   }, []);
 
-  // The provenance the pill hands the engine: the block the highlighted
+  // The provenance the pill hands the agent: the block the highlighted
   // text came from, found through the block element the selection sits in.
   const buildSelection = useCallback((): Selection | null => {
     const active = window.getSelection();
@@ -82,7 +82,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
 
   useEffect(() => {
     void invoke<Settings>("get_settings").then((settings) =>
-      setHasEngine(settings.engine !== null),
+      setHasAgent(settings.agent !== null),
     );
   }, []);
 
@@ -191,7 +191,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
       <HighlightPill
         container={pane}
         buildSelection={buildSelection}
-        hasEngine={hasEngine}
+        hasAgent={hasAgent}
         onApplied={() => void readRules()}
       />
       {ruleError ? <p className="warn">{ruleError}</p> : null}

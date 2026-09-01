@@ -80,7 +80,7 @@ function handler(command: string) {
       return "/Users/someone/Ambient Context";
     case "get_settings":
       // The union of keys Overview, Main and DayView each read on mount.
-      return { sound_enabled: true, sound_volume: 0.6, engine: null };
+      return { sound_enabled: true, sound_volume: 0.6, agent: null };
     case "list_days":
       return [
         {

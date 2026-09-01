@@ -10,7 +10,7 @@ const base = {
   finished: 0,
   total: 0,
   status: "Ready",
-  hasEngine: true,
+  hasAgent: true,
   onStart: vi.fn(),
   onStop: vi.fn(),
 };
@@ -28,8 +28,8 @@ describe("DefragControls", () => {
     expect((go as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("disables Summarise with no engine connected", () => {
-    render(<DefragControls {...base} hasEngine={false} />);
+  it("disables Summarise with no agent connected", () => {
+    render(<DefragControls {...base} hasAgent={false} />);
     const go = screen.getByRole("button", { name: /Summarise/ });
     expect((go as HTMLButtonElement).disabled).toBe(true);
   });

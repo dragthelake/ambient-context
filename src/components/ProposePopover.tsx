@@ -6,7 +6,7 @@ import type { Proposal, ProposeError, ProposeTarget, Selection } from "../lib/ru
 type ProposePopoverProps = {
   target: ProposeTarget;
   selection: Selection;
-  hasEngine: boolean;
+  hasAgent: boolean;
   onClose: () => void;
   onApplied?: () => void;
 };
@@ -25,26 +25,26 @@ const TARGET_LABEL: Record<ProposeTarget, string> = {
 export function ProposePopover({
   target,
   selection,
-  hasEngine,
+  hasAgent,
   onClose,
   onApplied,
 }: ProposePopoverProps) {
   const [instruction, setInstruction] = useState("");
-  const [engineName, setEngineName] = useState<string>("");
+  const [agentName, setAgentName] = useState<string>("");
   const [state, setState] = useState<PopoverState>({ status: "editing" });
   const [showRaw, setShowRaw] = useState(false);
 
   useEffect(() => {
-    void invoke<{ engine: { label: string } | null }>("get_settings").then(
-      (settings) => setEngineName(settings.engine?.label ?? "no engine"),
+    void invoke<{ agent: { label: string } | null }>("get_settings").then(
+      (settings) => setAgentName(settings.agent?.label ?? "no agent"),
     );
   }, []);
 
-  if (!hasEngine) {
+  if (!hasAgent) {
     return (
       <div className="propose-popover">
         <p className="empty-state">
-          No engine is connected. Connect one in Settings to use this.
+          No agent is connected. Connect one on the Agent tab to use this.
         </p>
         <button type="button" onClick={onClose}>
           Close
@@ -93,11 +93,11 @@ export function ProposePopover({
               }
             />
           </label>
-          <p className="propose-engine">Using {engineName || "the connected engine"}.</p>
+          <p className="propose-agent">Using {agentName || "the connected agent"}.</p>
 
           {state.status === "running" ? (
             <p className="empty-state is-running">
-              Running. The engine is rewriting the file; this can take a few
+              Running. The agent is rewriting the file; this can take a few
               minutes.
               <span className="blink" aria-hidden="true">
                 _
@@ -107,11 +107,11 @@ export function ProposePopover({
 
           {state.status === "failed" ? (
             <div className="propose-failure">
-              <p className="warn">{state.error.kind === "engine_failed"
+              <p className="warn">{state.error.kind === "agent_failed"
                 ? state.error.stderr
                 : state.error.kind === "invalid"
                   ? state.error.reason
-                  : "No engine is connected."}</p>
+                  : "No agent is connected."}</p>
               {state.error.kind === "invalid" ? (
                 <>
                   <button
@@ -119,7 +119,7 @@ export function ProposePopover({
                     className="link-button"
                     onClick={() => setShowRaw((shown) => !shown)}
                   >
-                    {showRaw ? "Hide engine output" : "Show engine output"}
+                    {showRaw ? "Hide agent output" : "Show agent output"}
                   </button>
                   {showRaw ? <pre className="day-error">{state.error.raw}</pre> : null}
                 </>

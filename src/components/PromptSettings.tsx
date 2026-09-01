@@ -82,7 +82,7 @@ export function PromptSettings() {
           : "Using the built-in prompt."}
       </p>
       <p className="settings-note">
-        Saving writes your own copy to that file. The engine reads it on the
+        Saving writes your own copy to that file. The agent reads it on the
         next run.
       </p>
 

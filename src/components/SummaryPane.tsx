@@ -6,7 +6,7 @@ import type { Selection } from "../lib/rules";
 export type SummaryPaneProps = {
   markdown: string | null;
   hasCapture: boolean;
-  hasEngine: boolean;
+  hasAgent: boolean;
   running: boolean;
   onSummarise: () => void;
   date: string;
@@ -85,7 +85,7 @@ function Pane({
 export function SummaryPane({
   markdown,
   hasCapture,
-  hasEngine,
+  hasAgent,
   running,
   onSummarise,
   date,
@@ -119,7 +119,7 @@ export function SummaryPane({
     return (
       <Pane>
         <p className="empty-state is-running">
-          Summarising now. The engine is reading the day file; this can take a
+          Summarising now. The agent is reading the day file; this can take a
           few minutes.
           <span className="blink" aria-hidden="true">
             _
@@ -139,18 +139,18 @@ export function SummaryPane({
         <HighlightPill
           container={pane}
           buildSelection={buildSelection}
-          hasEngine={hasEngine}
+          hasAgent={hasAgent}
         />
         {render(markdown)}
       </Pane>
     );
   }
-  if (!hasEngine) {
+  if (!hasAgent) {
     return (
       <Pane>
         <p className="empty-state">
-          No summary yet, and no engine is connected. Connect one in Settings
-          in the left rail, then come back and summarise.
+          No summary yet, and no agent is connected. Connect one on the
+          Agent tab, then come back and summarise.
         </p>
       </Pane>
     );

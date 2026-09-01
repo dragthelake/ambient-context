@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { DayView } from "./DayView";
-import { EngineSettings } from "./EngineSettings";
+import { AgentSettings } from "./EngineSettings";
 import { McpSettings } from "./McpSettings";
 import { Overview } from "./Overview";
 import { CLOSE_GLYPH, HELP_GLYPH, PixelGlyph } from "./PixelGlyph";
@@ -33,9 +33,9 @@ export function Main() {
     setTab("context");
   };
 
-  // Wire up the declarative cues once, then hand the engine the user's
-  // saved preferences. Both are read-once: the Settings tab applies its
-  // own changes as they are made.
+  // Wire up the declarative cues once, then hand the sound engine the
+  // user's saved preferences. Both are read-once: the Settings tab applies
+  // its own changes as they are made.
   useEffect(() => {
     bind();
     void invoke<Settings>("get_settings").then((saved) =>
@@ -123,7 +123,7 @@ export function Main() {
           {tab === "context" && <DayView date={contextDate ?? undefined} />}
           {tab === "settings" && (
             <div className="settings-stack">
-              <EngineSettings />
+              <AgentSettings />
               <RulesSettings />
               <PromptSettings />
               <RecordingSettings />

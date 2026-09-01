@@ -15,7 +15,7 @@ export function DefragControls({
   finished,
   total,
   status,
-  hasEngine,
+  hasAgent,
   onStart,
   onStop,
 }: {
@@ -24,7 +24,7 @@ export function DefragControls({
   finished: number;
   total: number;
   status: string;
-  hasEngine: boolean;
+  hasAgent: boolean;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -73,8 +73,8 @@ export function DefragControls({
         <span className="defrag-spacer" />
         <button
           type="button"
-          disabled={running || pending.length === 0 || !hasEngine}
-          title={hasEngine ? undefined : "Connect an engine in Settings to use this."}
+          disabled={running || pending.length === 0 || !hasAgent}
+          title={hasAgent ? undefined : "Connect an agent on the Agent tab to use this."}
           onClick={onStart}
         >
           {`Summarise ${days}`}

@@ -39,7 +39,7 @@ describe("RawPane", () => {
         case "get_rules":
           return { rules: [], built_ins: [], next_id: "r1", error: null };
         case "get_settings":
-          return { engine: null };
+          return { agent: null };
         default:
           throw new Error(`unexpected command ${command}`);
       }
@@ -75,7 +75,7 @@ describe("RawPane", () => {
         case "get_rules":
           return { rules: [], built_ins: [], next_id: "r1", error: null };
         case "get_settings":
-          return { engine: null };
+          return { agent: null };
         case "add_rule":
           // add_rule answers with the whole rules payload, not the rule.
           return {

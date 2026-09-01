@@ -31,7 +31,7 @@ function handler(pendingDay: string | null) {
       case "read_summary":
         return null;
       case "get_settings":
-        return { engine: null };
+        return { agent: null };
       case "job_status":
         // A fresh object every call, as the real command returns.
         return { when: "2026-08-30T06:00:00+10:00", date: todayIso(), ok: true, message: "done" };

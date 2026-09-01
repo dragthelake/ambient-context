@@ -651,7 +651,7 @@ body:has(.main-window) {
   resize: vertical;
 }
 
-.propose-engine {
+.propose-agent {
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -733,14 +733,14 @@ body:has(.main-window) {
   font-size: 12px;
 }
 
-.engine-list,
+.agent-list,
 .rules-list {
   list-style: none;
   padding: 0;
   margin: 0 0 8px;
 }
 
-.engine-row,
+.agent-row,
 .rule-row {
   display: flex;
   align-items: baseline;
@@ -753,30 +753,30 @@ body:has(.main-window) {
   color: var(--chrome-dark);
 }
 
-.engine-label {
+.agent-label {
   font-weight: 700;
   min-width: 110px;
 }
 
-.engine-path {
+.agent-path {
   font-family: var(--mono);
   font-size: 10px;
   overflow-wrap: anywhere;
 }
 
-.engine-auth {
+.agent-auth {
   font-size: 11px;
   color: var(--warn-ink);
   font-weight: 600;
 }
 
-.manual-engine {
+.manual-agent {
   margin: 6px 0 6px 24px;
   display: grid;
   gap: 6px;
 }
 
-.manual-engine label,
+.manual-agent label,
 .propose-field,
 .patterns-field,
 .number-field {
@@ -784,7 +784,7 @@ body:has(.main-window) {
   display: block;
 }
 
-.manual-engine input,
+.manual-agent input,
 .number-field input {
   display: block;
   margin-top: 2px;
