@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { applySoundSettings, play } from "../lib/sound";
 import type { Settings } from "../lib/days";
 
 export function SoundSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const enabledId = useId();
+  const volumeId = useId();
 
   useEffect(() => {
     void invoke<Settings>("get_settings").then(setSettings);
@@ -33,9 +35,10 @@ export function SoundSettings() {
         changing tab. Nothing is played in the background.
       </p>
 
-      <label className="schedule-row">
+      <div className="field-row">
         <input
           type="checkbox"
+          id={enabledId}
           checked={settings.sound_enabled}
           onChange={(event) => {
             const enabled = event.target.checked;
@@ -45,12 +48,13 @@ export function SoundSettings() {
             if (enabled) play("chime");
           }}
         />
-        Play interface sounds
-      </label>
+        <label htmlFor={enabledId}>Play interface sounds</label>
+      </div>
 
-      <label className="schedule-row volume-row">
-        Volume
+      <div className="field-row">
+        <label htmlFor={volumeId}>Volume</label>
         <input
+          id={volumeId}
           type="range"
           min={0}
           max={1}
@@ -71,7 +75,7 @@ export function SoundSettings() {
         <span className="volume-readout">
           {Math.round(settings.sound_volume * 100)}%
         </span>
-      </label>
+      </div>
     </fieldset>
   );
 }

@@ -13,9 +13,15 @@
 // start resume before any async work.
 import { bind as cuelumeBind, play as cuelumePlay, setEnabled, setVolume } from "cuelume";
 import type { SoundName } from "cuelume";
+import { installSoundDiag, markPlay } from "./soundDiag";
 
 export type { SoundName };
 export { sounds } from "cuelume";
+
+// Dev builds log the audio path to the console (see soundDiag.ts). The
+// wrapper it installs must be in place before cuelume creates its context.
+const DIAG = import.meta.env.DEV;
+if (DIAG) installSoundDiag();
 
 let primed = false;
 
@@ -36,6 +42,7 @@ export function primeAudio(): void {
 export function play(name: SoundName): void {
   primeAudio();
   try {
+    if (DIAG) markPlay(name);
     cuelumePlay(name);
   } catch {
     // A cue that will not sound is not worth an error.

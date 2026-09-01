@@ -470,6 +470,40 @@ button:disabled {
 
 /* About */
 
+.about-window .titlebar-controls {
+  display: flex;
+}
+
+/* The 98.css title-bar close control: 16x14, bevelled, bitmap X. Only
+   About uses this; setup keeps the circular pixel close. */
+.about-window .titlebar-controls button {
+  appearance: none;
+  display: block;
+  width: 16px;
+  height: 14px;
+  min-width: 16px;
+  min-height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  color: transparent;
+  background-color: var(--chrome);
+  box-shadow: var(--bevel-out);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg width='8' height='7' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M0 0h2v1h1v1h2V1h1V0h2v1H7v1H6v1H5v1h1v1h1v1h1v1H6V6H5V5H3v1H2v1H0V6h1V5h1V4h1V3H2V2H1V1H0V0z' fill='%23000'/%3E%3C/svg%3E");
+  background-position: top 3px left 4px;
+  background-repeat: no-repeat;
+}
+
+.about-window .titlebar-controls button:active {
+  box-shadow: var(--bevel-in);
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+.about-window .titlebar-controls button:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
 .about-window .window-body {
   text-align: center;
   padding: 14px 18px 6px;
@@ -568,6 +602,105 @@ input[type="radio"]:focus-visible {
   outline-offset: 2px;
 }
 
+/* Field rows
+
+   98.css groups controls in field-row (label beside control) or
+   field-row-stacked (label above). Checkboxes and radios go in field-row
+   with the input before its label. */
+
+.field-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.field-row > * + * {
+  margin-left: 6px;
+}
+
+/* Sunken fields: text boxes, number boxes and drop-downs. The arrow on
+   select matches provider-field in main-window.css, which Agent still uses. */
+
+select,
+.field-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked select {
+  appearance: none;
+  border: none;
+  border-radius: 0;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+select,
+.field-row-stacked select {
+  display: block;
+  padding: 4px 26px 4px 6px;
+  min-width: 160px;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%207%204%22%20shape-rendering%3D%22crispEdges%22%20fill%3D%22%23000%22%3E%3Crect%20x%3D%220%22%20y%3D%220%22%20width%3D%227%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%221%22%20width%3D%225%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%223%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 7px 4px;
+}
+
+.field-row-stacked select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  padding: 4px 6px;
+}
+
+.field-row input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+select:disabled,
+.field-row input:disabled,
+.field-row-stacked input:disabled,
+.field-row-stacked select:disabled {
+  background-color: var(--chrome);
+  color: var(--chrome-dark);
+}
+
+select:focus-visible,
+.field-row input:focus-visible,
+.field-row-stacked input:focus-visible,
+.field-row-stacked select:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+/* 98.css field-border: a sunken work area inside a group box. */
+.field-border {
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.field-border-disabled {
+  background: var(--chrome);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  margin: 8px 0;
+  color: var(--chrome-dark);
+}
+
 /* Stacked fields and multiline inputs
 
    The reference's field-row-stacked puts a label over a sunken textarea,
@@ -617,6 +750,11 @@ input[type="radio"]:focus-visible {
 .field-row-stacked textarea:focus-visible {
   outline: 1px dotted var(--ink);
   outline-offset: -4px;
+}
+
+.field-row-stacked .settings-note {
+  margin-top: 4px;
+  margin-bottom: 0;
 }
 
 /* Trackbar (range input)

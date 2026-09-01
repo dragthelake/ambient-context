@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { countOf, mockInvoke } from "./tauri-mock";
 import { AgentTab } from "../components/AgentTab";
 
@@ -83,9 +83,195 @@ describe("AgentTab", () => {
     expect(await screen.findByText(/Not signed in\. Run claude login/)).toBeTruthy();
   });
 
+  it("connects Claude Code with the chosen model, and Haiku without an effort flag", async () => {
+    let savedAgent: { args: string[] } | null = null;
+    mockInvoke((command, args) => {
+      switch (command) {
+        case "get_settings":
+          return {
+            folder: "/tmp/capture",
+            enabled: true,
+            interval_secs: 5,
+            min_dwell_secs: 10,
+            similarity_threshold: 0.5,
+            agent: null,
+            schedule_hhmm: null,
+            editor: null,
+            launch_at_login: true,
+            max_block_chars: 0,
+            write_references: true,
+            extra_redaction_patterns: [],
+          };
+        case "set_settings":
+          savedAgent = (args?.next as { agent: { args: string[] } }).agent;
+          return null;
+        case "agent_detect":
+          return [CLAUDE];
+        case "agent_auth":
+          return { state: "ok" };
+        case "get_prompt":
+          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+        default:
+          throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
+      }
+    });
+
+    render(<AgentTab />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Claude Code" }));
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "claude-haiku-4-5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    await screen.findByText("Connected");
+    expect(savedAgent!.args).toContain("claude-haiku-4-5");
+    // Haiku 4.5 takes no effort levels; passing the flag would fail the run.
+    expect(savedAgent!.args).not.toContain("--effort");
+  });
+
+  it("shows a failed test, and a result from an abandoned run never lands", async () => {
+    let failNext = true;
+    let release: (() => void) | null = null;
+    mockInvoke((command, args) => {
+      switch (command) {
+        case "get_settings":
+          return {
+            folder: "/tmp/capture",
+            enabled: true,
+            interval_secs: 5,
+            min_dwell_secs: 10,
+            similarity_threshold: 0.5,
+            agent: null,
+            schedule_hhmm: null,
+            editor: null,
+            launch_at_login: true,
+            max_block_chars: 0,
+            write_references: true,
+            extra_redaction_patterns: [],
+          };
+        case "agent_detect":
+          return [CLAUDE, CODEX];
+        case "agent_auth":
+          return { state: "ok" };
+        case "agent_test":
+          if (failNext) return Promise.reject("exited with status 1");
+          // Held open until the test releases it, after switching provider.
+          return new Promise((resolve) => {
+            release = () => resolve("late reply");
+          });
+        case "get_prompt":
+          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+        default:
+          throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
+      }
+    });
+
+    render(<AgentTab />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    expect(await screen.findByText(/Test failed: exited with status 1/)).toBeTruthy();
+
+    // A slow run abandoned by switching provider must not write its result
+    // into the newly selected provider's view.
+    failNext = false;
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByText(/Waiting for the agent to reply/);
+    fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+    release!();
+    await waitFor(() => expect(screen.queryByText(/Test passed/)).toBe(null));
+  });
+
+  it("keeps a passing test result across Connect", async () => {
+    mockInvoke((command, args) => {
+      switch (command) {
+        case "get_settings":
+          return {
+            folder: "/tmp/capture",
+            enabled: true,
+            interval_secs: 5,
+            min_dwell_secs: 10,
+            similarity_threshold: 0.5,
+            agent: null,
+            schedule_hhmm: null,
+            editor: null,
+            launch_at_login: true,
+            max_block_chars: 0,
+            write_references: true,
+            extra_redaction_patterns: [],
+          };
+        case "set_settings":
+          return null;
+        case "agent_detect":
+          return [CLAUDE];
+        case "agent_auth":
+          return { state: "ok" };
+        case "agent_test":
+          return "Claude replied.";
+        case "get_prompt":
+          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+        default:
+          throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
+      }
+    });
+
+    render(<AgentTab />);
+    fireEvent.click(await screen.findByRole("radio", { name: "Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+    await screen.findByText(/Test passed/);
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+    // Connect applies the provider that was just tested, so the pass holds:
+    // it must not be replaced by "has not passed a test yet".
+    await screen.findByText("Connected");
+    expect(screen.getByText(/Test passed/)).toBeTruthy();
+    expect(screen.queryByText(/has not passed a test yet/)).toBe(null);
+  });
+
+  it("locks the other providers while one is connected", async () => {
+    mockInvoke((command, args) => {
+      switch (command) {
+        case "get_settings":
+          return {
+            folder: "/tmp/capture",
+            enabled: true,
+            interval_secs: 5,
+            min_dwell_secs: 10,
+            similarity_threshold: 0.5,
+            agent: CLAUDE,
+            schedule_hhmm: null,
+            editor: null,
+            launch_at_login: true,
+            max_block_chars: 0,
+            write_references: true,
+            extra_redaction_patterns: [],
+          };
+        case "agent_detect":
+          return [CLAUDE, CODEX];
+        case "agent_auth":
+          return { state: "ok" };
+        case "get_prompt":
+          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+        default:
+          throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
+      }
+    });
+
+    render(<AgentTab />);
+    // The connected provider says so, offers Disconnect, and holds the
+    // schedule; the other row cannot be chosen until it is let go.
+    expect(await screen.findByText("Connected")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(screen.getByText("Schedule")).toBeTruthy();
+    const codex = screen.getByRole("radio", { name: "Codex" }) as HTMLInputElement;
+    expect(codex.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Connect" })).toBe(null);
+  });
+
   it("carries the schedule and the prompt, so summarising is configured in one place", async () => {
     mockInvoke(handler);
     render(<AgentTab />);
+    // The schedule lives inside the chosen provider's section, so nothing
+    // shows until a provider is picked.
+    expect(screen.queryByText("Schedule")).toBe(null);
+    fireEvent.click(await screen.findByRole("radio", { name: "Something else" }));
     expect(await screen.findByText("Schedule")).toBeTruthy();
     // PromptSettings' own legend reads "Daily summary prompt", not the bare
     // word, and "prompt" also turns up in its body copy, so this pins the
@@ -98,7 +284,7 @@ describe("AgentTab", () => {
   it("does not carry launch at login, which is an application preference", async () => {
     mockInvoke(handler);
     render(<AgentTab />);
-    await screen.findByText("Schedule");
+    await screen.findByText("Provider");
     expect(screen.queryByText("Launch at login")).toBe(null);
   });
 });

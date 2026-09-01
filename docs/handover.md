@@ -11,10 +11,7 @@ measurements, and its open visual items.
 
 ## What the app is
 
-A macOS menu bar app that writes a record of what you worked on: one markdown
-file per day, on your own computer. It reads the focused window through the
-accessibility API, never takes screenshots, and sends nothing anywhere. There
-is no account and no server, and that claim is on the About screen, so any
+An app that writes a record of what you worked on: one markdown file per day, on your own computer. It reads the focused window through the accessibility API, and never takes screenshots. There is no account and no server, and that claim is on the About screen, so any
 feature that phones home contradicts the product.
 
 Once a day it can hand the day's file to an agent CLI already on the machine

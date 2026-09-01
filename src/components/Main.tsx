@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { AgentTab } from "./AgentTab";
 import { AppSettings } from "./AppSettings";
 import { DayView } from "./DayView";
@@ -8,6 +9,7 @@ import { Overview } from "./Overview";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
 import { SoundSettings } from "./SoundSettings";
+import { StorageSettings } from "./StorageSettings";
 import { applySoundSettings, bind, play } from "../lib/sound";
 import { useAppStatus } from "../lib/status";
 import type { Settings } from "../lib/days";
@@ -22,8 +24,17 @@ const TABS = [
 
 type Tab = (typeof TABS)[number]["id"];
 
+function isTab(value: string): value is Tab {
+  return TABS.some(({ id }) => id === value);
+}
+
+function tabFromLocation(): Tab {
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab && isTab(tab) ? tab : "overview";
+}
+
 export function Main() {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(tabFromLocation);
   const [contextDate, setContextDate] = useState<string | null>(null);
   const status = useAppStatus();
 
@@ -40,6 +51,17 @@ export function Main() {
     void invoke<Settings>("get_settings").then((saved) =>
       applySoundSettings(saved.sound_enabled, saved.sound_volume),
     );
+  }, []);
+
+  // Tray Settings on an already-open window. A cold open carries ?tab= in
+  // the URL instead, which survives React Strict Mode's remount.
+  useEffect(() => {
+    const unlisten = listen<string>("open-tab", (event) => {
+      if (event.payload && isTab(event.payload)) setTab(event.payload);
+    });
+    return () => {
+      void unlisten.then((off) => off()).catch(() => undefined);
+    };
   }, []);
 
   return (
@@ -60,8 +82,17 @@ export function Main() {
             aria-controls={`pane-${id}`}
             aria-selected={tab === id}
             className={tab === id ? "tab is-current" : "tab"}
-            onClick={() => {
+            // The cue fires on pointerdown, not click. A click lands on
+            // release, 80 to 120ms after the finger went down, and that gap
+            // is heard as lag on top of what the output device adds (about
+            // 16ms on the built-in speakers, 160ms over Bluetooth).
+            onPointerDown={() => {
               if (id !== tab) play("tick");
+            }}
+            onClick={(event) => {
+              // Keyboard activation raises a click with no pointerdown and
+              // detail 0; it gets its cue here. A mouse click already had one.
+              if (id !== tab && event.detail === 0) play("tick");
               // A tab pressed directly is not a request for a particular day, so
               // drop any day the map asked for. Without this the Context tab would
               // keep reopening the last cell clicked, for the rest of the session.
@@ -97,8 +128,9 @@ export function Main() {
           {tab === "agent" && <AgentTab />}
           {tab === "settings" && (
             <div className="settings-stack">
-              <RulesSettings />
+              <StorageSettings />
               <RecordingSettings />
+              <RulesSettings />
               <AppSettings />
               <SoundSettings />
               <McpSettings />

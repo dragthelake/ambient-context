@@ -4,14 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { CLOSE_GLYPH, PixelGlyph } from "./PixelGlyph";
 import { EyePanel } from "./EyePanel";
 import { useAppStatus, type CaptureStatus } from "../lib/status";
-
-function looksSynced(folder: string): boolean {
-  return (
-    folder.includes("Mobile Documents") ||
-    folder.includes("com~apple~CloudDocs") ||
-    folder.includes("iCloud Drive")
-  );
-}
+import { looksSynced } from "./StorageSettings";
 
 function closeWindow() {
   void getCurrentWindow().close();
@@ -129,11 +122,10 @@ export function Setup() {
         <fieldset>
           <legend>2. Choose where to save</legend>
           <p>
-            Your files are plain markdown. The default folder sits outside
-            Documents so iCloud will not upload them. You can move or delete
-            them at any time. Ambient Context opens when you log in so the
-            record does not have a hole in it after a restart; you can turn
-            that off in Settings.
+            Your files are plain markdown; you can move or delete them at any
+            time. Ambient Context opens when you log in so the record does
+            not have a hole in it after a restart; you can turn that off in
+            Settings.
           </p>
           {folder ? (
             <p className="status-line done">
@@ -155,7 +147,7 @@ export function Setup() {
                 disabled={picking}
                 onClick={() => void pickFolder("use_default_folder")}
               >
-                Save to ~/Ambient Context
+                Save to Documents/Ambient Context
               </button>
             )}
             <button

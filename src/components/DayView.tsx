@@ -46,6 +46,13 @@ export type SummaryState =
   | { kind: "generated"; at: string }
   | { kind: "failed"; message: string };
 
+/// The runner prefixes failures with "{date} failed: ". In the day header
+/// that date is already in the title, so strip the prefix when present.
+function failureReason(message: string, date: string): string {
+  const prefix = `${date} failed: `;
+  return message.startsWith(prefix) ? message.slice(prefix.length) : message;
+}
+
 const BLOCK_HEADING = /^## (\d{2}):(\d{2})[-–](\d{2}):(\d{2})/;
 
 export function dayStats(dayMarkdown: string | null): DayStats {
@@ -313,7 +320,10 @@ export function DayView({ date }: { date?: string } = {}) {
       return { kind: "generated", at };
     }
     if (outcome && outcome.date === selected && !outcome.ok) {
-      return { kind: "failed", message: outcome.message };
+      return {
+        kind: "failed",
+        message: failureReason(outcome.message, selected),
+      };
     }
     return { kind: "none" };
   }, [summaryMarkdown, outcome, selected, jobStatus, manualFailure]);

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CLOSE_GLYPH, PixelGlyph } from "./PixelGlyph";
 import appIcon from "../assets/app-icon.png";
 
 function closeWindow() {
@@ -29,14 +28,9 @@ export function About() {
         <span className="titlebar-text" data-tauri-drag-region>
           ABOUT
         </span>
-        <button
-          type="button"
-          className="titlebar-button"
-          aria-label="Close about"
-          onClick={closeWindow}
-        >
-          <PixelGlyph pattern={CLOSE_GLYPH} />
-        </button>
+        <div className="titlebar-controls">
+          <button type="button" aria-label="Close" onClick={closeWindow} />
+        </div>
       </div>
 
       <div className="window-body about-body">

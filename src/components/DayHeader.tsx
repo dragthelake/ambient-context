@@ -38,7 +38,6 @@ export function DayHeader({
   onToday,
   onSummarise,
 }: DayHeaderProps) {
-  const [showStderr, setShowStderr] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const hasSummary = summary.kind === "generated";
 
@@ -112,19 +111,7 @@ export function DayHeader({
         <span className={`day-summary-state ${summary.kind}`}>
           {summaryLine}
           {summary.kind === "failed" ? (
-            <>
-              {" "}
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => setShowStderr((shown) => !shown)}
-              >
-                {showStderr ? "Hide detail" : "Show detail"}
-              </button>
-              {showStderr ? (
-                <pre className="day-error">{summary.message}</pre>
-              ) : null}
-            </>
+            <pre className="day-error">{summary.message}</pre>
           ) : null}
         </span>
       </div>

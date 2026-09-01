@@ -88,6 +88,16 @@ use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+/// The part of a failed run a person can act on. Many CLIs print errors on
+/// stdout, stderr, or both; an empty stderr with a nonempty stdout is common.
+pub fn failure_detail(stdout: &str, stderr: &str) -> String {
+    let stderr = stderr.trim();
+    if !stderr.is_empty() {
+        return stderr.to_string();
+    }
+    stdout.trim().to_string()
+}
+
 #[derive(Debug)]
 pub enum AgentError {
     /// The command does not exist at that path. Almost always a stale
@@ -110,7 +120,12 @@ impl std::fmt::Display for AgentError {
                 let code = code
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "signal".into());
-                write!(f, "the agent exited with {code}: {}", stderr.trim())
+                let detail = stderr.trim();
+                if detail.is_empty() {
+                    write!(f, "the agent exited with {code}")
+                } else {
+                    write!(f, "the agent exited with {code}: {detail}")
+                }
             }
             AgentError::Io(message) => write!(f, "{message}"),
         }
@@ -190,9 +205,11 @@ pub fn run_with_env(
             if output.status.success() {
                 Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
             } else {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
                 Err(AgentError::Failed {
                     code: output.status.code(),
-                    stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                    stderr: failure_detail(&stdout, &stderr),
                 })
             }
         }
@@ -319,15 +336,47 @@ pub const CLAUDE_CODE_ARGS: &[&str] = &[
     "medium",
 ];
 
+pub const CLAUDE_DEFAULT_MODEL: &str = "claude-opus-5";
+
+/// The models the Agent tab offers for Claude Code. AgentTab.tsx carries
+/// the same list with display names; the two move together.
+pub const CLAUDE_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"];
+
+/// argv for one Claude Code model. Haiku 4.5 takes no effort levels, so
+/// the flag only goes on the models that accept it.
+pub fn claude_code_args_for(model: &str) -> Vec<String> {
+    let mut args: Vec<String> = ["-p", "--output-format", "text", "--model", model]
+        .iter()
+        .map(|arg| arg.to_string())
+        .collect();
+    if model != "claude-haiku-4-5" {
+        args.push("--effort".to_string());
+        args.push("medium".to_string());
+    }
+    args
+}
+
 pub fn claude_code_args() -> Vec<String> {
-    CLAUDE_CODE_ARGS.iter().map(|arg| arg.to_string()).collect()
+    claude_code_args_for(CLAUDE_DEFAULT_MODEL)
+}
+
+/// The value following "--model" in an argv, if any.
+pub fn claude_model_of(args: &[String]) -> Option<&str> {
+    let at = args.iter().position(|arg| arg == "--model")?;
+    args.get(at + 1).map(String::as_str)
 }
 
 /// Refreshes Claude Code argv when the preset gains new flags, so an older
-/// settings.json does not keep running without them.
+/// settings.json does not keep running without them. The chosen model
+/// survives the refresh; anything not on the offered list falls back to
+/// the default rather than being passed through to the CLI unchecked.
 pub fn normalize_claude_agent(agent: &mut Agent) {
     if agent.label == "Claude Code" {
-        agent.args = claude_code_args();
+        let model = claude_model_of(&agent.args)
+            .filter(|m| CLAUDE_MODELS.contains(m))
+            .unwrap_or(CLAUDE_DEFAULT_MODEL)
+            .to_string();
+        agent.args = claude_code_args_for(&model);
     }
 }
 
@@ -519,6 +568,25 @@ mod tests {
     }
 
     #[test]
+    fn a_nonzero_exit_falls_back_to_stdout_when_stderr_is_empty() {
+        let agent = agent_for(
+            "/bin/sh",
+            &["-c", "echo out of tokens; exit 1"],
+            10,
+        );
+        let out = run(&agent, "x");
+        assert_eq!(out.status, 1);
+        assert_eq!(out.stderr, "out of tokens");
+    }
+
+    #[test]
+    fn failure_detail_prefers_stderr() {
+        assert_eq!(failure_detail("stdout only", "stderr wins"), "stderr wins");
+        assert_eq!(failure_detail("stdout only", ""), "stdout only");
+        assert_eq!(failure_detail("", ""), "");
+    }
+
+    #[test]
     fn a_slow_agent_times_out_instead_of_hanging_forever() {
         let agent = agent_for("/bin/sh", &["-c", "sleep 30"], 1);
         let started = std::time::Instant::now();
@@ -630,6 +698,39 @@ mod tests {
         };
         normalize_claude_agent(&mut agent);
         assert_eq!(agent.args, claude_code_args());
+    }
+
+    #[test]
+    fn haiku_takes_no_effort_flag() {
+        let args = claude_code_args_for("claude-haiku-4-5");
+        assert!(!args.contains(&"--effort".to_string()));
+        assert_eq!(claude_model_of(&args), Some("claude-haiku-4-5"));
+    }
+
+    #[test]
+    fn normalize_claude_agent_keeps_the_chosen_model() {
+        let mut agent = Agent {
+            label: "Claude Code".to_string(),
+            command: "/usr/local/bin/claude".to_string(),
+            // Stale argv from an older preset, but with a model the user chose.
+            args: vec!["-p".to_string(), "--model".to_string(), "claude-sonnet-5".to_string()],
+            timeout_secs: 600,
+        };
+        normalize_claude_agent(&mut agent);
+        assert_eq!(claude_model_of(&agent.args), Some("claude-sonnet-5"));
+        assert!(agent.args.contains(&"--effort".to_string()));
+    }
+
+    #[test]
+    fn normalize_claude_agent_rejects_unknown_models() {
+        let mut agent = Agent {
+            label: "Claude Code".to_string(),
+            command: "/usr/local/bin/claude".to_string(),
+            args: vec!["--model".to_string(), "not-a-model".to_string()],
+            timeout_secs: 600,
+        };
+        normalize_claude_agent(&mut agent);
+        assert_eq!(claude_model_of(&agent.args), Some(CLAUDE_DEFAULT_MODEL));
     }
 
     #[test]

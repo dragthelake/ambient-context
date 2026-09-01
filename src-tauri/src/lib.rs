@@ -67,13 +67,18 @@ async fn choose_folder(app: tauri::AppHandle) -> Option<String> {
     Some(path.to_string_lossy().to_string())
 }
 
-/// The default is ~/Ambient Context, deliberately outside ~/Documents:
-/// iCloud's Desktop & Documents sync uploads everything in Documents, and
-/// this file must not silently leave the machine.
+/// The default is ~/Documents/Ambient Context, where people expect their
+/// own files to live. On a Mac with iCloud's Desktop & Documents sync on,
+/// that means the record is uploaded; the settings and setup screens carry
+/// that warning rather than this path avoiding it.
 #[tauri::command]
 fn use_default_folder(app: tauri::AppHandle) -> Option<String> {
-    let home = app.path().home_dir().ok()?;
-    let path = home.join("Ambient Context");
+    let documents = app
+        .path()
+        .document_dir()
+        .or_else(|_| app.path().home_dir())
+        .ok()?;
+    let path = documents.join("Ambient Context");
     // Create it now, not at first write: Reveal Folder and Open Today's File
     // are dead until the folder exists, which reads as a broken app.
     std::fs::create_dir_all(&path).ok()?;
@@ -786,6 +791,25 @@ async fn agent_auth(app: tauri::AppHandle, agent_config: settings::Agent) -> age
         .unwrap_or(agent::AuthState::Unknown)
 }
 
+/// Development diagnostics for the audio path (see src/lib/soundDiag.ts).
+/// Appends one line to sound-diag.log in the app data dir and echoes it to
+/// stderr, so a late cue can be traced without the inspector open.
+#[tauri::command]
+fn sound_diag(app: tauri::AppHandle, line: String) {
+    eprintln!("[sound] {line}");
+    if let Ok(dir) = app.path().app_data_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join("sound-diag.log"))
+        {
+            use std::io::Write;
+            let _ = writeln!(file, "{line}");
+        }
+    }
+}
+
 #[tauri::command]
 fn get_settings(app: tauri::AppHandle) -> settings::Settings {
     settings::load(&app)
@@ -1206,25 +1230,46 @@ fn read_summary(app: tauri::AppHandle, date: String) -> Option<String> {
 /// The browsing window, unlike the setup card, is resizable and keeps the
 /// native titlebar: it is a document window and should behave like one.
 pub fn open_main_window(app: &tauri::AppHandle) {
+    open_main_window_with_tab(app, None);
+}
+
+/// Opens the browsing window on a given tab. An already-open window is
+/// switched with an event; a cold open carries the tab in the URL so React
+/// Strict Mode cannot consume the pending state on remount.
+pub fn open_main_window_on_tab(app: &tauri::AppHandle, tab: &str) {
+    open_main_window_with_tab(app, Some(tab));
+}
+
+fn main_window_url(tab: Option<&str>) -> WebviewUrl {
+    let path = match tab {
+        Some(tab) => format!("index.html?view=main&tab={tab}"),
+        None => String::from("index.html?view=main"),
+    };
+    WebviewUrl::App(path.into())
+}
+
+fn open_main_window_with_tab(app: &tauri::AppHandle, tab: Option<&str>) {
     sync_activation_policy(app, true);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         window_chrome::centre_traffic_lights(&window);
         let _ = window.set_focus();
+        if let Some(tab) = tab {
+            let _ = window.emit("open-tab", tab);
+        }
         return;
     }
     // The traffic lights and native resizing stay; the title bar itself is
     // transparent and the page draws its own under them, which is why the
     // drawn bar carries a left inset wide enough to clear the buttons.
-    if let Ok(window) =
-        WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html?view=main".into()))
-            .title("Ambient Context")
-            .inner_size(1000.0, 700.0)
-            .min_inner_size(820.0, 560.0)
-            .resizable(true)
-            .title_bar_style(tauri::TitleBarStyle::Overlay)
-            .hidden_title(true)
-            .build()
+    if let Ok(window) = WebviewWindowBuilder::new(app, "main", main_window_url(tab))
+        .title("Ambient Context")
+        .inner_size(1000.0, 700.0)
+        .min_inner_size(820.0, 560.0)
+        .resizable(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .build()
     {
         let _ = window.show();
         window_chrome::centre_traffic_lights(&window);
@@ -1510,6 +1555,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            sound_diag,
             permission_status,
             request_permission,
             current_folder,

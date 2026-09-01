@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Settings } from "../lib/days";
 
@@ -8,6 +8,7 @@ import type { Settings } from "../lib/days";
 /// whose own note says it changes what is recorded.
 export function AppSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const launchId = useId();
 
   const readSettings = useCallback(async () => {
     setSettings(await invoke<Settings>("get_settings"));
@@ -22,9 +23,10 @@ export function AppSettings() {
   return (
     <fieldset>
       <legend>Application</legend>
-      <label className="schedule-row">
+      <div className="field-row">
         <input
           type="checkbox"
+          id={launchId}
           checked={settings.launch_at_login}
           onChange={(event) =>
             void invoke("set_launch_at_login", { enabled: event.target.checked })
@@ -32,8 +34,8 @@ export function AppSettings() {
               .catch(() => undefined)
           }
         />
-        Ambient Context opens when you log in
-      </label>
+        <label htmlFor={launchId}>Ambient Context opens when you log in</label>
+      </div>
       <p className="settings-note">
         The app starts with the Mac so the daily summary runs whether or not
         you opened it.

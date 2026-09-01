@@ -329,7 +329,7 @@ pub fn propose(
             let stderr = if run.timed_out {
                 format!("timed out after {}s", agent.timeout_secs)
             } else {
-                run.stderr.clone()
+                crate::agent::failure_detail(&run.stdout, &run.stderr)
             };
             let _ = ledger(
                 folder,

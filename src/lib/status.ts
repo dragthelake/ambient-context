@@ -34,11 +34,19 @@ export function useAppStatus(): AppStatus {
   const [permission, setPermission] = useState<Permission>("notGranted");
   const [folder, setFolder] = useState<string | null>(null);
 
+  // The folder rides the same poll as capture: it can be changed from the
+  // Settings tab or the setup window while this window is open, and the
+  // status bar must not keep showing the old path.
   useEffect(() => {
     let cancelled = false;
     const read = async () => {
-      const next = await invoke<CaptureStatus>("capture_status");
-      if (!cancelled) setCapture(next);
+      const [nextCapture, nextFolder] = await Promise.all([
+        invoke<CaptureStatus>("capture_status"),
+        invoke<string | null>("current_folder"),
+      ]);
+      if (cancelled) return;
+      setCapture(nextCapture);
+      setFolder(nextFolder ?? null);
     };
     void read();
     const id = setInterval(read, 1000);
@@ -49,9 +57,6 @@ export function useAppStatus(): AppStatus {
   }, []);
 
   useEffect(() => {
-    void invoke<string | null>("current_folder").then((next) =>
-      setFolder(next ?? null),
-    );
     void invoke<Permission>("permission_status").then(setPermission);
   }, []);
 
