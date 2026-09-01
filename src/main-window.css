@@ -114,7 +114,7 @@ body:has(.main-window) {
      hard against them as a saturated navy edge. It is deliberately more
      than the 3px the status bar keeps below the pane: that gap is between
      two grey surfaces and needs less. */
-  padding: 6px 8px 0 8px;
+  padding: 6px 4px 0 8px;
   position: relative;
   z-index: 1;
 }
@@ -161,14 +161,6 @@ body:has(.main-window) {
   padding: 4px 13px 7px;
   margin-bottom: -3px;
   z-index: 2;
-}
-
-/* Settings sits hard against the right edge, apart from the tabs that are
-   places in the record. It is a drawer of preferences rather than another
-   view, and the gap says so without needing a separator. It is always the
-   last tab, so :last-child is the whole rule. */
-.tabstrip .tab:last-child {
-  margin-left: auto;
 }
 
 .tab:focus-visible {
