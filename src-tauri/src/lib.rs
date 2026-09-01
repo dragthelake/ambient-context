@@ -1242,6 +1242,12 @@ pub fn open_about_window(app: &tauri::AppHandle) {
         let _ = window.set_focus();
         return;
     }
+    // Built hidden and shown from the page load callback. A window is
+    // visible the moment it is built, and an unpainted webview is white, so
+    // opening this window flashed a white rectangle before the dialog
+    // appeared. Showing it here rather than from the frontend keeps the
+    // About window's capability as narrow as it is: it has no
+    // core:window:allow-show, and does not need one.
     if let Ok(window) = WebviewWindowBuilder::new(
         app,
         "about",
@@ -1251,9 +1257,16 @@ pub fn open_about_window(app: &tauri::AppHandle) {
     .inner_size(380.0, 400.0)
     .resizable(false)
     .decorations(false)
+    .visible(false)
+    .on_page_load(|window, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Finished {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    })
     .build()
     {
-        let _ = window.set_focus();
+        let _ = window;
     }
 }
 
