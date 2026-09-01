@@ -1099,3 +1099,81 @@ body:has(.main-window) {
 .defrag-info-hint {
   color: var(--chrome-dark);
 }
+
+.defrag-controls {
+  margin-top: 6px;
+}
+
+.defrag-status,
+.defrag-percent {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The trough is sunken and the fill is the reference's navy. It carries
+   the same 2px padding the panes do, for the same reason: an inset shadow
+   paints beneath its descendants, so without it the fill covers the bevel. */
+.defrag-bar {
+  height: 20px;
+  background: var(--chrome);
+  box-shadow: var(--bevel-in);
+  padding: 2px;
+  overflow: hidden;
+}
+
+.defrag-bar-fill {
+  height: 100%;
+  /* Blocks with gaps, not a solid bar: repeating-linear-gradient gives the
+     period's segmented fill without an element per segment. */
+  background: repeating-linear-gradient(
+    90deg,
+    #00007b 0 10px,
+    transparent 10px 12px
+  );
+  transition: width 120ms linear;
+}
+
+.defrag-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.defrag-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.defrag-swatch {
+  width: 9px;
+  height: 12px;
+  border: 1px solid #0a0a0a;
+  background: #ffffff;
+}
+
+.defrag-swatch.is-raw {
+  background: #8be2f8;
+}
+
+.defrag-swatch.is-summarised {
+  background: #0308a3;
+}
+
+.defrag-swatch.is-failed {
+  background: #d84a3a;
+}
+
+.defrag-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.defrag-spacer {
+  flex: 1;
+}
