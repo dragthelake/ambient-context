@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AgentTab } from "./AgentTab";
+import { AppSettings } from "./AppSettings";
 import { DayView } from "./DayView";
 import { McpSettings } from "./McpSettings";
 import { Overview } from "./Overview";
 import { CLOSE_GLYPH, HELP_GLYPH, PixelGlyph } from "./PixelGlyph";
-import { PromptSettings } from "./PromptSettings";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
 import { SoundSettings } from "./SoundSettings";
@@ -18,6 +18,7 @@ import "../main-window.css";
 const TABS = [
   { id: "overview", label: "Overview" },
   { id: "context", label: "Context" },
+  { id: "agent", label: "Agent" },
   { id: "settings", label: "Settings" },
 ] as const;
 
@@ -121,12 +122,12 @@ export function Main() {
             <Overview status={status} onOpenDay={openDay} />
           )}
           {tab === "context" && <DayView date={contextDate ?? undefined} />}
+          {tab === "agent" && <AgentTab />}
           {tab === "settings" && (
             <div className="settings-stack">
-              <AgentTab />
               <RulesSettings />
-              <PromptSettings />
               <RecordingSettings />
+              <AppSettings />
               <SoundSettings />
               <McpSettings />
             </div>

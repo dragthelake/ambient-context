@@ -79,8 +79,25 @@ function handler(command: string) {
     case "current_folder":
       return "/Users/someone/Ambient Context";
     case "get_settings":
-      // The union of keys Overview, Main and DayView each read on mount.
-      return { sound_enabled: true, sound_volume: 0.6, agent: null };
+      // The union of keys Overview, Main and DayView each read on mount, plus
+      // the Settings tab's own panels once the Agent tab test switches to it.
+      return {
+        sound_enabled: true,
+        sound_volume: 0.6,
+        agent: null,
+        extra_redaction_patterns: [],
+      };
+    case "mcp_registration":
+      return {
+        binary: "/usr/local/bin/ambient-context",
+        quoted_binary: "/usr/local/bin/ambient-context",
+        running: false,
+        last_write: null,
+      };
+    case "agent_detect":
+      return [];
+    case "get_prompt":
+      return { text: "", customised: false, path: "/tmp/prompt.md" };
     case "list_days":
       return [
         {
@@ -202,5 +219,21 @@ describe("the main window's tab strip", () => {
     // the case the calendar rail used to have to be kept in step with. The
     // rail is gone; landing on the right day still has to hold.
     await waitFor(() => expect(screen.getByText(OLDER_HEADING)).toBeTruthy());
+  });
+
+  it("has an Agent tab between Context and Settings", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    expect(tabs).toEqual(["Overview", "Context", "Agent", "Settings"]);
+  });
+
+  it("shows the agent options on the Agent tab, not in Settings", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+    fireEvent.click(screen.getByRole("tab", { name: "Agent" }));
+    expect(await screen.findByText("Schedule")).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    await waitFor(() => expect(screen.queryByText("Schedule")).toBe(null));
   });
 });
