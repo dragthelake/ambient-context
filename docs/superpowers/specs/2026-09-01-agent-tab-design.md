@@ -72,6 +72,11 @@ rewriting files the user is entitled to consider settled. A comment on the
 field states this, so the inconsistency reads as a decision rather than a
 miss.
 
+The same holds for the ledger's `action` strings. `"engine_test"` is written
+into entries on disk and is asserted by a test at `src-tauri/src/lib.rs`.
+It stays as it is, for the same reason: a query over a user's ledger should
+not have to know which app version wrote each line.
+
 ### MCP is a breaking change, taken deliberately
 
 `no_engine` is a documented error code in `docs/mcp.md` that clients match
@@ -142,8 +147,9 @@ looked at rather than assumed.
 
 | File | Change |
 | --- | --- |
-| `src-tauri/src/engine.rs` | Renamed to `agent.rs`, types and functions renamed. |
-| `src-tauri/src/settings.rs` | `agent` field with `#[serde(alias = "engine")]`. |
+| `src-tauri/src/engine.rs` | Renamed to `agent.rs`. Holds `EngineError`, `AuthState`, `BUSY_MESSAGE` and the run logic. |
+| `src-tauri/src/settings.rs` | Holds the `Engine` struct itself, which is `settings::Engine` at every call site. |
+| `src-tauri/src/settings.rs` | Also the `agent` field, with `#[serde(alias = "engine")]`. |
 | `src-tauri/src/lib.rs` | Commands renamed and re-registered. |
 | `src-tauri/src/control.rs` | `no_engine` becomes `no_agent`, message reworded. |
 | `src-tauri/src/{jobs,propose}.rs` | Call sites. |
