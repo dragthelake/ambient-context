@@ -116,10 +116,10 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
     )
 }
 
-/// Starts or stops capture. Shared by the left click on the icon, the
-/// Start/Stop Capturing menu item, and the settings page's switch, so they
-/// can never drift apart. Permission missing or no folder chosen: open
-/// setup rather than failing silently.
+/// Starts or stops capture. Shared by the Start/Stop Capturing menu item
+/// and the settings page's switch, so the two can never drift apart.
+/// Permission missing or no folder chosen: open setup rather than failing
+/// silently.
 pub fn toggle_capture(app: &AppHandle) {
     if reader::macos::permission_status() == reader::Permission::NotGranted {
         crate::open_setup_window(app);
@@ -194,14 +194,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             else {
                 return;
             };
-            toggle_capture(tray.app_handle());
+            crate::open_main_window(tray.app_handle());
         })
         .build(app)?;
 
     Ok(())
 }
 
-/// The left-click toggle writes `enabled` to settings.json, and a settings
+/// The capture toggle writes `enabled` to settings.json, and a settings
 /// write is a settings write whichever surface made it: it goes through the
 /// same recorded save as the Settings page and MCP.
 fn record_toggle(app: &tauri::AppHandle, config: &settings::Settings) {

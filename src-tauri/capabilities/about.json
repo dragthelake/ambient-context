@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "about-window",
+  "description": "The About window reads a version string and closes itself. It needs nothing else, so it is not given the default capability's dialog, updater, process or clipboard permissions.",
+  "windows": [
+    "about"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close"
+  ]
+}

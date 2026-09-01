@@ -15,6 +15,7 @@ mod rules;
 mod segment;
 mod settings;
 mod summarise;
+mod titlebar;
 mod tray;
 mod writer;
 
@@ -822,6 +823,13 @@ pub(crate) fn set_launch_at_login_inner(
     }
 }
 
+/// The Overview tab's way back to first-run setup, for the case it is
+/// reporting: permission missing or no folder chosen.
+#[tauri::command]
+fn open_setup(app: tauri::AppHandle) {
+    open_setup_window(&app);
+}
+
 #[tauri::command]
 fn set_launch_at_login(app: tauri::AppHandle, enabled: bool) -> Result<(), String> {
     set_launch_at_login_inner(&app, enabled, Some("set_launch_at_login"))
@@ -1113,18 +1121,60 @@ pub fn open_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
+        // Showing a window again can restore the buttons AppKit thinks it
+        // owns, so this is asserted on every open rather than only once.
+        titlebar::hide_traffic_lights(&window);
         return;
     }
+    // The traffic lights and native resizing stay; the title bar itself is
+    // transparent and the page draws its own under them, which is why the
+    // drawn bar carries a left inset wide enough to clear the buttons.
     if let Ok(window) =
         WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html?view=main".into()))
             .title("Ambient Context")
             .inner_size(1000.0, 700.0)
             .min_inner_size(820.0, 560.0)
             .resizable(true)
+            .title_bar_style(tauri::TitleBarStyle::Overlay)
+            .hidden_title(true)
+            .build()
+    {
+        titlebar::hide_traffic_lights(&window);
+        let _ = window.set_focus();
+    }
+}
+
+/// The About window: a small fixed dialog with no native chrome, the same
+/// shape as setup. Opened from the title bar's ? button.
+pub fn open_about_window(app: &tauri::AppHandle) {
+    sync_activation_policy(app, true);
+    if let Some(window) = app.get_webview_window("about") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    if let Ok(window) =
+        WebviewWindowBuilder::new(app, "about", WebviewUrl::App("index.html?view=about".into()))
+            .title("About Ambient Context")
+            .inner_size(380.0, 400.0)
+            .resizable(false)
+            .decorations(false)
             .build()
     {
         let _ = window.set_focus();
     }
+}
+
+#[tauri::command]
+fn open_about(app: tauri::AppHandle) {
+    open_about_window(&app);
+}
+
+/// The version the About window shows, read from the crate rather than
+/// duplicated in the page, so a release bump cannot leave it stale.
+#[tauri::command]
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
 }
 
 /// An Accessory app has no Dock icon and cannot properly take focus, which
@@ -1381,6 +1431,9 @@ pub fn run() {
             get_settings,
             set_settings,
             set_launch_at_login,
+            open_setup,
+            open_about,
+            app_version,
             list_days,
             days_in_month,
             read_day,

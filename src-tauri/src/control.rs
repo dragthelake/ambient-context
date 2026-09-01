@@ -165,6 +165,8 @@ pub mod writes {
         "editor",
         "max_block_chars",
         "write_references",
+        "sound_enabled",
+        "sound_volume",
         "extra_redaction_patterns",
     ];
 

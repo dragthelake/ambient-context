@@ -40,6 +40,11 @@ pub struct Settings {
     /// The longest a single block's body can be, in characters. 0 is
     /// unlimited, which is the shipped behaviour.
     pub max_block_chars: usize,
+    /// Whether the interface plays its interaction cues. On by default:
+    /// the sounds are short and tied to actions the user took.
+    pub sound_enabled: bool,
+    /// Cue volume, 0.0 to 1.0.
+    pub sound_volume: f64,
     /// Whether `file:` and `url:` reference lines are written.
     pub write_references: bool,
     /// User redaction patterns, appended to the built-ins.
@@ -62,6 +67,8 @@ impl Default for Settings {
             editor: None,
             launch_at_login: true,
             max_block_chars: 0,
+            sound_enabled: true,
+            sound_volume: 0.6,
             write_references: true,
             extra_redaction_patterns: Vec::new(),
         }

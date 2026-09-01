@@ -186,3 +186,30 @@ public func ambientAxSnapshot() -> SRString {
     }
     return SRString(json)
 }
+
+// MARK: - Window chrome
+
+/// Hides the three traffic light buttons on one window, leaving the rest of
+/// the native title bar in place. The window keeps its system corner mask
+/// and its edge resizing, which going borderless would both give up; only
+/// the buttons go, because the page draws its own.
+///
+/// Identified by the NSWindow pointer Tauri already holds rather than by
+/// title, which would pick the wrong window the moment two of them matched.
+/// AppKit is main-thread only, so the caller marshals.
+@_cdecl("ambient_hide_window_buttons")
+public func ambientHideWindowButtons(_ windowPointer: Int64) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    var hidden: Int32 = 0
+    for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+        if let button = window.standardWindowButton(kind) {
+            button.isHidden = true
+            hidden += 1
+        }
+    }
+    return hidden
+}
