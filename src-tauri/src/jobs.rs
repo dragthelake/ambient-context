@@ -295,6 +295,10 @@ fn tick(app: &AppHandle) {
     );
 
     let queued: Vec<QueuedJob> = app.state::<JobQueue>().drain_if_idle(&state);
+    // Snapshotted the moment this batch is taken, so a Stop pressed before
+    // the snapshot cancels nothing (there is no batch yet) and a Stop
+    // pressed after it is what the per-job check below detects.
+    let generation = app.state::<JobQueue>().generation();
     if pending.is_empty() && queued.is_empty() {
         return;
     }
@@ -321,12 +325,11 @@ fn tick(app: &AppHandle) {
     }
     // Queued on-demand runs, from the window and from MCP clients named in
     // each job's trigger. A queued failure only stops its own job.
-    let mut cancelled = false;
     for job in queued {
-        // Taken once per job, so Stop drops everything still to come in
-        // this batch without touching the next one.
-        if cancelled || app.state::<JobQueue>().take_cancelled() {
-            cancelled = true;
+        // Checked once per job against the snapshot taken when this batch
+        // was drained, so a Stop pressed mid-batch cancels the remainder
+        // without touching whatever gets queued after this batch finishes.
+        if app.state::<JobQueue>().generation() != generation {
             app.state::<JobQueue>()
                 .record(&job.id, JobStatus::Cancelled);
             continue;
@@ -417,11 +420,12 @@ pub struct JobQueue {
     /// Wakes the runner when a job is pushed, so an on-demand run starts
     /// within about a second rather than at the next tick.
     work: std::sync::Condvar,
-    /// Raised by Stop, taken by the runner between jobs. A flag rather than
-    /// a queue drain because `drain_if_idle` empties the queue into a local
-    /// vector the moment the runner is idle, so by the time the user can
-    /// press Stop there is usually nothing left in the queue to clear.
-    cancel: std::sync::atomic::AtomicBool,
+    /// Bumped by Stop. A generation rather than a flag because a flag
+    /// cannot tell "raised while idle" from "raised for a batch already in
+    /// flight": anything else that enqueues while Stop is being handled
+    /// would clear a plain flag and let the cancelled batch run anyway. The
+    /// runner snapshots this once per batch and compares before each job.
+    cancel_generation: std::sync::atomic::AtomicU64,
 }
 
 impl JobQueue {
@@ -432,9 +436,6 @@ impl JobQueue {
 
     fn push(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
         use std::sync::atomic::Ordering;
-        // Enqueuing expresses intent to run, so it clears any stale flag
-        // left by a Stop pressed against a previous, now-empty batch.
-        self.cancel.store(false, Ordering::SeqCst);
         let n = self.counter.fetch_add(1, Ordering::SeqCst);
         let id = format!("job-{n}");
         self.queue.lock().expect("job queue").push_back(QueuedJob {
@@ -506,16 +507,16 @@ impl JobQueue {
         }
     }
 
-    /// Empties the queue, marks what it took as cancelled, and raises the
-    /// flag so the runner drops whatever it already drained. Returns how
-    /// many it cleared, which is not the whole story: the runner may hold
-    /// more. The caller counts its own jobs to report a total.
+    /// Empties the queue, marks what it took as cancelled, and bumps the
+    /// generation so the runner drops whatever it already drained. Returns
+    /// how many it cleared, which is not the whole story: the runner may
+    /// hold more. The caller counts its own jobs to report a total.
     // Wired to the Overview Stop button in a follow-up task; until then
     // the tests are its only caller.
     #[allow(dead_code)]
     pub fn cancel_queued(&self) -> usize {
         use std::sync::atomic::Ordering;
-        self.cancel.store(true, Ordering::SeqCst);
+        self.cancel_generation.fetch_add(1, Ordering::SeqCst);
         let dropped: Vec<QueuedJob> = self.queue.lock().expect("job queue").drain(..).collect();
         for job in &dropped {
             self.record(&job.id, JobStatus::Cancelled);
@@ -523,11 +524,13 @@ impl JobQueue {
         dropped.len()
     }
 
-    /// Reads and clears the flag. The runner calls this before each job, so
-    /// one press of Stop cancels one batch and not the next.
-    pub fn take_cancelled(&self) -> bool {
+    /// The current cancel generation. The runner snapshots this once per
+    /// batch, right after draining it, and compares before each job: a
+    /// mismatch means Stop was pressed after the snapshot was taken, so
+    /// this batch (and only this batch) should stop running.
+    pub fn generation(&self) -> u64 {
         use std::sync::atomic::Ordering;
-        self.cancel.swap(false, Ordering::SeqCst)
+        self.cancel_generation.load(Ordering::SeqCst)
     }
 
     /// Drains everything queued and marks it failed with `reason`. Used when
@@ -883,19 +886,51 @@ mod tests {
         let queue = JobQueue::for_test();
         queue.cancel_queued();
 
-        // Enqueuing expresses intent to run, so it clears any stale flag.
+        // A batch drained after this point snapshots the generation the
+        // cancel already bumped to, so comparing against its own snapshot
+        // later finds no mismatch and nothing in it gets cancelled.
         let next = queue.enqueue_summarise(day(2026, 8, 30));
-        assert!(!queue.take_cancelled());
+        let generation = queue.generation();
+        assert_eq!(queue.generation(), generation);
         assert_eq!(queue.find(&next.0).unwrap().status, JobStatus::Queued);
     }
 
     #[test]
-    fn the_flag_is_taken_once() {
+    fn generation_only_changes_on_cancel() {
         let queue = JobQueue::for_test();
         queue.enqueue_summarise(day(2026, 8, 28));
+        let before = queue.generation();
+
         queue.cancel_queued();
 
-        assert!(queue.take_cancelled());
-        assert!(!queue.take_cancelled());
+        let after = queue.generation();
+        assert_ne!(before, after);
+        // Reading it again does not consume or change it, unlike the flag
+        // this replaced: the runner reads it once per job for the whole
+        // batch, not once in total.
+        assert_eq!(queue.generation(), after);
+    }
+
+    #[test]
+    fn cancelling_mid_batch_is_not_undone_by_a_later_enqueue() {
+        // Reproduces the bug in the flag-based design: Stop pressed after a
+        // batch is already drained must not be erased by something else
+        // (an MCP client, the Day view's own Summarise button) enqueuing
+        // while the cancelled batch is still winding down.
+        let queue = JobQueue::for_test();
+        let state = JobState::default();
+        queue.enqueue_summarise(day(2026, 8, 28));
+        queue.enqueue_summarise(day(2026, 8, 29));
+
+        let _drained = queue.drain_if_idle(&state);
+        let generation = queue.generation(); // the runner's snapshot for this batch
+
+        assert_eq!(queue.cancel_queued(), 0); // Stop; the queue is already empty
+
+        // Something else enqueues while the cancelled batch is still in flight.
+        queue.enqueue_summarise(day(2026, 8, 30));
+
+        // The in-flight batch's snapshot must still show a mismatch.
+        assert_ne!(queue.generation(), generation);
     }
 }
