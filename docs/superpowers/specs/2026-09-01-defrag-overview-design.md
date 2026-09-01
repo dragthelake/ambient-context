@@ -122,13 +122,35 @@ something else between render and press is harmless: it is summarised twice.
 
 ### `cancel_queued_summaries() -> usize`
 
-The queue has no cancel today. Jobs drain serially on the tick thread, so
-stopping means clearing what has not started and letting the one in flight
-finish. Returns the number dropped, which the status line reports as
-"Stopped, N skipped".
+The queue has no cancel today, and the obvious implementation does not
+work. `drain_if_idle` takes *every* queued job into a local vector the
+moment the runner is idle, then runs them serially from there. Clearing the
+`VecDeque` therefore stops nothing once a batch has started, which is within
+about a second of pressing Summarise.
 
-Backed by a new `JobQueue::clear_queued()` which drains the `VecDeque` and
-records each dropped job as `Done` so nothing polls forever.
+Cancelling needs a flag the runner checks between jobs:
+
+- `JobQueue` gains a `cancel: AtomicBool`.
+- `cancel_queued_summaries` sets it, clears the `VecDeque`, marks the
+  cleared jobs `Cancelled` in history, and returns how many it cleared.
+- The runner's loop takes and clears the flag at the top of each iteration.
+  If it was set, it marks that job and every one still to come `Cancelled`
+  and stops.
+- `push` clears the flag, so a cancel raised while nothing was running
+  cannot kill the next batch.
+
+The day in flight finishes. Killing the engine child process mid-write is
+out of scope.
+
+`JobStatus` gains a `Cancelled` variant. It has exactly one exhaustive
+match, in `JobSummaryPayload::from`, so the compiler finds the only place
+that needs updating. On the wire it is `"cancelled"`, and `DayView`'s
+existing checks for `"done"` and `"failed"` ignore it, which is correct:
+that view polls only the single job it started itself.
+
+The return value is informational. The status line's "Stopped, N skipped"
+counts the batch's own job ids that came back `Cancelled`, because the
+queue cannot see how many the runner still held.
 
 ## Progress
 
@@ -195,7 +217,7 @@ Opening a day from the map needs the same effect on an internal route:
 | `src/lib/days.ts` | `DayEntry` type, mirroring the Rust struct. |
 | `src/main-window.css` | Well, lattice, cell colours, progress bar. |
 | `src-tauri/src/lib.rs` | Two commands, registered in the handler. |
-| `src-tauri/src/jobs.rs` | `JobQueue::clear_queued`. |
+| `src-tauri/src/jobs.rs` | `Cancelled` status, cancel flag, runner check. |
 
 One hook and two presentational components. `useDefragState` in
 `src/lib/defrag.ts` owns the day list, the failed dates, the batch and its
@@ -219,8 +241,10 @@ means the parts worth testing need no React and no job machinery.
   reflects finished over total.
 - **Navigation, component.** Clicking a recorded cell calls `onOpenDay`
   with that date; a white cell is disabled.
-- **`clear_queued`, Rust.** Drops queued jobs, leaves a running one, returns
-  the count, and marks the dropped ones so polling ends.
+- **Cancel, Rust.** `cancel_queued_summaries` empties the queue and marks
+  those jobs `Cancelled`; a batch already drained into the runner stops at
+  the next job boundary; a cancel raised while idle does not affect the
+  next batch.
 
 The existing `css-cascade.test.ts` guard covers the new CSS for the two
 shapes it already checks.
