@@ -5,14 +5,17 @@ reader who was not in the session.
 
 ## What the main window is now
 
-A Windows 98 tabbed dialog. Three tabs: Overview, Context, Settings. The
+A Windows 98 tabbed dialog. Three tabs today, four once the Agent tab
+lands: Overview, Context, Settings. The
 tab strip, title bar, status bar and scrollbars are shared with the setup
 dialog through `src/setup.css`, which `src/main-window.css` imports.
 
-- **Overview** holds the eye and the record toggle, plus a Status group.
-- **Context** is the former Day view, unchanged.
-- **Settings** is the former stack of settings panels, plus a new Sound
-  section.
+- **Overview** holds the eye and the record toggle, plus the defrag map.
+- **Context** is the former Day view, without its calendar rail. Day
+  navigation is the header's previous, next and Today, plus the Overview
+  map, which reaches any recorded day in one click.
+- **Settings** is the former stack of settings panels, plus a Sound
+  section. The agent options leave it when the Agent tab lands.
 
 The menu bar eye icon opens this window; it is no longer a capture toggle.
 Capture is toggled from the tray menu, the Overview tab or MCP, all through
@@ -96,6 +99,75 @@ NSWorkspace.shared.icon(forFile: "…/Ambient Context.app")
 `docs/app-icon-dock-compare.png` is that render beside Mail, Notes and System
 Settings at 256px, which is how the size and corner were settled.
 
+## The Overview defrag map
+
+The Status group is gone. In its place is a Windows 98 Disk Defragmenter
+field, one cell per recorded day, with a status line, a segmented progress
+bar and buttons that batch-summarise every day holding raw context and no
+summary. Clicking a cell opens that day on the Context tab.
+
+Spec at `docs/superpowers/specs/2026-09-01-defrag-overview-design.md`, plan
+at `docs/superpowers/plans/2026-09-01-defrag-overview.md`, reference capture
+at `docs/reference/defrag98-idle.png`.
+
+- **Cell geometry is read, not inferred.** The pixel run across a boundary
+  in the reference, at 2x: white 2, black 2, fill 12, black 2. Halved, a 1px
+  outline around a 6x9 fill with a **1px white gap** to the next cell. The
+  first attempt measured the pitch (9x12, correct) and assumed the outlines
+  touched, which fused a run of summarised days into one navy slab. Box size
+  and pitch are separate constants because they are no longer the same
+  number: n columns occupy n boxes plus n-1 gaps.
+- **The well needs 4px of padding, not 2.** Two go to the inset bevel, which
+  consumes them entirely, and two are white. The clearance that appears at
+  the sides is not padding: it is leftover width from centring the grid, and
+  there is no vertical equivalent, so the field sat flush top and bottom.
+- **A pressed cell fills with its outline colour.** Inverting the outline to
+  white was tried and does not work: the well behind is white, so the outline
+  vanishes and the cell appears to swell into its gap.
+- **Cancelling a batch is a generation counter, not a flag.** `drain_if_idle`
+  takes the whole queue into a local vector the moment the runner is idle, so
+  clearing the queue stops nothing once a batch has started. `cancel_queued`
+  bumps a counter; the runner snapshots it at drain and compares before each
+  job. A flag could not tell "raised while idle" from "raised for the batch
+  in flight".
+
+Two findings are deferred, both real:
+
+1. Every hover rebuilds `buildCells` and re-renders the field. The floor is
+   `MIN_ROWS` times the column count, about 2000 buttons even for a user with
+   one recorded day.
+2. Every recorded day is a tab stop, ahead of the Legend and Summarise
+   buttons. After a year that is 365 presses to reach them.
+
+## The Agent tab, planned but not built
+
+Renames "engine" to "agent" everywhere except two persisted names, gives it
+its own tab, and prompts from the Overview when none is connected. Spec at
+`docs/superpowers/specs/2026-09-01-agent-tab-design.md`, plan at
+`docs/superpowers/plans/2026-09-01-agent-tab.md`.
+
+The load-bearing detail: `Settings` carries `#[serde(default)]`, so renaming
+the `engine` key would not fail, it would silently parse an existing
+`settings.json` to "no agent" and discard the user's configuration. A
+`#[serde(alias = "engine")]` reads either key and writes the new one.
+
+Three names keep the old word, all persisted in the user's capture folder:
+the ledger's `engine` field, its `"engine_test"` action string, and the test
+asserting that string.
+
+## Windows are shown before they paint
+
+A Tauri window is visible the moment it is built, and an unpainted webview is
+white. Opening About flashed a white rectangle: measured at 98.8% white on
+the frame after the click, against 1% once painted.
+
+About is now built with `.visible(false)` and shown from `on_page_load`.
+Doing that in Rust rather than from the page keeps its capability as narrow
+as it was made: it carries only `core:default` and `core:window:allow-close`,
+and `show()` from the frontend would have needed `core:window:allow-show`.
+
+**The main and setup windows are built the same way and still flash.**
+
 ## The cascade hazard
 
 `src/setup.css` and `src/main-window.css` share one namespace, and
@@ -171,7 +243,23 @@ osascript -e 'tell application "System Events" to set frontmost of \
 
 ## Open items
 
-None.
+1. **`.defrag-cell:focus-visible` has never been seen.** Synthetic Tab
+   presses do not reach the grid, so the ring was never photographed. The
+   risk is specific: it is `0 0 0 1px #ffffff, 0 0 0 2px #0a0a0a` drawn
+   outside a cell, and the well and the inter-cell gaps are both white, so
+   the white half may be invisible and the black half may merge with the
+   neighbouring cells' outlines rather than reading as a ring.
+2. **The empty-state line has never been seen.** It shows only with zero
+   recorded days, which no development machine here has.
+3. **The main and setup windows still flash white** before they paint. Same
+   defect as About, same three-line fix.
+4. **The map's two deferred findings**, above: the hover re-render and the
+   tab stops.
+5. **`@types/node` is `^26` against a Node 24 runtime**, so TypeScript
+   accepts APIs the runtime does not have.
+6. **A root-owned Node 22.17.0 at `/usr/local/bin/node`** shadows Volta in
+   any shell that does not source `.zshrc`, which includes scripts and
+   launchd jobs.
 
 ## Since fixed
 
