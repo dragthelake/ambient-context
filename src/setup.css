@@ -316,13 +316,16 @@ ul {
   list-style: none;
 }
 
-li {
+/* Prose lists only. Control lists (the engine radios, the rules rows) carry a
+   class and are laid out by main-window.css; a bullet beside a radio is not
+   something the reference dialogs ever do. */
+ul:not([class]) > li {
   padding-left: 14px;
   position: relative;
   margin-bottom: 3px;
 }
 
-li::before {
+ul:not([class]) > li::before {
   content: "■";
   position: absolute;
   left: 0;

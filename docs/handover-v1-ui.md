@@ -57,6 +57,45 @@ plugin, called from `src-tauri/src/titlebar.rs`. Going borderless would
 have hidden them too but would also have given up the corner mask and edge
 resizing.
 
+## The app icon
+
+`src/assets/app-icon.png` is the artwork: a Windows 98 raised panel, square,
+bled to the canvas edge. Clipping that square to the macOS squircle cuts the
+corners straight through the white highlight band, so the bevel is redrawn to
+follow the squircle instead and the eye is keyed out and dropped inside it.
+`tools/make-app-icon.py` does this and writes `src/assets/app-icon-macos.png`,
+which is what `tauri icon` is then pointed at. Both the script and its output
+are committed; the script's docstring carries the commands.
+
+- Apple's icon grid: a 1024 canvas with the art on an 824 square, so the icon
+  carries the same visual weight as its Dock neighbours.
+- The corner is a superellipse with exponent 5, which tracks Apple's
+  continuous corner far more closely than a circular-arc rounded rect.
+- The bevel tones are sampled from the artwork, not from `--bevel-out`. On a
+  window the near-black is one hairline against a grey desktop; here it is a
+  26px arc on transparency, and pure black reads as a drop shadow. The bands
+  are unequal for the same reason the artwork's are: an even white band turns
+  into a halo and the icon reads as an outline sticker.
+- The light and dark sides meet on the anti-diagonal, which is the Windows
+  miter rule, and it transfers to a superellipse unchanged.
+
+`tauri icon` also writes `android/` and `ios/` trees. This app is macOS only;
+delete them.
+
+The app is `LSUIElement` and only promotes to `ActivationPolicy::Regular`
+while a window is open, so the Dock icon exists but only while the window
+does. `tauri dev` runs a bare binary with no bundle, so the icon can only be
+checked against `npm run tauri build`. To check it without trusting the file,
+ask macOS what it resolves for the bundle, which goes through the same icon
+services cache the Dock uses:
+
+```swift
+NSWorkspace.shared.icon(forFile: "…/Ambient Context.app")
+```
+
+`docs/app-icon-dock-compare.png` is that render beside Mail, Notes and System
+Settings at 256px, which is how the size and corner were settled.
+
 ## The cascade hazard
 
 `src/setup.css` and `src/main-window.css` share one namespace, and
@@ -80,8 +119,23 @@ disk deliberately, because vitest stubs CSS imports and a version built on
 nothing.
 
 What the sweep could not settle is selectors that differ in text but match
-the same element, which is how the `button:active` bug got in. That needs a
-DOM to decide, so it is left to review rather than automated.
+the same element, which is how the `button:active` bug got in, and which
+later put a `■` on every engine radio and rule row: `li::before` in setup.css
+against `.engine-list` and `.rule-row` in main-window.css. The bullet is now
+scoped to `ul:not([class])`, so prose lists keep it and control lists, which
+all carry a class, do not.
+
+That class of bug does need a DOM, but it does not need a person. Against the
+dev server, with both sheets loaded, `getComputedStyle(el, "::before")` settles
+it outright:
+
+```js
+// prose  → content "■", padding-left 14px
+// engine → content none, padding-left 0px
+```
+
+There is no harness for that yet, because it wants a browser and a running
+`vite`, which the vitest suite has neither of.
 
 ## Verification kit
 
@@ -94,24 +148,28 @@ are **not** in the repo; worth keeping if this continues:
 - `click.swift x y` a real down/up click, where System Events failed
 - `scroll.swift x y ticks` real scroll wheel events
 
+`screencapture -x -o -l<id>` replaces them for capture: `CGWindowListCreateImage`
+was obsoleted in macOS 15, so the window id is read from `CGWindowListCopyWindowInfo`
+and the capture is left to the command line tool.
+
 Screenshots need a validation loop: raise the window, capture, and check
 the title bar navy is present before trusting the image. Several captures
 during the session silently grabbed the wrong window.
 
+The same trap catches clicks, and more quietly. `-l` captures a window even
+when it is buried, so a capture can look right while every click has been
+landing on whatever is actually on top. Raise the app first and confirm it:
+
+```
+osascript -e 'tell application "System Events" to set frontmost of \
+  (first process whose name is "ambient-context") to true'
+```
+
 ## Open items
 
-1. **The blue bullet beside the engine radios.** `li::before` in setup.css
-   draws a `■` on every list item, including the radio lists in Settings,
-   where the reference would have none. Not changed pending a decision.
-2. **Sound is unverified by ear.** `cuelume` plays `ready` on starting
+1. **Sound is unverified by ear.** `cuelume` plays `ready` on starting
    capture, `release` on stopping, `tick` on changing tab and `chime` on
    opening About. Volume and on/off are in Settings.
-3. **The app icon is full bleed**, keeping the artwork's own bevel edge to
-   edge. It will sit square in a Dock of rounded icons. Insetting it on a
-   transparent canvas with the macOS mask is the alternative.
-4. **The Dock icon needs a real bundle.** `tauri dev` runs a bare binary,
-   so the new icon only appears after `npm run tauri build`, and macOS
-   caches icons aggressively.
 
 ## Since fixed
 
