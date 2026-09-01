@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DayEntry } from "./CalendarRail";
+import type { DayEntry } from "../lib/days";
 import type { DayStats, SummaryState } from "./DayView";
 
 export type DayHeaderProps = {

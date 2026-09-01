@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { CalendarRail } from "./CalendarRail";
 import { DayHeader } from "./DayHeader";
 import { RawPane } from "./RawPane";
 import { SummaryPane } from "./SummaryPane";
-import type { DayEntry } from "./CalendarRail";
+import type { DayEntry } from "../lib/days";
 
 export type { DayEntry };
 
@@ -82,10 +81,6 @@ function shift(date: string, days: number): string {
 
 export function DayView({ date }: { date?: string } = {}) {
   const [selected, setSelected] = useState(todayIso);
-  const [month, setMonth] = useState(() => {
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() + 1 };
-  });
   const [days, setDays] = useState<DayEntry[]>([]);
   const [dayMarkdown, setDayMarkdown] = useState<string | null>(null);
   const [summaryMarkdown, setSummaryMarkdown] = useState<string | null>(null);
@@ -105,13 +100,10 @@ export function DayView({ date }: { date?: string } = {}) {
     selected === todayIso() ? "raw" : "summary",
   );
 
-  // Selecting a day always brings the calendar with it, so the rail and the
-  // pane never disagree about which day you are looking at.
-  const selectDate = useCallback((date: string) => {
-    setSelected(date);
-    const [year, month] = date.split("-").map(Number);
-    if (year && month) setMonth({ year, month });
-  }, []);
+  // A plain setter since the calendar rail went: nothing else has to be
+  // kept in step with the selected day. Wrapped anyway so the call sites
+  // and their dependency arrays did not all have to change.
+  const selectDate = useCallback((date: string) => setSelected(date), []);
 
   // The window can be opened for a particular day, by the tray or by an
   // agent over MCP. Taken once on mount, and listened for while open.
@@ -143,17 +135,16 @@ export function DayView({ date }: { date?: string } = {}) {
     if (date) selectDate(date);
   }, [date, selectDate]);
 
-  const refreshMonth = useCallback(async () => {
-    const entries = await invoke<DayEntry[]>("days_in_month", {
-      year: month.year,
-      month: month.month,
-    });
-    setDays(entries);
-  }, [month.year, month.month]);
+  // Every recorded day, not one month of them. The rail wanted a month to
+  // draw a grid; the header only wants the entry for the selected day, and
+  // this is the list the Overview map already reads.
+  const refreshDays = useCallback(async () => {
+    setDays(await invoke<DayEntry[]>("list_days"));
+  }, []);
 
   useEffect(() => {
-    void refreshMonth();
-  }, [refreshMonth]);
+    void refreshDays();
+  }, [refreshDays]);
 
   // The last completed run, read on its own schedule. It is deliberately not
   // a dependency of the day load: that is what made the two re-enter each
@@ -236,8 +227,8 @@ export function DayView({ date }: { date?: string } = {}) {
     setDayMarkdown(day);
     setSummaryMarkdown(summary);
     await refreshOutcome();
-    void refreshMonth();
-  }, [selected, refreshMonth, refreshOutcome]);
+    void refreshDays();
+  }, [selected, refreshDays, refreshOutcome]);
 
   // Runs are queued and serial. The command returns a job id straight away;
   // the view follows that one job and nobody else's.
@@ -327,20 +318,8 @@ export function DayView({ date }: { date?: string } = {}) {
     return { kind: "none" };
   }, [summaryMarkdown, outcome, selected, jobStatus, manualFailure]);
 
-  const onMonthChange = useCallback((year: number, month: number) => {
-    setMonth({ year, month });
-  }, []);
-
   return (
     <div className="day-view">
-      <CalendarRail
-        year={month.year}
-        month={month.month}
-        days={days}
-        selected={selected}
-        onSelect={selectDate}
-        onMonthChange={onMonthChange}
-      />
       <div className="day-main">
         <DayHeader
           date={selected}

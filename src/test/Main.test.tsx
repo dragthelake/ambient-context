@@ -38,8 +38,8 @@ const OLDER_LABEL = new Date(`${OLDER_DATE}T00:00:00Z`).toLocaleDateString(
   { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" },
 );
 
-// DayHeader's own date heading, which includes the weekday CalendarRail's
-// month title does not; used to prove which day the Context pane landed on.
+// DayHeader's own date heading, used to prove which day the Context pane
+// landed on.
 function dayHeading(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString("en-AU", {
@@ -53,17 +53,6 @@ function dayHeading(iso: string): string {
 const TODAY_HEADING = dayHeading(RECORDED_DATE);
 const OLDER_HEADING = dayHeading(OLDER_DATE);
 
-// CalendarRail's own month title, "Month Year", to prove a cross-month
-// click moves the rail rather than leaving it on today's month.
-function monthTitle(iso: string): string {
-  const [y, m] = iso.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-AU", {
-    month: "long",
-    year: "numeric",
-  });
-}
-
-const OLDER_MONTH_TITLE = monthTitle(OLDER_DATE);
 
 vi.mock("@tauri-apps/api/core", async () => {
   const mock = await import("./tauri-mock");
@@ -117,8 +106,6 @@ function handler(command: string) {
       return [];
     case "take_pending_day":
       return null;
-    case "days_in_month":
-      return [];
     case "job_status":
       return null;
     case "read_day":
@@ -200,7 +187,7 @@ describe("the main window's tab strip", () => {
     expect(screen.queryByText(OLDER_HEADING)).toBe(null);
   });
 
-  it("moves the calendar rail to the clicked day's month when it differs from today's", async () => {
+  it("opens a day from an earlier month when its cell is clicked", async () => {
     mockInvoke(handler);
     render(<Main />);
 
@@ -211,10 +198,9 @@ describe("the main window's tab strip", () => {
     );
     fireEvent.click(screen.getAllByRole("button", { name: OLDER_LABEL })[0]);
 
-    // CalendarRail's month title has no accessible role of its own, so this
-    // proves what it renders (a "Month Year" title) rather than anything
-    // about the rail's internal state; there is nothing more specific to
-    // query it by.
-    await waitFor(() => expect(screen.getByText(OLDER_MONTH_TITLE)).toBeTruthy());
+    // A day 90 days back is always in a different month from today, which is
+    // the case the calendar rail used to have to be kept in step with. The
+    // rail is gone; landing on the right day still has to hold.
+    await waitFor(() => expect(screen.getByText(OLDER_HEADING)).toBeTruthy());
   });
 });

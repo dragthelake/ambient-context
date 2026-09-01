@@ -24,7 +24,7 @@ function handler(pendingDay: string | null) {
     switch (command) {
       case "take_pending_day":
         return pendingDay;
-      case "days_in_month":
+      case "list_days":
         return [];
       case "read_day":
         return "## 09:00-09:30 Finder\n\nsomething\n";
