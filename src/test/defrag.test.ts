@@ -1,0 +1,77 @@
+import { describe, expect, it } from "vitest";
+import { buildCells, MIN_ROWS, pendingDates } from "../lib/defrag";
+import type { DayEntry } from "../lib/days";
+
+function entry(date: string, over: Partial<DayEntry> = {}): DayEntry {
+  return {
+    date,
+    has_capture: true,
+    has_summary: false,
+    bytes: 100,
+    title: null,
+    ...over,
+  };
+}
+
+describe("buildCells", () => {
+  it("fills at least twenty rows even with one day", () => {
+    const cells = buildCells([entry("2026-09-01")], "2026-09-01", 10, new Set());
+    expect(cells).toHaveLength(MIN_ROWS * 10);
+  });
+
+  it("starts at the first recorded day and runs to today", () => {
+    const cells = buildCells([entry("2026-08-30")], "2026-09-01", 10, new Set());
+    expect(cells[0].date).toBe("2026-08-30");
+    expect(cells[1].date).toBe("2026-08-31");
+    expect(cells[2].date).toBe("2026-09-01");
+  });
+
+  it("colours by capture and summary, and leaves gaps empty in place", () => {
+    const days = [
+      entry("2026-08-30"),
+      entry("2026-09-01", { has_summary: true }),
+    ];
+    const cells = buildCells(days, "2026-09-01", 10, new Set());
+    expect(cells[0].state).toBe("raw");
+    expect(cells[1].state).toBe("empty");
+    expect(cells[2].state).toBe("summarised");
+  });
+
+  it("marks a failed date red over its raw colour", () => {
+    const cells = buildCells(
+      [entry("2026-09-01")],
+      "2026-09-01",
+      10,
+      new Set(["2026-09-01"]),
+    );
+    expect(cells[0].state).toBe("failed");
+  });
+
+  it("leaves every cell past today empty", () => {
+    const cells = buildCells([entry("2026-09-01")], "2026-09-01", 10, new Set());
+    expect(cells[1].state).toBe("empty");
+    expect(cells[1].entry).toBeNull();
+  });
+
+  it("grows past twenty rows when there are more days than fit", () => {
+    const cells = buildCells([entry("2024-01-01")], "2026-09-01", 10, new Set());
+    expect(cells.length).toBeGreaterThan(MIN_ROWS * 10);
+    expect(cells.length % 10).toBe(0);
+  });
+
+  it("returns nothing when no day has been recorded", () => {
+    expect(buildCells([], "2026-09-01", 10, new Set())).toEqual([]);
+  });
+});
+
+describe("pendingDates", () => {
+  it("is days with capture and no summary, oldest first", () => {
+    const days = [
+      entry("2026-09-01"),
+      entry("2026-08-30", { has_summary: true }),
+      entry("2026-08-31"),
+      entry("2026-08-29", { has_capture: false }),
+    ];
+    expect(pendingDates(days)).toEqual(["2026-08-31", "2026-09-01"]);
+  });
+});

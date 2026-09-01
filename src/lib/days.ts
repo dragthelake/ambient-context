@@ -27,3 +27,14 @@ export type Settings = {
   write_references: boolean;
   extra_redaction_patterns: string[];
 };
+
+/// One day as `list_days` reports it. Mirrors `days::DayEntry` in Rust.
+/// `date` arrives as the `YYYY-MM-DD` string chrono serialises a NaiveDate
+/// to, not as a Date.
+export type DayEntry = {
+  date: string;
+  has_capture: boolean;
+  has_summary: boolean;
+  bytes: number;
+  title: string | null;
+};
