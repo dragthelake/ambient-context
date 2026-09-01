@@ -1,7 +1,7 @@
+mod agent;
 mod capture;
 mod control;
 mod days;
-mod engine;
 mod ipc;
 mod jobs;
 mod ledger;
@@ -467,7 +467,7 @@ fn read_day_blocks(app: tauri::AppHandle, date: String) -> Vec<days::RawBlock> {
         .unwrap_or_default()
 }
 
-/// Runs on the blocking pool: the engine can take minutes and must not
+/// Runs on the blocking pool: the agent can take minutes and must not
 /// park the webview.
 #[tauri::command]
 async fn propose(
@@ -477,13 +477,13 @@ async fn propose(
     instruction: String,
 ) -> Result<propose::Proposal, propose::ProposeError> {
     let loaded = settings::load(&app);
-    let engine = loaded.engine.ok_or(propose::ProposeError::NoEngine)?;
-    let folder = loaded.folder.ok_or(propose::ProposeError::NoEngine)?;
-    // A popover must not park on the engine lock behind a ten-minute
+    let agent = loaded.agent.ok_or(propose::ProposeError::NoAgent)?;
+    let folder = loaded.folder.ok_or(propose::ProposeError::NoAgent)?;
+    // A popover must not park on the agent lock behind a ten-minute
     // summary; say so and let the user try again.
-    if engine::is_busy() {
-        return Err(propose::ProposeError::EngineFailed {
-            stderr: engine::BUSY_MESSAGE.to_string(),
+    if agent::is_busy() {
+        return Err(propose::ProposeError::AgentFailed {
+            stderr: agent::BUSY_MESSAGE.to_string(),
         });
     }
     let config_dir = settings::config_dir(&app);
@@ -492,14 +492,14 @@ async fn propose(
         propose::propose(
             &config_dir,
             &folder,
-            &engine,
+            &agent,
             target,
             selection,
             &instruction,
         )
     })
     .await
-    .map_err(|e| propose::ProposeError::EngineFailed {
+    .map_err(|e| propose::ProposeError::AgentFailed {
         stderr: e.to_string(),
     })??;
     handle
@@ -580,7 +580,7 @@ impl From<jobs::JobSummary> for JobSummaryPayload {
 }
 
 /// Queues the run rather than starting it. The queue is what keeps
-/// on-demand and scheduled runs serial: two engine processes writing the
+/// on-demand and scheduled runs serial: two agent processes writing the
 /// same summary is the failure this closes.
 #[tauri::command]
 fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayload, String> {
@@ -589,8 +589,8 @@ fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayl
     if config.folder.is_none() {
         return Err("no capture folder is set".to_string());
     }
-    if config.engine.is_none() {
-        return Err("no engine is connected".to_string());
+    if config.agent.is_none() {
+        return Err("no agent is connected".to_string());
     }
     let id = app
         .state::<jobs::JobQueue>()
@@ -620,8 +620,8 @@ fn summarise_days(app: tauri::AppHandle, dates: Vec<String>) -> Result<Vec<Strin
     if config.folder.is_none() {
         return Err("no capture folder is set".to_string());
     }
-    if config.engine.is_none() {
-        return Err("no engine is connected".to_string());
+    if config.agent.is_none() {
+        return Err("no agent is connected".to_string());
     }
     let parsed = parse_dates(&dates)?;
     let queue = app.state::<jobs::JobQueue>();
@@ -675,66 +675,66 @@ fn job_status(state: tauri::State<jobs::JobState>) -> Option<jobs::Outcome> {
 /// cache is warmed on a background thread at startup and can be rebuilt
 /// from Settings after installing a CLI.
 #[derive(Default)]
-pub struct EngineEnv(std::sync::Mutex<Option<std::collections::HashMap<String, String>>>);
+pub struct AgentEnv(std::sync::Mutex<Option<std::collections::HashMap<String, String>>>);
 
-impl EngineEnv {
+impl AgentEnv {
     fn get(&self) -> std::collections::HashMap<String, String> {
-        let mut slot = self.0.lock().expect("engine env");
+        let mut slot = self.0.lock().expect("agent env");
         if slot.is_none() {
-            *slot = Some(engine::login_shell_env());
+            *slot = Some(agent::login_shell_env());
         }
         slot.clone().unwrap_or_default()
     }
 
     fn refresh(&self) -> std::collections::HashMap<String, String> {
-        let fresh = engine::login_shell_env();
-        *self.0.lock().expect("engine env") = Some(fresh.clone());
+        let fresh = agent::login_shell_env();
+        *self.0.lock().expect("agent env") = Some(fresh.clone());
         fresh
     }
 }
 
-pub(crate) fn engine_env(app: &tauri::AppHandle) -> std::collections::HashMap<String, String> {
-    app.state::<EngineEnv>().get()
+pub(crate) fn agent_env(app: &tauri::AppHandle) -> std::collections::HashMap<String, String> {
+    app.state::<AgentEnv>().get()
 }
 
 /// Rebuilds the cached environment. Called from Settings after installing
-/// or moving an engine CLI, so a detect can find it without a relaunch.
+/// or moving an agent CLI, so a detect can find it without a relaunch.
 #[tauri::command]
-async fn refresh_engine_env(app: tauri::AppHandle) -> Vec<settings::Engine> {
+async fn refresh_agent_env(app: tauri::AppHandle) -> Vec<settings::Agent> {
     tauri::async_runtime::spawn_blocking(move || {
-        let env = app.state::<EngineEnv>().refresh();
-        engine::detect(&env)
+        let env = app.state::<AgentEnv>().refresh();
+        agent::detect(&env)
     })
     .await
     .unwrap_or_default()
 }
 
 #[tauri::command]
-fn engine_detect(app: tauri::AppHandle) -> Vec<settings::Engine> {
-    engine::detect(&engine_env(&app))
+fn agent_detect(app: tauri::AppHandle) -> Vec<settings::Agent> {
+    agent::detect(&agent_env(&app))
 }
 
 /// Proves the connection now, in front of someone who can fix it, rather
 /// than at 6am six weeks from now.
 #[tauri::command]
-async fn engine_test(
+async fn agent_test(
     app: tauri::AppHandle,
-    engine_config: settings::Engine,
+    agent_config: settings::Agent,
 ) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if engine::is_busy() {
-            return Err(engine::BUSY_MESSAGE.to_string());
+        if agent::is_busy() {
+            return Err(agent::BUSY_MESSAGE.to_string());
         }
-        let mut probe = engine_config;
+        let mut probe = agent_config;
         // A test must never park the window for ten minutes.
         probe.timeout_secs = probe.timeout_secs.min(60);
         let result =
-            engine::run_with_env(&probe, "Reply with exactly the word: ok", &engine_env(&app))
+            agent::run_with_env(&probe, "Reply with exactly the word: ok", &agent_env(&app))
                 .map_err(|e| e.to_string());
         // A test spends a model call under the user's subscription, so it
-        // belongs in the record like any other engine run.
+        // belongs in the record like any other agent run.
         if let Some(folder) = settings::load(&app).folder {
-            ledger_engine_test(&folder, &probe, &result);
+            ledger_agent_test(&folder, &probe, &result);
         }
         result
     })
@@ -742,11 +742,13 @@ async fn engine_test(
     .map_err(|e| e.to_string())?
 }
 
-/// One entry per engine test: what was run, what came back verbatim, and
-/// whether it worked.
-fn ledger_engine_test(
+/// One entry per agent test: what was run, what came back verbatim, and
+/// whether it worked. The action string stays "engine_test": it is written
+/// into entries in the user's capture folder, and a query over their ledger
+/// should not have to know which app version wrote each line.
+fn ledger_agent_test(
     folder: &std::path::Path,
-    engine_config: &settings::Engine,
+    agent_config: &settings::Agent,
     result: &Result<String, String>,
 ) {
     let (output, disposition) = match result {
@@ -764,26 +766,24 @@ fn ledger_engine_test(
         action: "engine_test".to_string(),
         prompt_id: None,
         prompt_sha256: None,
-        engine: Some(engine_config.label.clone()),
+        engine: Some(agent_config.label.clone()),
         inputs: Vec::new(),
         output,
         reasoning: None,
         disposition,
     };
     if let Err(error) = ledger::append(folder, &entry) {
-        eprintln!("[ledger] could not record the engine test: {error}");
+        eprintln!("[ledger] could not record the agent test: {error}");
     }
 }
 
-/// Whether the engine is signed in, without spending a model call. Ten
+/// Whether the agent is signed in, without spending a model call. Ten
 /// second cap inside `auth_state`; never called on the schedule.
 #[tauri::command]
-async fn engine_auth(app: tauri::AppHandle, engine_config: settings::Engine) -> engine::AuthState {
-    tauri::async_runtime::spawn_blocking(move || {
-        engine::auth_state(&engine_config, &engine_env(&app))
-    })
-    .await
-    .unwrap_or(engine::AuthState::Unknown)
+async fn agent_auth(app: tauri::AppHandle, agent_config: settings::Agent) -> agent::AuthState {
+    tauri::async_runtime::spawn_blocking(move || agent::auth_state(&agent_config, &agent_env(&app)))
+        .await
+        .unwrap_or(agent::AuthState::Unknown)
 }
 
 #[tauri::command]
@@ -1060,13 +1060,13 @@ mod tests {
     #[test]
     fn an_engine_test_is_recorded_with_its_output_and_its_failures() {
         let folder = tempfile::tempdir().unwrap();
-        let engine_config = settings::Engine {
+        let agent_config = settings::Agent {
             label: "Claude Code".to_string(),
             command: "/bin/echo".to_string(),
             args: Vec::new(),
             timeout_secs: 60,
         };
-        ledger_engine_test(folder.path(), &engine_config, &Ok("ok".to_string()));
+        ledger_agent_test(folder.path(), &agent_config, &Ok("ok".to_string()));
         let text = entries_in(folder.path());
         assert_eq!(text.matches("\n## ").count(), 1);
         assert!(text.contains("engine_test"));
@@ -1075,9 +1075,9 @@ mod tests {
         assert!(text.contains("- disposition: accepted"));
         assert!(text.contains("ok"));
 
-        ledger_engine_test(
+        ledger_agent_test(
             folder.path(),
-            &engine_config,
+            &agent_config,
             &Err("not logged in".to_string()),
         );
         let text = entries_in(folder.path());
@@ -1532,10 +1532,10 @@ pub fn run() {
             running_batch,
             job_status,
             job_state,
-            engine_detect,
-            refresh_engine_env,
-            engine_test,
-            engine_auth,
+            agent_detect,
+            refresh_agent_env,
+            agent_test,
+            agent_auth,
             get_settings,
             set_settings,
             set_launch_at_login,
@@ -1569,13 +1569,13 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.manage(capture::CaptureState::new());
-            app.manage(EngineEnv::default());
+            app.manage(AgentEnv::default());
             {
                 // Warm the login-shell environment off the launch path: it
                 // costs about half a second and nothing needs it yet.
                 let handle = app.handle().clone();
                 std::thread::spawn(move || {
-                    let _ = engine_env(&handle);
+                    let _ = agent_env(&handle);
                 });
             }
             {

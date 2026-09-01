@@ -58,7 +58,7 @@ pub fn due(
     pending
 }
 
-use crate::{engine, ledger, settings, summarise, writer};
+use crate::{agent, ledger, settings, summarise, writer};
 use serde::Serialize;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -157,14 +157,14 @@ fn record_in_ledger(folder: &Path, entry: &ledger::Entry) {
     }
 }
 
-/// Summarises one day: read the day file, build the prompt, run the engine,
+/// Summarises one day: read the day file, build the prompt, run the agent,
 /// validate, write, ledger. Every path through this function writes exactly
 /// one ledger entry, and every failure returns a sentence a person can act
 /// on.
 #[allow(clippy::too_many_arguments)]
 pub fn summarise_day(
     folder: &Path,
-    engine_config: &settings::Engine,
+    agent_config: &settings::Agent,
     template: &str,
     date: NaiveDate,
     trigger: ledger::Trigger,
@@ -183,7 +183,7 @@ pub fn summarise_day(
         action: "summarise_day".to_string(),
         prompt_id: Some("day-context".to_string()),
         prompt_sha256: Some(ledger::sha256_of(template.as_bytes())),
-        engine: Some(engine_config.label.clone()),
+        engine: Some(agent_config.label.clone()),
         inputs: ledger::hash_file(&day_path)
             .map(|i| vec![i])
             .unwrap_or_default(),
@@ -194,7 +194,7 @@ pub fn summarise_day(
 
     let prompt = summarise::build_prompt(template, date, &day_markdown);
 
-    let output = match engine::run_with_env(engine_config, &prompt, env) {
+    let output = match agent::run_with_env(agent_config, &prompt, env) {
         Ok(output) => output,
         Err(error) => {
             let message = error.to_string();
@@ -231,7 +231,7 @@ pub fn summarise_day(
 pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Result<(), String> {
     let config = settings::load(app);
     let folder = config.folder.clone().ok_or("no capture folder is set")?;
-    let engine_config = config.engine.clone().ok_or("no engine is connected")?;
+    let agent_config = config.agent.clone().ok_or("no agent is connected")?;
     let config_dir = settings::config_dir(app);
     // The customised prompt when there is one, the bundled copy otherwise.
     let template = crate::prompt::current(&config_dir);
@@ -242,12 +242,12 @@ pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Re
         .join("rejected");
     summarise_day(
         &folder,
-        &engine_config,
+        &agent_config,
         &template,
         date,
         trigger,
         &reject_dir,
-        &crate::engine_env(app),
+        &crate::agent_env(app),
     )
 }
 
@@ -273,14 +273,14 @@ fn tick(app: &AppHandle) {
     }
 
     let config = settings::load(app);
-    let (Some(folder), Some(_)) = (config.folder.clone(), config.engine.clone()) else {
-        // A job queued before the engine or the folder went away must not
+    let (Some(folder), Some(_)) = (config.folder.clone(), config.agent.clone()) else {
+        // A job queued before the agent or the folder went away must not
         // sit as "queued" forever with the window polling it. Fail it with
         // the reason, which is also what the Day view shows.
         let reason = if config.folder.is_none() {
             "No capture folder is set. Choose one in Setup."
         } else {
-            "No engine is connected. Choose one in Settings."
+            "No agent is connected. Choose one in Settings."
         };
         app.state::<JobQueue>().fail_queued(&state, reason);
         return;
@@ -318,7 +318,7 @@ fn tick(app: &AppHandle) {
         state.record(outcome);
         persist_last_run(app);
         if result.is_err() {
-            // One failure is usually the engine, and every following day
+            // One failure is usually the agent, and every following day
             // would fail the same way. Stop and let the user see it.
             break;
         }
@@ -422,7 +422,7 @@ struct QueuedJob {
 }
 
 /// The on-demand queue. Control and MCP surfaces push into it; the tick
-/// drains it when nothing else is running, so engine work stays serial and
+/// drains it when nothing else is running, so agent work stays serial and
 /// off the capture thread.
 #[derive(Default)]
 pub struct JobQueue {
@@ -672,14 +672,14 @@ mod tests {
 
     use tempfile::tempdir;
 
-    /// A stub engine is an absolute path, so the environment only has to
+    /// A stub agent is an absolute path, so the environment only has to
     /// be a plausible one rather than the user's own.
     fn test_env() -> std::collections::HashMap<String, String> {
         std::collections::HashMap::from([("PATH".to_string(), "/usr/bin:/bin".to_string())])
     }
 
-    fn stub_engine(command: &str, args: &[&str]) -> crate::settings::Engine {
-        crate::settings::Engine {
+    fn stub_agent(command: &str, args: &[&str]) -> crate::settings::Agent {
+        crate::settings::Agent {
             label: "stub".to_string(),
             command: command.to_string(),
             args: args.iter().map(|a| a.to_string()).collect(),
@@ -720,11 +720,11 @@ mod tests {
         let rejects = tempdir().unwrap();
         write_day(folder.path(), day(2026, 8, 28));
 
-        // /bin/echo ignores stdin and prints its argument: an engine that
+        // /bin/echo ignores stdin and prints its argument: an agent that
         // answers, badly.
         let error = summarise_day(
             folder.path(),
-            &stub_engine("/bin/echo", &["not a summary"]),
+            &stub_agent("/bin/echo", &["not a summary"]),
             "{{DATE}}\n{{DAY_FILE}}",
             day(2026, 8, 28),
             crate::ledger::Trigger::Schedule,
@@ -744,14 +744,14 @@ mod tests {
     }
 
     #[test]
-    fn an_engine_that_never_returns_an_answer_is_still_ledgered() {
+    fn an_agent_that_never_returns_an_answer_is_still_ledgered() {
         let folder = tempdir().unwrap();
         let rejects = tempdir().unwrap();
         write_day(folder.path(), day(2026, 8, 28));
 
         let error = summarise_day(
             folder.path(),
-            &stub_engine("/bin/sh", &["-c", "echo not logged in >&2; exit 1"]),
+            &stub_agent("/bin/sh", &["-c", "echo not logged in >&2; exit 1"]),
             "{{DAY_FILE}}",
             day(2026, 8, 28),
             crate::ledger::Trigger::Schedule,
@@ -774,10 +774,10 @@ mod tests {
         write_day(folder.path(), day(2026, 8, 28));
 
         // /bin/cat returns whatever the prompt was, so a template with no
-        // placeholders is a stub engine that answers correctly.
+        // placeholders is a stub agent that answers correctly.
         summarise_day(
             folder.path(),
-            &stub_engine("/bin/cat", &[]),
+            &stub_agent("/bin/cat", &[]),
             &valid_summary(),
             day(2026, 8, 28),
             crate::ledger::Trigger::OnDemand,
@@ -813,7 +813,7 @@ mod tests {
     #[test]
     fn a_queued_job_waits_while_a_run_is_in_flight() {
         // The on-demand path goes through the queue precisely so that a
-        // click cannot start a second engine run beside a scheduled one.
+        // click cannot start a second agent run beside a scheduled one.
         let queue = JobQueue::for_test();
         let state = JobState::default();
         queue.enqueue_summarise(day(2026, 8, 30));
@@ -842,10 +842,10 @@ mod tests {
         let queue = JobQueue::for_test();
         let state = JobState::default();
         let id = queue.enqueue_summarise(chrono::NaiveDate::from_ymd_opt(2026, 8, 30).unwrap());
-        assert_eq!(queue.fail_queued(&state, "No engine is connected."), 1);
+        assert_eq!(queue.fail_queued(&state, "No agent is connected."), 1);
         let job = queue.find(&id.0).expect("the job stays findable");
         assert!(
-            matches!(job.status, JobStatus::Failed { ref stderr } if stderr.contains("No engine"))
+            matches!(job.status, JobStatus::Failed { ref stderr } if stderr.contains("No agent"))
         );
         assert_eq!(
             queue.fail_queued(&state, "again"),
@@ -959,7 +959,7 @@ mod tests {
 
     #[test]
     fn a_stop_mid_batch_stops_the_runner_at_the_next_job_boundary() {
-        // The runner's own loop over a drained batch, with the engine work
+        // The runner's own loop over a drained batch, with the agent work
         // left out: what is under test is the decision `tick` makes before
         // each job, which is the whole of what Stop does to a batch already
         // taken off the queue.

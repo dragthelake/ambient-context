@@ -17,7 +17,7 @@ impl ProposeTarget {
     }
 }
 
-/// The text the user highlighted, with enough provenance for the engine to
+/// The text the user highlighted, with enough provenance for the agent to
 /// know what it is looking at and for the ledger to record where it came
 /// from. `mode` is "raw" or "summary".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -78,7 +78,7 @@ Return the complete file, including every rule already in it that your change do
 
 fn prompt_schema() -> String {
     format!(
-        "The file is the markdown prompt handed to the engine that writes each day's summary.\n\n\
+        "The file is the markdown prompt handed to the agent that writes each day's summary.\n\n\
          Constraints:\n\
          - It must still ask for every one of these headings, spelled exactly: {}.\n\
          - It must not be empty.\n\
@@ -245,21 +245,21 @@ pub struct Proposal {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ProposeError {
-    NoEngine,
-    EngineFailed { stderr: String },
+    NoAgent,
+    AgentFailed { stderr: String },
     Invalid { reason: String, raw: String },
 }
 
 impl std::fmt::Display for ProposeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ProposeError::NoEngine => write!(
+            ProposeError::NoAgent => write!(
                 f,
-                "no engine is connected. Connect one in Settings to use this."
+                "no agent is connected. Connect one on the Agent tab to use this."
             ),
-            ProposeError::EngineFailed { stderr } => write!(f, "the engine failed: {stderr}"),
+            ProposeError::AgentFailed { stderr } => write!(f, "the agent failed: {stderr}"),
             ProposeError::Invalid { reason, .. } => {
-                write!(f, "the engine's answer was not usable: {reason}")
+                write!(f, "the agent's answer was not usable: {reason}")
             }
         }
     }
@@ -307,7 +307,7 @@ fn inputs_for(config_dir: &Path, target: ProposeTarget) -> Vec<crate::ledger::In
 pub fn propose(
     config_dir: &Path,
     folder: &Path,
-    engine: &crate::engine::Engine,
+    agent: &crate::agent::Agent,
     target: ProposeTarget,
     selection: Selection,
     instruction: &str,
@@ -324,17 +324,17 @@ pub fn propose(
     // which is the cheapest thing that turns a near-miss into a usable
     // answer and the only mitigation this feature gets.
     for attempt in 0..2 {
-        let run = crate::engine::run(engine, &prompt);
+        let run = crate::agent::run(agent, &prompt);
         if run.timed_out || run.status != 0 {
             let stderr = if run.timed_out {
-                format!("timed out after {}s", engine.timeout_secs)
+                format!("timed out after {}s", agent.timeout_secs)
             } else {
                 run.stderr.clone()
             };
             let _ = ledger(
                 folder,
                 target,
-                engine,
+                agent,
                 &prompt,
                 inputs.clone(),
                 Some(run.stdout.clone()),
@@ -343,7 +343,7 @@ pub fn propose(
                     stderr: stderr.clone(),
                 },
             );
-            return Err(ProposeError::EngineFailed { stderr });
+            return Err(ProposeError::AgentFailed { stderr });
         }
         last_raw = run.stdout.clone();
         match parse_response(&run.stdout).and_then(|(file, reasoning)| {
@@ -354,7 +354,7 @@ pub fn propose(
                 let ledger_path = ledger(
                     folder,
                     target,
-                    engine,
+                    agent,
                     &prompt,
                     inputs,
                     Some(run.stdout.clone()),
@@ -387,7 +387,7 @@ pub fn propose(
     let _ = ledger(
         folder,
         target,
-        engine,
+        agent,
         &prompt,
         inputs,
         Some(last_raw.clone()),
@@ -406,7 +406,7 @@ pub fn propose(
 fn ledger(
     folder: &Path,
     target: ProposeTarget,
-    engine: &crate::engine::Engine,
+    agent: &crate::agent::Agent,
     prompt: &str,
     inputs: Vec<crate::ledger::Input>,
     output: Option<String>,
@@ -421,7 +421,7 @@ fn ledger(
             action: action_name(target).to_string(),
             prompt_id: Some(action_name(target).to_string()),
             prompt_sha256: Some(crate::ledger::sha256_of(prompt.as_bytes())),
-            engine: Some(engine.label.clone()),
+            engine: Some(agent.label.clone()),
             inputs,
             output,
             reasoning,
@@ -621,8 +621,8 @@ mod tests {
 
     use tempfile::tempdir;
 
-    fn fake_engine(script: &str) -> crate::engine::Engine {
-        crate::engine::Engine {
+    fn fake_agent(script: &str) -> crate::agent::Agent {
+        crate::agent::Agent {
             label: "fake".to_string(),
             command: "/bin/sh".to_string(),
             args: vec!["-c".to_string(), script.to_string()],
@@ -639,7 +639,7 @@ mod tests {
         let proposal = propose(
             config.path(),
             folder.path(),
-            &fake_engine(GOOD_RULES),
+            &fake_agent(GOOD_RULES),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -658,7 +658,7 @@ mod tests {
         let proposal = propose(
             config.path(),
             folder.path(),
-            &fake_engine(GOOD_RULES),
+            &fake_agent(GOOD_RULES),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -670,19 +670,19 @@ mod tests {
     }
 
     #[test]
-    fn a_failing_engine_is_a_failure_and_is_ledgered() {
+    fn a_failing_agent_is_a_failure_and_is_ledgered() {
         let config = tempdir().unwrap();
         let folder = tempdir().unwrap();
         let err = propose(
             config.path(),
             folder.path(),
-            &fake_engine("cat >/dev/null; echo 'not logged in' >&2; exit 1"),
+            &fake_agent("cat >/dev/null; echo 'not logged in' >&2; exit 1"),
             ProposeTarget::Rules,
             selection(),
             "x",
         )
         .unwrap_err();
-        assert!(matches!(err, ProposeError::EngineFailed { .. }));
+        assert!(matches!(err, ProposeError::AgentFailed { .. }));
         assert!(days_ledger(folder.path()).contains("failed:"));
     }
 
@@ -699,7 +699,7 @@ mod tests {
         let err = propose(
             config.path(),
             folder.path(),
-            &fake_engine(&script),
+            &fake_agent(&script),
             ProposeTarget::Rules,
             selection(),
             "x",
@@ -721,7 +721,7 @@ mod tests {
         let err = propose(
             config.path(),
             folder.path(),
-            &fake_engine(script),
+            &fake_agent(script),
             ProposeTarget::Rules,
             selection(),
             "x",
@@ -737,7 +737,7 @@ mod tests {
         let proposal = propose(
             config.path(),
             folder.path(),
-            &fake_engine(GOOD_RULES),
+            &fake_agent(GOOD_RULES),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -757,7 +757,7 @@ mod tests {
         let mut proposal = propose(
             config.path(),
             folder.path(),
-            &fake_engine(GOOD_RULES),
+            &fake_agent(GOOD_RULES),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -775,7 +775,7 @@ mod tests {
         let proposal = propose(
             config.path(),
             folder.path(),
-            &fake_engine(GOOD_RULES),
+            &fake_agent(GOOD_RULES),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",

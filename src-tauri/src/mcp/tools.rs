@@ -129,7 +129,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "summarise_day",
             title: "Summarise a day",
-            description: "Queues a summary for one day using the engine the user connected, and replaces the existing summary if there is one. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an engine connected.",
+            description: "Queues a summary for one day using the agent the user connected, and replaces the existing summary if there is one. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an agent connected.",
             input_schema: args(json!({ "date": date_property() }), &["date"]),
             read_only: false, destructive: true, idempotent: false,
         },
@@ -184,7 +184,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "get_config",
             title: "Read the settings",
-            description: "Returns every setting the Settings page exposes: capture folder, poll interval, minimum dwell, similarity threshold, engine, the daily summary time as schedule_hhmm, launch at login, editor, block size cap, whether references are written, and extra redaction patterns, plus the app version and the list of keys set_config accepts.",
+            description: "Returns every setting the Settings page exposes: capture folder, poll interval, minimum dwell, similarity threshold, agent, the daily summary time as schedule_hhmm, launch at login, editor, block size cap, whether references are written, and extra redaction patterns, plus the app version and the list of keys set_config accepts.",
             input_schema: none(),
             read_only: true, destructive: false, idempotent: true,
         },

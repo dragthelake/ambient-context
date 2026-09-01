@@ -43,11 +43,12 @@ pub struct Entry {
     /// A prompt changed by an app update silently rewrites history without
     /// this.
     pub prompt_sha256: Option<String>,
-    /// The engine label, plus the model where the CLI reports one. The same
-    /// brief through two engines is not the same reasoning.
+    /// Still "engine" though the rest of the app says agent. This is written
+    /// into entries in the user's capture folder, and a query over their
+    /// ledger should not have to know which app version wrote each line.
     pub engine: Option<String>,
     pub inputs: Vec<Input>,
-    /// What the engine produced, verbatim.
+    /// What the agent produced, verbatim.
     pub output: Option<String>,
     /// The model's stated account of its own choices.
     pub reasoning: Option<String>,

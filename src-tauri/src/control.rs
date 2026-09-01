@@ -80,10 +80,10 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
         );
     };
     let config = settings::load(app);
-    if config.engine.is_none() {
+    if config.agent.is_none() {
         return Response::err(
-            "no_engine",
-            "No engine is connected. Connect one in Settings, then try again.",
+            "no_agent",
+            "No agent is connected. Connect one in Settings, then try again.",
         );
     }
     let Some(folder) = config.folder.clone() else {
@@ -159,7 +159,7 @@ pub mod writes {
         "interval_secs",
         "min_dwell_secs",
         "similarity_threshold",
-        "engine",
+        "agent",
         "schedule_hhmm",
         "launch_at_login",
         "editor",

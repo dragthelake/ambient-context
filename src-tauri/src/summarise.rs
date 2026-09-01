@@ -25,7 +25,7 @@ pub enum Invalid {
 impl std::fmt::Display for Invalid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Invalid::Empty => write!(f, "the engine returned nothing"),
+            Invalid::Empty => write!(f, "the agent returned nothing"),
             Invalid::NoFrontmatter => write!(f, "the summary has no frontmatter block"),
             Invalid::MissingField(field) => write!(f, "the summary is missing '{field}'"),
             Invalid::NoSections => write!(f, "the summary has no sections"),

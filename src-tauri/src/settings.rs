@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, Runtime};
 /// PATH an app inherits from the Dock is not the PATH the user has in a
 /// terminal.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct Engine {
+pub struct Agent {
     pub label: String,
     pub command: String,
     pub args: Vec<String>,
@@ -26,9 +26,16 @@ pub struct Settings {
     pub interval_secs: u64,
     pub min_dwell_secs: i64,
     pub similarity_threshold: f64,
-    /// None means no engine connected, which is the shipped state and
-    /// leaves the app a pure recorder.
-    pub engine: Option<Engine>,
+    /// None means no agent connected, which is the shipped state and leaves
+    /// the app a pure recorder.
+    ///
+    /// The alias is a migration. This field was called "engine", and Settings
+    /// carries serde(default), so without it an existing settings.json would
+    /// parse to None and silently drop the user's agent. Deserialisation
+    /// takes either key, serialisation writes this one, and the file
+    /// normalises on the next save.
+    #[serde(alias = "engine")]
+    pub agent: Option<Agent>,
     /// Local time of day as "HH:MM". None means manual runs only.
     pub schedule_hhmm: Option<String>,
     /// Absolute path to an application to open markdown with. None uses
@@ -62,7 +69,7 @@ impl Default for Settings {
             // blocks to a heading.
             min_dwell_secs: 10,
             similarity_threshold: 0.5,
-            engine: None,
+            agent: None,
             schedule_hhmm: None,
             editor: None,
             launch_at_login: true,
@@ -177,9 +184,9 @@ mod tests {
     }
 
     #[test]
-    fn engine_and_schedule_default_to_off_and_login_launch_defaults_to_on() {
+    fn agent_and_schedule_default_to_off_and_login_launch_defaults_to_on() {
         let settings = Settings::default();
-        assert_eq!(settings.engine, None);
+        assert_eq!(settings.agent, None);
         assert_eq!(settings.schedule_hhmm, None);
         assert_eq!(settings.editor, None);
         // An app whose value is a complete record cannot depend on being
@@ -199,17 +206,17 @@ mod tests {
         let settings = read_from(&path);
         assert_eq!(settings.folder, Some(PathBuf::from("/tmp/ambient")));
         assert_eq!(settings.interval_secs, 5);
-        assert_eq!(settings.engine, None);
+        assert_eq!(settings.agent, None);
         assert_eq!(settings.schedule_hhmm, None);
         assert!(settings.launch_at_login);
     }
 
     #[test]
-    fn engine_and_launch_at_login_round_trip() {
+    fn agent_and_launch_at_login_round_trip() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("settings.json");
         let settings = Settings {
-            engine: Some(Engine {
+            agent: Some(Agent {
                 label: "Claude Code".to_string(),
                 command: "/opt/homebrew/bin/claude".to_string(),
                 args: vec!["-p".to_string()],
@@ -221,5 +228,40 @@ mod tests {
         };
         write_to(&path, &settings).unwrap();
         assert_eq!(read_from(&path), settings);
+    }
+
+    #[test]
+    fn settings_written_with_the_old_engine_key_still_load() {
+        // Settings carries serde(default), so an unknown key is ignored and a
+        // missing one takes its default. Without the alias this parses to
+        // agent: None and the user silently loses their configuration.
+        let raw = r#"{
+            "engine": {
+                "label": "Claude Code",
+                "command": "/usr/local/bin/claude",
+                "args": ["--print"],
+                "timeout_secs": 300
+            }
+        }"#;
+        let loaded: Settings = serde_json::from_str(raw).expect("parses");
+        let agent = loaded.agent.expect("the old key populates the new field");
+        assert_eq!(agent.label, "Claude Code");
+        assert_eq!(agent.command, "/usr/local/bin/claude");
+    }
+
+    #[test]
+    fn settings_are_written_with_the_new_key() {
+        let settings = Settings {
+            agent: Some(Agent {
+                label: "Codex".to_string(),
+                command: "/usr/bin/codex".to_string(),
+                args: vec![],
+                timeout_secs: 300,
+            }),
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialises");
+        assert!(json.contains("\"agent\""), "writes the new key");
+        assert!(!json.contains("\"engine\""), "does not write the old one");
     }
 }

@@ -57,7 +57,7 @@ pub enum Request {
 /// - `duplicate`     rules::RuleError::Duplicate
 /// - `not_found`     rules::RuleError::NotFound, or a date with no capture
 /// - `locked`        rules::RuleError::Locked, a built-in protection
-/// - `no_engine`     summarise_day with no engine connected
+/// - `no_agent`      summarise_day with no agent connected
 /// - `io`            a filesystem failure, with the OS message
 ///
 /// One response. Adjacently tagged rather than internally tagged: an `Ok`

@@ -1,4 +1,5 @@
-//! The connected engine: the user's own agent CLI, run as a subprocess.
+//! The connected agent: the user's own CLI (Claude Code, Codex, opencode),
+//! run as a subprocess.
 //!
 //! Apps launched from Finder or the Dock inherit only the launchd
 //! environment, which on macOS carries no `PATH` beyond the system
@@ -9,12 +10,12 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-/// The connected engine lives in settings.rs because it is persisted as
+/// The connected agent lives in settings.rs because it is persisted as
 /// part of settings.json; re-exported here so callers can talk about it as
-/// `engine::Engine`.
-pub use crate::settings::Engine;
+/// `agent::Agent`.
+pub use crate::settings::Agent;
 
-/// The outcome of one engine invocation, in the shape the propose pipeline
+/// The outcome of one agent invocation, in the shape the propose pipeline
 /// reads: a failed run is data, not an error type.
 #[derive(Debug, Clone)]
 pub struct RunOutput {
@@ -24,38 +25,38 @@ pub struct RunOutput {
     pub timed_out: bool,
 }
 
-/// Runs the engine with a freshly captured login-shell environment and
+/// Runs the agent with a freshly captured login-shell environment and
 /// reports the outcome as data. A missing binary is a failure with status
 /// 127 and its explanation on stderr, the same shape a failing CLI
 /// produces.
-pub fn run(engine: &Engine, stdin: &str) -> RunOutput {
+pub fn run(agent: &Agent, stdin: &str) -> RunOutput {
     let env = login_shell_env();
-    match run_with_env(engine, stdin, &env) {
+    match run_with_env(agent, stdin, &env) {
         Ok(stdout) => RunOutput {
             stdout,
             stderr: String::new(),
             status: 0,
             timed_out: false,
         },
-        Err(EngineError::Timeout) => RunOutput {
+        Err(AgentError::Timeout) => RunOutput {
             stdout: String::new(),
-            stderr: format!("timed out after {}s", engine.timeout_secs),
+            stderr: format!("timed out after {}s", agent.timeout_secs),
             status: 124,
             timed_out: true,
         },
-        Err(EngineError::NotFound) => RunOutput {
+        Err(AgentError::NotFound) => RunOutput {
             stdout: String::new(),
-            stderr: "the engine command could not be found".to_string(),
+            stderr: "the agent command could not be found".to_string(),
             status: 127,
             timed_out: false,
         },
-        Err(EngineError::Failed { code, stderr }) => RunOutput {
+        Err(AgentError::Failed { code, stderr }) => RunOutput {
             stdout: String::new(),
             stderr,
             status: code.unwrap_or(1),
             timed_out: false,
         },
-        Err(EngineError::Io(message)) => RunOutput {
+        Err(AgentError::Io(message)) => RunOutput {
             stdout: String::new(),
             stderr: message,
             status: 1,
@@ -67,7 +68,7 @@ pub fn run(engine: &Engine, stdin: &str) -> RunOutput {
 /// Parses the output of `env`: KEY=VALUE per line. Values may contain '='
 /// and may be empty; keys may not. Lines without '=' are continuations of a
 /// previous multi-line value and are ignored rather than guessed at.
-// Consumed by login_shell_env once the engine subprocess lands (0.2.0 plan,
+// Consumed by login_shell_env once the agent subprocess lands (0.2.0 plan,
 // Task 3); until then the spike's tests are its only caller.
 #[allow(dead_code)]
 pub fn parse_env(raw: &str) -> HashMap<String, String> {
@@ -88,7 +89,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 #[derive(Debug)]
-pub enum EngineError {
+pub enum AgentError {
     /// The command does not exist at that path. Almost always a stale
     /// absolute path after the user moved or reinstalled the CLI.
     NotFound,
@@ -100,56 +101,56 @@ pub enum EngineError {
     Io(String),
 }
 
-impl std::fmt::Display for EngineError {
+impl std::fmt::Display for AgentError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            EngineError::NotFound => write!(f, "the engine command could not be found"),
-            EngineError::Timeout => write!(f, "the engine took too long and was stopped"),
-            EngineError::Failed { code, stderr } => {
+            AgentError::NotFound => write!(f, "the agent command could not be found"),
+            AgentError::Timeout => write!(f, "the agent took too long and was stopped"),
+            AgentError::Failed { code, stderr } => {
                 let code = code
                     .map(|c| c.to_string())
                     .unwrap_or_else(|| "signal".into());
-                write!(f, "the engine exited with {code}: {}", stderr.trim())
+                write!(f, "the agent exited with {code}: {}", stderr.trim())
             }
-            EngineError::Io(message) => write!(f, "{message}"),
+            AgentError::Io(message) => write!(f, "{message}"),
         }
     }
 }
 
-/// Runs the engine once: prompt in on stdin, response out on stdout.
+/// Runs the agent once: prompt in on stdin, response out on stdout.
 ///
 /// The child is moved into a waiter thread so the caller can give up on it.
 /// std has no wait-with-timeout, and rather than take a dependency for one
 /// call site we keep the pid and send it a signal through /bin/kill, which
 /// is always present on macOS.
-/// The app never runs two engine invocations at once, from any path: the
+/// The app never runs two agent invocations at once, from any path: the
 /// scheduler, the on-demand queue, the test button and highlight-to-instruct
 /// all pass through here. The queue keeps the scheduled and on-demand runs
 /// serial by design; this lock is the floor under everything else.
-static ENGINE_LOCK: Mutex<()> = Mutex::new(());
+static AGENT_LOCK: Mutex<()> = Mutex::new(());
 
-/// True while an engine invocation is in progress. Interactive callers ask
+/// True while an agent invocation is in progress. Interactive callers ask
 /// this first so they can say "a summary is running" instead of parking a
 /// button on a lock for up to ten minutes.
 pub fn is_busy() -> bool {
-    ENGINE_LOCK.try_lock().is_err()
+    AGENT_LOCK.try_lock().is_err()
 }
 
 pub const BUSY_MESSAGE: &str =
-    "An engine run is already in progress. Wait for it to finish and try again.";
+    "An agent run is already in progress. Wait for it to finish and try again.";
 
 pub fn run_with_env(
-    engine: &crate::settings::Engine,
+    agent: &crate::settings::Agent,
     prompt: &str,
     env: &HashMap<String, String>,
-) -> Result<String, EngineError> {
-    let _one_at_a_time = ENGINE_LOCK
+) -> Result<String, AgentError> {
+    let _one_at_a_time = AGENT_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut command = Command::new(&engine.command);
+    let mut command = Command::new(&agent.command);
     command
-        .args(&engine.args)
-        .current_dir(engine_cwd())
+        .args(&agent.args)
+        .current_dir(agent_cwd())
         .env_clear()
         .envs(env)
         .stdin(Stdio::piped())
@@ -159,9 +160,9 @@ pub fn run_with_env(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Err(EngineError::NotFound)
+            return Err(AgentError::NotFound)
         }
-        Err(error) => return Err(EngineError::Io(error.to_string())),
+        Err(error) => return Err(AgentError::Io(error.to_string())),
     };
 
     let pid = child.id();
@@ -171,7 +172,7 @@ pub fn run_with_env(
     let mut stdin = child
         .stdin
         .take()
-        .ok_or(EngineError::Io("no stdin".into()))?;
+        .ok_or(AgentError::Io("no stdin".into()))?;
     let owned_prompt = prompt.to_string();
     std::thread::spawn(move || {
         let _ = stdin.write_all(owned_prompt.as_bytes());
@@ -184,35 +185,35 @@ pub fn run_with_env(
         let _ = tx.send(child.wait_with_output());
     });
 
-    match rx.recv_timeout(Duration::from_secs(engine.timeout_secs)) {
+    match rx.recv_timeout(Duration::from_secs(agent.timeout_secs)) {
         Ok(Ok(output)) => {
             if output.status.success() {
                 Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
             } else {
-                Err(EngineError::Failed {
+                Err(AgentError::Failed {
                     code: output.status.code(),
                     stderr: String::from_utf8_lossy(&output.stderr).to_string(),
                 })
             }
         }
-        Ok(Err(error)) => Err(EngineError::Io(error.to_string())),
+        Ok(Err(error)) => Err(AgentError::Io(error.to_string())),
         Err(_) => {
             let _ = Command::new("/bin/kill")
                 .args(["-9", &pid.to_string()])
                 .status();
-            Err(EngineError::Timeout)
+            Err(AgentError::Timeout)
         }
     }
 }
 
-/// Where every engine runs. Claude Code reads CLAUDE.md and Codex reads
+/// Where every agent runs. Claude Code reads CLAUDE.md and Codex reads
 /// AGENTS.md from the working directory, so the child must start somewhere
 /// the app owns and keeps empty, never in whatever directory the app
 /// happened to inherit. Created on first use.
-pub fn engine_cwd() -> std::path::PathBuf {
+pub fn agent_cwd() -> std::path::PathBuf {
     let dir = std::env::temp_dir()
         .join("com.0x0000007a.ambientcontext")
-        .join("engine-cwd");
+        .join("agent-cwd");
     let _ = std::fs::create_dir_all(&dir);
     dir
 }
@@ -338,18 +339,18 @@ pub fn which(name: &str, env: &HashMap<String, String>) -> Option<String> {
     None
 }
 
-pub fn detect(env: &HashMap<String, String>) -> Vec<crate::settings::Engine> {
+pub fn detect(env: &HashMap<String, String>) -> Vec<crate::settings::Agent> {
     detect_from(PRESETS, env)
 }
 
 pub fn detect_from(
     presets: &[(&str, &str, &[&str])],
     env: &HashMap<String, String>,
-) -> Vec<crate::settings::Engine> {
+) -> Vec<crate::settings::Agent> {
     presets
         .iter()
         .filter_map(|(label, binary, args)| {
-            which(binary, env).map(|command| crate::settings::Engine {
+            which(binary, env).map(|command| crate::settings::Agent {
                 label: label.to_string(),
                 command,
                 args: args.iter().map(|a| a.to_string()).collect(),
@@ -372,7 +373,7 @@ pub enum AuthState {
     Unknown,
 }
 
-/// The auth probe for a preset, by label. Manual engines return None.
+/// The auth probe for a preset, by label. Manual agents return None.
 fn auth_probe(label: &str) -> Option<(&'static [&'static str], &'static str)> {
     match label {
         "Claude Code" => Some((
@@ -388,15 +389,15 @@ fn auth_probe(label: &str) -> Option<(&'static [&'static str], &'static str)> {
     }
 }
 
-/// Asks the engine whether it is signed in. Ten second cap; a probe that
+/// Asks the agent whether it is signed in. Ten second cap; a probe that
 /// hangs is Unknown, not a failure.
-pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String>) -> AuthState {
-    let Some((args, fix)) = auth_probe(&engine.label) else {
+pub fn auth_state(agent: &crate::settings::Agent, env: &HashMap<String, String>) -> AuthState {
+    let Some((args, fix)) = auth_probe(&agent.label) else {
         return AuthState::Unknown;
     };
-    let child = match Command::new(&engine.command)
+    let child = match Command::new(&agent.command)
         .args(args)
-        .current_dir(engine_cwd())
+        .current_dir(agent_cwd())
         .env_clear()
         .envs(env)
         .stdin(Stdio::null())
@@ -422,7 +423,7 @@ pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String
         }
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
-    match engine.label.as_str() {
+    match agent.label.as_str() {
         "Claude Code" => {
             if output.status.success() && stdout.contains("\"loggedIn\": true") {
                 AuthState::Ok
@@ -457,10 +458,10 @@ pub fn auth_state(engine: &crate::settings::Engine, env: &HashMap<String, String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::Engine;
+    use crate::settings::Agent;
 
-    fn engine_for(command: &str, args: &[&str], timeout_secs: u64) -> Engine {
-        Engine {
+    fn agent_for(command: &str, args: &[&str], timeout_secs: u64) -> Agent {
+        Agent {
             label: "test".to_string(),
             command: command.to_string(),
             args: args.iter().map(|a| a.to_string()).collect(),
@@ -471,35 +472,35 @@ mod tests {
     #[test]
     fn feeds_the_prompt_on_stdin_and_returns_stdout() {
         // /bin/cat copies stdin to stdout, which is exactly the contract.
-        let engine = engine_for("/bin/cat", &[], 10);
-        let out = run_with_env(&engine, "hello prompt", &HashMap::new()).unwrap();
+        let agent = agent_for("/bin/cat", &[], 10);
+        let out = run_with_env(&agent, "hello prompt", &HashMap::new()).unwrap();
         assert_eq!(out, "hello prompt");
     }
 
     #[test]
     fn a_missing_binary_is_not_found_rather_than_a_generic_io_error() {
-        let engine = engine_for("/nope/not/here", &[], 10);
+        let agent = agent_for("/nope/not/here", &[], 10);
         assert!(matches!(
-            run_with_env(&engine, "x", &HashMap::new()),
-            Err(EngineError::NotFound)
+            run_with_env(&agent, "x", &HashMap::new()),
+            Err(AgentError::NotFound)
         ));
     }
 
     #[test]
     fn a_nonzero_exit_carries_its_stderr() {
-        let engine = engine_for("/bin/sh", &["-c", "echo boom >&2; exit 3"], 10);
-        let out = run(&engine, "x");
+        let agent = agent_for("/bin/sh", &["-c", "echo boom >&2; exit 3"], 10);
+        let out = run(&agent, "x");
         assert_eq!(out.status, 3);
         assert!(out.stderr.contains("boom"), "stderr was {:?}", out.stderr);
     }
 
     #[test]
-    fn a_slow_engine_times_out_instead_of_hanging_forever() {
-        let engine = engine_for("/bin/sh", &["-c", "sleep 30"], 1);
+    fn a_slow_agent_times_out_instead_of_hanging_forever() {
+        let agent = agent_for("/bin/sh", &["-c", "sleep 30"], 1);
         let started = std::time::Instant::now();
         assert!(matches!(
-            run_with_env(&engine, "x", &HashMap::new()),
-            Err(EngineError::Timeout)
+            run_with_env(&agent, "x", &HashMap::new()),
+            Err(AgentError::Timeout)
         ));
         assert!(
             started.elapsed().as_secs() < 10,
@@ -509,10 +510,10 @@ mod tests {
 
     #[test]
     fn the_supplied_environment_reaches_the_child() {
-        let engine = engine_for("/bin/sh", &["-c", "printf %s \"$AC_TEST_VAR\""], 10);
+        let agent = agent_for("/bin/sh", &["-c", "printf %s \"$AC_TEST_VAR\""], 10);
         let mut env = HashMap::new();
         env.insert("AC_TEST_VAR".to_string(), "present".to_string());
-        assert_eq!(run_with_env(&engine, "", &env).unwrap(), "present");
+        assert_eq!(run_with_env(&agent, "", &env).unwrap(), "present");
     }
 
     #[test]
@@ -544,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn a_detected_engine_carries_an_absolute_path_and_a_timeout() {
+    fn a_detected_agent_carries_an_absolute_path_and_a_timeout() {
         // Stand in for a real CLI: /bin/cat exists everywhere.
         let mut env = HashMap::new();
         env.insert("PATH".to_string(), "/bin".to_string());
@@ -562,7 +563,7 @@ mod tests {
         label: &str,
         stdout: &str,
         code: i32,
-    ) -> crate::settings::Engine {
+    ) -> crate::settings::Agent {
         use std::os::unix::fs::PermissionsExt;
         let path = dir.join(format!("fake-{}", label.to_lowercase().replace(' ', "-")));
         std::fs::write(
@@ -571,7 +572,7 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        crate::settings::Engine {
+        crate::settings::Agent {
             label: label.to_string(),
             command: path.to_string_lossy().to_string(),
             args: vec![],
@@ -580,28 +581,28 @@ mod tests {
     }
 
     #[test]
-    fn a_manual_engine_has_unknown_auth() {
+    fn a_manual_agent_has_unknown_auth() {
         let dir = tempfile::tempdir().unwrap();
         let env = HashMap::new();
-        let engine = fake_cli(dir.path(), "Something else", "", 0);
-        assert_eq!(auth_state(&engine, &env), AuthState::Unknown);
+        let agent = fake_cli(dir.path(), "Something else", "", 0);
+        assert_eq!(auth_state(&agent, &env), AuthState::Unknown);
     }
 
     #[test]
     fn claude_logged_in_is_ok() {
         let dir = tempfile::tempdir().unwrap();
         let env = HashMap::new();
-        let engine = fake_cli(dir.path(), "Claude Code", "{ \"loggedIn\": true }", 0);
-        assert_eq!(auth_state(&engine, &env), AuthState::Ok);
+        let agent = fake_cli(dir.path(), "Claude Code", "{ \"loggedIn\": true }", 0);
+        assert_eq!(auth_state(&agent, &env), AuthState::Ok);
     }
 
     #[test]
     fn codex_logged_out_names_the_fix() {
         let dir = tempfile::tempdir().unwrap();
         let env = HashMap::new();
-        let engine = fake_cli(dir.path(), "Codex", "Not logged in", 1);
+        let agent = fake_cli(dir.path(), "Codex", "Not logged in", 1);
         assert_eq!(
-            auth_state(&engine, &env),
+            auth_state(&agent, &env),
             AuthState::NotLoggedIn {
                 fix: "Run `codex login`.".to_string()
             }
@@ -612,9 +613,9 @@ mod tests {
     fn opencode_with_no_credentials_is_a_warning_not_a_failure() {
         let dir = tempfile::tempdir().unwrap();
         let env = HashMap::new();
-        let engine = fake_cli(dir.path(), "opencode", "└  0 credentials", 0);
+        let agent = fake_cli(dir.path(), "opencode", "└  0 credentials", 0);
         assert!(matches!(
-            auth_state(&engine, &env),
+            auth_state(&agent, &env),
             AuthState::NoProvider { .. }
         ));
     }
