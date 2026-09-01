@@ -25,7 +25,13 @@ type Tab = (typeof TABS)[number]["id"];
 
 export function Main() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [contextDate, setContextDate] = useState<string | null>(null);
   const status = useAppStatus();
+
+  const openDay = (date: string) => {
+    setContextDate(date);
+    setTab("context");
+  };
 
   // Wire up the declarative cues once, then hand the engine the user's
   // saved preferences. Both are read-once: the Settings tab applies its
@@ -107,8 +113,10 @@ export function Main() {
             content rides over the frame at both ends. The outer div holds
             the bevel and never scrolls; this one scrolls inside it. */}
         <div className="tabpane-scroll">
-          {tab === "overview" && <Overview status={status} />}
-          {tab === "context" && <DayView />}
+          {tab === "overview" && (
+            <Overview status={status} onOpenDay={openDay} />
+          )}
+          {tab === "context" && <DayView date={contextDate ?? undefined} />}
           {tab === "settings" && (
             <div className="settings-stack">
               <EngineSettings />

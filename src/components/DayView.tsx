@@ -80,7 +80,7 @@ function shift(date: string, days: number): string {
   return `${next.getFullYear()}-${month}-${day}`;
 }
 
-export function DayView() {
+export function DayView({ date }: { date?: string } = {}) {
   const [selected, setSelected] = useState(todayIso);
   const [month, setMonth] = useState(() => {
     const now = new Date();
@@ -133,6 +133,12 @@ export function DayView() {
       void unlisten.then((off) => off()).catch(() => undefined);
     };
   }, [selectDate]);
+
+  // The same effect the open-day event has, on an internal route: the
+  // Overview map opens a day without going through Tauri.
+  useEffect(() => {
+    if (date) setSelected(date);
+  }, [date]);
 
   const refreshMonth = useCallback(async () => {
     const entries = await invoke<DayEntry[]>("days_in_month", {

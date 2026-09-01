@@ -1,7 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { mockInvoke } from "./tauri-mock";
 import { Main } from "../components/Main";
+import type { DayEntry } from "../lib/days";
+
+// A single recorded day, fixed to whatever "today" is when the suite runs.
+// The map draws every day from the first recorded one through today, so
+// today is always in range; deriving the expected label from this same
+// value (rather than writing a month name as a literal) keeps the test
+// from going stale the next time the calendar turns over.
+const RECORDED_DATE = (() => {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+})();
+
+const RECORDED_LABEL = new Date(`${RECORDED_DATE}T00:00:00Z`).toLocaleDateString(
+  "en-AU",
+  { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" },
+);
 
 vi.mock("@tauri-apps/api/core", async () => {
   const mock = await import("./tauri-mock");
@@ -15,8 +33,10 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ close: () => undefined }),
 }));
 
-// Only the Overview tab's commands: the other panes are not mounted until
-// their tab is chosen, which is the behaviour the second test pins down.
+// The Overview tab's commands, plus the Context tab's: clicking a map cell
+// switches to Context and mounts DayView for real, so its own mount-time
+// commands need answers too, or they reject unhandled once the test moves
+// on.
 function handler(command: string) {
   switch (command) {
     case "capture_status":
@@ -26,8 +46,36 @@ function handler(command: string) {
     case "current_folder":
       return "/Users/someone/Ambient Context";
     case "get_settings":
-      // Only the keys the sound engine is handed on mount.
-      return { sound_enabled: true, sound_volume: 0.6 };
+      // The union of keys Overview, Main and DayView each read on mount.
+      return { sound_enabled: true, sound_volume: 0.6, engine: null };
+    case "list_days":
+      return [
+        {
+          date: RECORDED_DATE,
+          has_capture: true,
+          has_summary: false,
+          bytes: 128,
+          title: null,
+        } satisfies DayEntry,
+      ];
+    case "summarise_days":
+      return [];
+    case "cancel_queued_summaries":
+      return 0;
+    case "take_pending_day":
+      return null;
+    case "days_in_month":
+      return [];
+    case "job_status":
+      return null;
+    case "read_day":
+      return null;
+    case "read_summary":
+      return null;
+    case "read_day_blocks":
+      return [];
+    case "get_rules":
+      return { rules: [], built_ins: [], next_id: "r1", error: null };
     default:
       throw new Error(`unexpected command ${command}`);
   }
@@ -57,5 +105,21 @@ describe("the main window's tab strip", () => {
     // presence is what "the Overview pane is the one showing" means.
     expect(screen.getAllByRole("tabpanel")).toHaveLength(1);
     expect(screen.getByRole("button", { name: /recording/i })).toBeTruthy();
+  });
+
+  it("opens a day on the Context tab when a map cell is clicked", async () => {
+    mockInvoke(handler);
+    render(<Main />);
+    await waitFor(() =>
+      expect(
+        screen.getAllByRole("button", { name: RECORDED_LABEL }).length,
+      ).toBeGreaterThan(0),
+    );
+    fireEvent.click(screen.getAllByRole("button", { name: RECORDED_LABEL })[0]);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("tab", { name: "Context" }).getAttribute("aria-selected"),
+      ).toBe("true"),
+    );
   });
 });
