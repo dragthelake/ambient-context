@@ -568,6 +568,7 @@ impl From<jobs::JobSummary> for JobSummaryPayload {
             jobs::JobStatus::Running => ("running", None),
             jobs::JobStatus::Done => ("done", None),
             jobs::JobStatus::Failed { stderr } => ("failed", Some(stderr)),
+            jobs::JobStatus::Cancelled => ("cancelled", None),
         };
         JobSummaryPayload {
             id: job.id,

@@ -321,7 +321,16 @@ fn tick(app: &AppHandle) {
     }
     // Queued on-demand runs, from the window and from MCP clients named in
     // each job's trigger. A queued failure only stops its own job.
+    let mut cancelled = false;
     for job in queued {
+        // Taken once per job, so Stop drops everything still to come in
+        // this batch without touching the next one.
+        if cancelled || app.state::<JobQueue>().take_cancelled() {
+            cancelled = true;
+            app.state::<JobQueue>()
+                .record(&job.id, JobStatus::Cancelled);
+            continue;
+        }
         let date = job.date;
         app.state::<JobQueue>().record(&job.id, JobStatus::Running);
         let result = run_one(app, date, job.trigger);
@@ -365,7 +374,12 @@ pub enum JobStatus {
     Queued,
     Running,
     Done,
-    Failed { stderr: String },
+    Failed {
+        stderr: String,
+    },
+    /// Skipped because the user pressed Stop. Distinct from Done so the
+    /// progress line can say how many never ran.
+    Cancelled,
 }
 
 /// Identifies one queued run. A newtype over the string the wire carries.
@@ -403,6 +417,11 @@ pub struct JobQueue {
     /// Wakes the runner when a job is pushed, so an on-demand run starts
     /// within about a second rather than at the next tick.
     work: std::sync::Condvar,
+    /// Raised by Stop, taken by the runner between jobs. A flag rather than
+    /// a queue drain because `drain_if_idle` empties the queue into a local
+    /// vector the moment the runner is idle, so by the time the user can
+    /// press Stop there is usually nothing left in the queue to clear.
+    cancel: std::sync::atomic::AtomicBool,
 }
 
 impl JobQueue {
@@ -413,6 +432,9 @@ impl JobQueue {
 
     fn push(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
         use std::sync::atomic::Ordering;
+        // Enqueuing expresses intent to run, so it clears any stale flag
+        // left by a Stop pressed against a previous, now-empty batch.
+        self.cancel.store(false, Ordering::SeqCst);
         let n = self.counter.fetch_add(1, Ordering::SeqCst);
         let id = format!("job-{n}");
         self.queue.lock().expect("job queue").push_back(QueuedJob {
@@ -482,6 +504,30 @@ impl JobQueue {
         if let Some(job) = history.iter_mut().find(|job| job.id == id) {
             job.status = status;
         }
+    }
+
+    /// Empties the queue, marks what it took as cancelled, and raises the
+    /// flag so the runner drops whatever it already drained. Returns how
+    /// many it cleared, which is not the whole story: the runner may hold
+    /// more. The caller counts its own jobs to report a total.
+    // Wired to the Overview Stop button in a follow-up task; until then
+    // the tests are its only caller.
+    #[allow(dead_code)]
+    pub fn cancel_queued(&self) -> usize {
+        use std::sync::atomic::Ordering;
+        self.cancel.store(true, Ordering::SeqCst);
+        let dropped: Vec<QueuedJob> = self.queue.lock().expect("job queue").drain(..).collect();
+        for job in &dropped {
+            self.record(&job.id, JobStatus::Cancelled);
+        }
+        dropped.len()
+    }
+
+    /// Reads and clears the flag. The runner calls this before each job, so
+    /// one press of Stop cancels one batch and not the next.
+    pub fn take_cancelled(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        self.cancel.swap(false, Ordering::SeqCst)
     }
 
     /// Drains everything queued and marks it failed with `reason`. Used when
@@ -818,5 +864,38 @@ mod tests {
         let recent = queue.recent();
         assert_eq!(recent.len(), 8);
         assert_eq!(recent[0].date.day(), 10);
+    }
+
+    #[test]
+    fn cancelling_empties_the_queue_and_marks_those_jobs() {
+        let queue = JobQueue::for_test();
+        let a = queue.enqueue_summarise(day(2026, 8, 28));
+        let b = queue.enqueue_summarise(day(2026, 8, 29));
+
+        assert_eq!(queue.cancel_queued(), 2);
+
+        assert_eq!(queue.find(&a.0).unwrap().status, JobStatus::Cancelled);
+        assert_eq!(queue.find(&b.0).unwrap().status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn cancelling_while_idle_does_not_kill_the_next_batch() {
+        let queue = JobQueue::for_test();
+        queue.cancel_queued();
+
+        // Enqueuing expresses intent to run, so it clears any stale flag.
+        let next = queue.enqueue_summarise(day(2026, 8, 30));
+        assert!(!queue.take_cancelled());
+        assert_eq!(queue.find(&next.0).unwrap().status, JobStatus::Queued);
+    }
+
+    #[test]
+    fn the_flag_is_taken_once() {
+        let queue = JobQueue::for_test();
+        queue.enqueue_summarise(day(2026, 8, 28));
+        queue.cancel_queued();
+
+        assert!(queue.take_cancelled());
+        assert!(!queue.take_cancelled());
     }
 }
