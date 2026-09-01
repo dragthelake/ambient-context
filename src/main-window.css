@@ -957,11 +957,17 @@ body:has(.main-window) {
 }
 
 .defrag-cell:active:not(:disabled) {
-  /* The tile flashes by inverting its own outline. Nothing about the box
-     changes: the lattice is one pixel wide and the fills sit flush, so a
-     border width or padding change on press would nudge every cell after
-     it along the row. */
-  border-color: #ffffff;
+  /* The tile fills with its own outline colour for as long as it is held.
+     Nothing about the box changes: the lattice is one pixel wide and the
+     cells sit a pixel apart, so a border width or padding change on press
+     would nudge every cell after it along the row.
+
+     Filling rather than inverting the outline, which was the first attempt
+     and does not work: the well behind is white, so a white border does not
+     read as inverted, it vanishes, and the cell appears to swell into its
+     own gap. A solid tile reads against all four fills and against the
+     well. */
+  background: #0a0a0a;
 }
 
 .defrag-cell:focus-visible {
