@@ -79,8 +79,10 @@ Context tab.
 The info box is drawn rather than a native `title` attribute. Native
 tooltips arrive after a delay, are styled by macOS, and cannot hold four
 lines usefully. This one follows the period: `#ffffe1` on a 1px `#000000`
-border, positioned next to the cursor and flipped back inside the well when
-it would overflow the right or bottom edge.
+border, pinned to the bottom left of the well rather than following the
+cursor. Pinned because a box that follows the pointer across a lattice of
+9px cells has to be flipped at two edges to stay inside, and it covers the
+very cells the user is reading along.
 
 Cells for days with nothing recorded are `disabled`: there is nothing to
 open.
