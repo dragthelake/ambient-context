@@ -107,7 +107,11 @@ fn settings_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
 }
 
 pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
-    read_from(&settings_path(app))
+    let mut settings = read_from(&settings_path(app));
+    if let Some(agent) = &mut settings.agent {
+        crate::agent::normalize_claude_agent(agent);
+    }
+    settings
 }
 
 pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> std::io::Result<()> {

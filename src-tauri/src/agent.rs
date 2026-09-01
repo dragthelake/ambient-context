@@ -307,11 +307,35 @@ use std::path::Path;
 
 pub const DEFAULT_TIMEOUT_SECS: u64 = 600;
 
+/// argv for one-shot Claude Code runs. Kept in one place so detection,
+/// saved settings and the auth probe all stay aligned.
+pub const CLAUDE_CODE_ARGS: &[&str] = &[
+    "-p",
+    "--output-format",
+    "text",
+    "--model",
+    "claude-opus-5",
+    "--effort",
+    "medium",
+];
+
+pub fn claude_code_args() -> Vec<String> {
+    CLAUDE_CODE_ARGS.iter().map(|arg| arg.to_string()).collect()
+}
+
+/// Refreshes Claude Code argv when the preset gains new flags, so an older
+/// settings.json does not keep running without them.
+pub fn normalize_claude_agent(agent: &mut Agent) {
+    if agent.label == "Claude Code" {
+        agent.args = claude_code_args();
+    }
+}
+
 /// Label, binary name, and the argv that makes it read one prompt from
 /// stdin and print one answer to stdout. Taken verbatim from
 /// docs/engine-spike.md; do not invent entries for CLIs nobody has run.
 const PRESETS: &[(&str, &str, &[&str])] = &[
-    ("Claude Code", "claude", &["-p", "--output-format", "text"]),
+    ("Claude Code", "claude", CLAUDE_CODE_ARGS),
     (
         "Codex",
         "codex",
@@ -578,6 +602,34 @@ mod tests {
             args: vec![],
             timeout_secs: 5,
         }
+    }
+
+    #[test]
+    fn claude_code_args_pin_opus_with_medium_effort() {
+        assert_eq!(
+            claude_code_args(),
+            vec![
+                "-p",
+                "--output-format",
+                "text",
+                "--model",
+                "claude-opus-5",
+                "--effort",
+                "medium",
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_claude_agent_refreshes_stale_argv() {
+        let mut agent = Agent {
+            label: "Claude Code".to_string(),
+            command: "/usr/local/bin/claude".to_string(),
+            args: vec!["-p".to_string()],
+            timeout_secs: 600,
+        };
+        normalize_claude_agent(&mut agent);
+        assert_eq!(agent.args, claude_code_args());
     }
 
     #[test]

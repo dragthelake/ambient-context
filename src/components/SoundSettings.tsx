@@ -30,7 +30,7 @@ export function SoundSettings() {
       <legend>Sound</legend>
       <p className="settings-note">
         Short cues on the actions you take: starting and stopping recording,
-        changing tab, opening About. Nothing is played in the background.
+        changing tab. Nothing is played in the background.
       </p>
 
       <label className="schedule-row">
@@ -48,7 +48,7 @@ export function SoundSettings() {
         Play interface sounds
       </label>
 
-      <label className="schedule-row">
+      <label className="schedule-row volume-row">
         Volume
         <input
           type="range"
@@ -57,6 +57,7 @@ export function SoundSettings() {
           step={0.05}
           value={settings.sound_volume}
           disabled={!settings.sound_enabled}
+          aria-valuetext={`${Math.round(settings.sound_volume * 100)} percent`}
           onChange={(event) =>
             void save((next) => ({
               ...next,
@@ -67,7 +68,7 @@ export function SoundSettings() {
           // fires a cue per pixel is unpleasant.
           onPointerUp={() => settings.sound_enabled && play("tick")}
         />
-        <span className="settings-note">
+        <span className="volume-readout">
           {Math.round(settings.sound_volume * 100)}%
         </span>
       </label>

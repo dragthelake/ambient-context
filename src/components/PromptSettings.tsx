@@ -88,13 +88,16 @@ export function PromptSettings() {
 
       {error ? <p className="warn">{error}</p> : null}
 
-      <textarea
-        className="prompt-editor"
-        rows={16}
-        spellCheck={false}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-      />
+      <div className="field-row-stacked">
+        <label htmlFor="daily-summary-prompt">Prompt text</label>
+        <textarea
+          id="daily-summary-prompt"
+          rows={16}
+          spellCheck={false}
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+        />
+      </div>
 
       <div className="button-row">
         <button type="button" onClick={() => void save()} disabled={draft === payload.text}>

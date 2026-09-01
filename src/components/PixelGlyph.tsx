@@ -1,6 +1,6 @@
 // Title bar glyphs as pixel art, traced pixel for pixel from the reference
-// screenshot rather than set in a typeface. A typographic "?" and "×" in a
-// modern sans are the wrong shape at this size: the period ones are bitmap
+// screenshot rather than set in a typeface. A typographic "×" in a modern
+// sans is the wrong shape at this size: the period ones are bitmap
 // letterforms with 2px strokes and hard diagonals, and no amount of
 // font-size gets a smooth glyph to read like one.
 //
@@ -22,23 +22,6 @@ export const CLOSE_GLYPH = [
   "..####..",
   ".##..##.",
   "##....##",
-];
-
-/// The help question mark, 6x10, with the one-pixel gap above its dot that
-/// makes it read as a question mark rather than an exclamation. The stem is
-/// three rows rather than two so the glyph is even on both axes and centres
-/// exactly, the same reason the X is 8x8.
-export const HELP_GLYPH = [
-  ".####.",
-  "##..##",
-  "##..##",
-  "...##.",
-  "..##..",
-  "..##..",
-  "..##..",
-  "......",
-  "..##..",
-  "..##..",
 ];
 
 export function PixelGlyph({ pattern }: { pattern: string[] }) {

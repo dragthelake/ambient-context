@@ -31,11 +31,14 @@ export function DefragMap({
   days,
   failed,
   today,
+  active = null,
   onOpenDay,
 }: {
   days: DayEntry[];
   failed: Set<string>;
   today: string;
+  /** The date being summarised right now; its cell blinks while it works. */
+  active?: string | null;
   onOpenDay: (date: string) => void;
 }) {
   const field = useRef<HTMLDivElement>(null);
@@ -75,7 +78,9 @@ export function DefragMap({
           <button
             key={cell.date || `pad-${index}`}
             type="button"
-            className={`defrag-cell is-${cell.state}`}
+            className={`defrag-cell is-${cell.state}${
+              active !== null && cell.date === active ? " is-working" : ""
+            }`}
             disabled={cell.state === "empty"}
             aria-label={cell.date ? longDate(cell.date) : undefined}
             onMouseEnter={() => setHovered(cell)}

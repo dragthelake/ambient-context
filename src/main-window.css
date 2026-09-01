@@ -64,11 +64,13 @@ body:has(.main-window) {
 }
 
 .main-window .titlebar {
-  /* No inset for traffic lights: they are hidden on this window, so the
-     title sits where a Windows 98 title sits. The height is the
-     reference's 18px scaled to this app's larger type, not the 28px that
-     was only ever there to clear the buttons. */
-  height: 22px;
+  /* The bar is drawn under the overlay traffic lights, so the title starts
+     clear of them. 78px is measured for macOS 26; re-measure if the text
+     ever sits under the buttons on a newer system. Height matches the
+     reference scaled up, with room for the lights to sit in the bar. Traffic
+     light placement is tuned in window_chrome.rs. */
+  height: 28px;
+  padding-left: 78px;
   border-radius: var(--corner-inner-top) var(--corner-inner-top) 0 0;
 }
 
@@ -80,19 +82,6 @@ body:has(.main-window) {
 .main-window .statusbar-cell:last-child {
   border-bottom-right-radius: var(--corner-inner-bottom);
 }
-
-/* Two buttons where Windows put its three. Grouped so the gap between them
-   stays even. They no longer sit hard against the right edge: the title bar
-   carries 4px of padding there so the navy runs past the close button. */
-
-.titlebar-buttons {
-  display: flex;
-  gap: 3px;
-}
-
-/* The close button used to need its top right corner rounded to clear the
-   window's corner arc, which its square corner sat exactly on. The buttons
-   are circles now, so the arc has nothing to shave. */
 
 /* Tab strip
 
@@ -213,21 +202,6 @@ body:has(.main-window) {
   padding: 5px;
 }
 
-.tabpane-scroll::-webkit-scrollbar {
-  width: 14px;
-}
-.tabpane-scroll::-webkit-scrollbar-track {
-  background: repeating-conic-gradient(
-      var(--chrome-light) 0% 25%,
-      var(--chrome-lighter) 0% 50%
-    )
-    0 0 / 4px 4px;
-}
-.tabpane-scroll::-webkit-scrollbar-thumb {
-  background: var(--chrome);
-  box-shadow: var(--bevel-out);
-}
-
 /* Overview */
 
 /* Centred in the pane rather than stacked at the top: the tab has three
@@ -283,9 +257,16 @@ body:has(.main-window) {
   gap: 6px;
 }
 
-.day-nav button {
-  min-width: 0;
-  padding: 3px 10px;
+/* Win98 push buttons in the day view: 23px tall, symmetric padding,
+   bevel swap on press only. Sizes from 98.css. */
+.day-nav-step {
+  min-width: 23px;
+  width: 23px;
+  padding: 0;
+}
+
+.day-today {
+  min-width: 75px;
 }
 
 .day-date {
@@ -294,10 +275,6 @@ body:has(.main-window) {
   font-weight: 700;
   font-size: 17px;
   flex: 1;
-  min-width: 0;
-}
-
-.day-today {
   min-width: 0;
 }
 
@@ -364,30 +341,47 @@ body:has(.main-window) {
 .day-actions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.day-actions button {
-  min-width: 0;
+.day-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
 }
 
 .segmented {
   display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--chrome);
   box-shadow: var(--bevel-in);
-  background: var(--chrome-light);
 }
 
 .segment {
+  min-width: 75px;
+  min-height: 23px;
+  padding: 0 12px;
   box-shadow: none;
   background: transparent;
-  min-width: 0;
-  padding: 4px 14px 5px;
 }
 
 .segment.is-current {
-  box-shadow: var(--bevel-in);
+  box-shadow: var(--bevel-out);
   background: var(--chrome);
+}
+
+.segment:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+.segment.is-current:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
 }
 
 .day-title {
@@ -434,10 +428,6 @@ body:has(.main-window) {
 
 .summarise-now {
   margin-top: 10px;
-}
-
-.reading {
-  max-width: 78ch;
 }
 
 .reading h1 {
@@ -574,15 +564,13 @@ body:has(.main-window) {
 
 .raw-actions {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   margin-top: 6px;
   flex-wrap: wrap;
 }
 
 .raw-actions button {
-  min-width: 0;
-  padding: 2px 8px 3px;
-  font-size: 11px;
+  min-width: 75px;
 }
 
 /* Highlight to instruct */
@@ -598,7 +586,8 @@ body:has(.main-window) {
 
 .highlight-pill button {
   min-width: 0;
-  padding: 3px 8px 4px;
+  min-height: 23px;
+  padding: 0 8px;
   font-size: 11px;
   font-weight: 600;
 }
@@ -806,6 +795,18 @@ body:has(.main-window) {
   margin: 6px 0;
 }
 
+.volume-row {
+  align-items: center;
+}
+
+.volume-readout {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+  min-width: 3.5em;
+}
+
 .patterns-field textarea {
   display: block;
   width: 100%;
@@ -933,10 +934,12 @@ body:has(.main-window) {
 .defrag-cell {
   appearance: none;
   /* 6x9 of fill inside a 1px outline. With the grid's 1px gap that makes
-     the pitch 9x12, which is what the reference measures. */
+     the pitch 9x12, which is what the reference measures. min-height
+     resets the Win98 button floor so these stay 11px tall. */
   width: 8px;
   height: 11px;
   min-width: 0;
+  min-height: 0;
   padding: 0;
   margin: 0;
   border: 1px solid #0a0a0a;
@@ -1105,12 +1108,52 @@ body:has(.main-window) {
   flex: 1;
 }
 
-/* Sits above the controls, where the disabled Summarise button is, so it
-   appears exactly where the user would have reached for it. */
+/* Agent callout on the Overview when summarising is unavailable. */
 .agent-missing {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 8px;
+  margin: 0;
   font-size: 12px;
+}
+
+/* The reference blinks the block being worked on, and it is the only
+   movement on the field: the cell being summarised alternates between its
+   raw fill and the summarised navy it is about to become. Steps, not a
+   fade, because nothing in this window has ever crossfaded. */
+.defrag-cell.is-working {
+  animation: defrag-working 0.7s steps(1, end) infinite;
+}
+
+@keyframes defrag-working {
+  0%,
+  100% {
+    background: #8be2f8;
+  }
+  50% {
+    background: #0308a3;
+  }
+}
+
+/* Marching dots after the status line while the batch runs. The agent run
+   is minutes long and the bar only moves per finished day, so this is the
+   only sign between segments that anything is happening. */
+.working-dots::after {
+  content: "";
+  animation: working-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes working-dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
 }

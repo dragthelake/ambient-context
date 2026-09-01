@@ -82,11 +82,21 @@ export function DayHeader({
   return (
     <header className="day-header">
       <div className="day-nav">
-        <button type="button" onClick={onPrev} aria-label="Previous day">
+        <button
+          type="button"
+          className="day-nav-step"
+          onClick={onPrev}
+          aria-label="Previous day"
+        >
           ◀
         </button>
         <h1 className="day-date">{longDate(date)}</h1>
-        <button type="button" onClick={onNext} aria-label="Next day">
+        <button
+          type="button"
+          className="day-nav-step"
+          onClick={onNext}
+          aria-label="Next day"
+        >
           ▶
         </button>
         <button type="button" className="day-today" onClick={onToday}>
@@ -140,15 +150,17 @@ export function DayHeader({
             Summary
           </button>
         </div>
-        <button type="button" onClick={onSummarise}>
-          {hasSummary ? "Regenerate" : "Summarise"}
-        </button>
-        <button type="button" onClick={() => void onOpen()}>
-          Open in editor
-        </button>
-        <button type="button" onClick={() => void onRevealDay()}>
-          Reveal in Finder
-        </button>
+        <div className="day-action-buttons">
+          <button type="button" onClick={onSummarise}>
+            {hasSummary ? "Regenerate" : "Summarise"}
+          </button>
+          <button type="button" onClick={() => void onOpen()}>
+            Open in editor
+          </button>
+          <button type="button" onClick={() => void onRevealDay()}>
+            Reveal in Finder
+          </button>
+        </div>
       </div>
       {actionError ? <p className="day-action-error">{actionError}</p> : null}
       {entry?.title ? <p className="day-title">{entry.title}</p> : null}

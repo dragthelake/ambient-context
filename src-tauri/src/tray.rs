@@ -96,6 +96,7 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
     let browse = MenuItem::with_id(app, "browse", "Browse Days\u{2026}", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Settings\u{2026}", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "About\u{2026}", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     Menu::with_items(
@@ -110,6 +111,7 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
             &reveal,
             &PredefinedMenuItem::separator(app)?,
             &setup,
+            &about,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -176,6 +178,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 "toggle" => toggle_capture(app),
                 "browse" => crate::open_main_window(app),
                 "setup" => crate::open_setup_window(app),
+                "about" => crate::open_about_window(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();
                     capture::stop(&state);

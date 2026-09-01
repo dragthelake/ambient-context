@@ -21,7 +21,7 @@ export const PITCH_W = CELL_W + CELL_GAP;
 /// have been recorded. At the Overview's width that is several years of
 /// canvas, mostly white, which is what the reference shows for a disk with
 /// little on it.
-export const MIN_ROWS = 20;
+export const MIN_ROWS = 16;
 
 export type CellState = "empty" | "raw" | "summarised" | "failed";
 

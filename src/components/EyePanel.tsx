@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { AsciiEye } from "./AsciiEye";
 import { CrtMonitor } from "./CrtMonitor";
-import { play } from "../lib/sound";
+import { play, primeAudio } from "../lib/sound";
 import type { CaptureStatus } from "../lib/status";
 
 /// The eye, what it is doing, and the one control that changes it. Shared
@@ -34,6 +34,9 @@ export function EyePanel({
         className="record-toggle"
         disabled={!ready && !capture.running}
         onClick={async () => {
+          // Resume must start before the invoke: after await the browser
+          // no longer treats playback as part of the click gesture.
+          primeAudio();
           const next = await invoke<CaptureStatus>("toggle_capture");
           // Cue the state that was actually reached, not the one asked
           // for: the toggle refuses when permission or a folder is

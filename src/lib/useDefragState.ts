@@ -31,6 +31,9 @@ export function useDefragState() {
   const [done, setDone] = useState<Set<string>>(new Set());
   const [cancelled, setCancelled] = useState<Set<string>>(new Set());
   const [status, setStatus] = useState("Ready");
+  // The date whose agent run is under way right now, so the map can blink
+  // its cell the way the reference blinks the block being worked on.
+  const [active, setActive] = useState<string | null>(null);
   const running = jobs.length > 0 && done.size < jobs.length;
   // Recomputed on every reload rather than fixed at mount. The window is
   // long lived and sits open across midnight, and a frozen `today` stops
@@ -144,6 +147,10 @@ export function useDefragState() {
           }
           if (state.status === "running") {
             setStatus(`Summarising ${state.date}`);
+            setActive(state.date);
+          } else {
+            // Whatever this job's terminal state, its cell stops working.
+            setActive((current) => (current === state.date ? null : current));
           }
         }
       })();
@@ -161,6 +168,7 @@ export function useDefragState() {
   // bar reading 100%.
   useEffect(() => {
     if (jobs.length === 0 || done.size < jobs.length) return;
+    setActive(null);
     if (cancelled.size > 0) {
       setStatus(`Stopped, ${cancelled.size} skipped`);
       return;
@@ -179,6 +187,7 @@ export function useDefragState() {
     today,
     pending: pendingDates(days),
     running,
+    active,
     finished: done.size,
     total: jobs.length,
     status,

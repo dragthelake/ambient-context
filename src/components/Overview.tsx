@@ -32,22 +32,27 @@ export function Overview({
     <div className="overview">
       <EyePanel capture={capture} ready={ready} onCapture={setCapture} />
 
-      <fieldset>
-        <legend>Record</legend>
-        <DefragMap
-          days={defrag.days}
-          failed={defrag.failed}
-          today={defrag.today}
-          onOpenDay={onOpenDay}
-        />
-        {hasAgent ? null : (
+      {hasAgent ? null : (
+        <fieldset>
+          <legend>Agent</legend>
           <p className="agent-missing">
             No agent connected. Summarising needs one.{" "}
             <button type="button" onClick={onOpenAgent}>
               Set up an agent
             </button>
           </p>
-        )}
+        </fieldset>
+      )}
+
+      <fieldset>
+        <legend>Record</legend>
+        <DefragMap
+          days={defrag.days}
+          failed={defrag.failed}
+          today={defrag.today}
+          active={defrag.active}
+          onOpenDay={onOpenDay}
+        />
         <DefragControls
           pending={defrag.pending}
           running={defrag.running}

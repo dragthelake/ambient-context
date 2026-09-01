@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AgentTab } from "./AgentTab";
 import { AppSettings } from "./AppSettings";
 import { DayView } from "./DayView";
 import { McpSettings } from "./McpSettings";
 import { Overview } from "./Overview";
-import { CLOSE_GLYPH, HELP_GLYPH, PixelGlyph } from "./PixelGlyph";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
 import { SoundSettings } from "./SoundSettings";
@@ -50,32 +48,6 @@ export function Main() {
         <span className="titlebar-text" data-tauri-drag-region>
           AMBIENT_CONTEXT
         </span>
-        {/* The native traffic lights are hidden on this window, so these
-            are the only way out of it. Closing hides rather than quits:
-            the app lives in the menu bar and keeps recording. */}
-        <div className="titlebar-buttons">
-          <button
-            type="button"
-            className="titlebar-button"
-            aria-label="About Ambient Context"
-            title="About Ambient Context"
-            onClick={() => {
-              play("chime");
-              void invoke("open_about");
-            }}
-          >
-            <PixelGlyph pattern={HELP_GLYPH} />
-          </button>
-          <button
-            type="button"
-            className="titlebar-button"
-            aria-label="Close window"
-            title="Close window"
-            onClick={() => void getCurrentWindow().close()}
-          >
-            <PixelGlyph pattern={CLOSE_GLYPH} />
-          </button>
-        </div>
       </div>
 
       <div className="tabstrip" role="tablist" aria-label="Views">

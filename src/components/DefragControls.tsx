@@ -34,7 +34,12 @@ export function DefragControls({
 
   return (
     <div className="defrag-controls">
-      <p className="defrag-status">{status}</p>
+      <p className="defrag-status">
+        {status}
+        {/* An agent run is minutes of nothing between bar segments; the
+            dots say the wait is work, not a hang. */}
+        {running ? <span className="working-dots" aria-hidden="true" /> : null}
+      </p>
 
       {/* Segmented, as the period's bars were: whole blocks appear rather
           than a bar sliding, so progress is countable at a glance. */}

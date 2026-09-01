@@ -15,8 +15,8 @@ mod rules;
 mod segment;
 mod settings;
 mod summarise;
-mod titlebar;
 mod tray;
+mod window_chrome;
 mod writer;
 
 use serde::Serialize;
@@ -1209,10 +1209,8 @@ pub fn open_main_window(app: &tauri::AppHandle) {
     sync_activation_policy(app, true);
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
+        window_chrome::centre_traffic_lights(&window);
         let _ = window.set_focus();
-        // Showing a window again can restore the buttons AppKit thinks it
-        // owns, so this is asserted on every open rather than only once.
-        titlebar::hide_traffic_lights(&window);
         return;
     }
     // The traffic lights and native resizing stay; the title bar itself is
@@ -1228,13 +1226,14 @@ pub fn open_main_window(app: &tauri::AppHandle) {
             .hidden_title(true)
             .build()
     {
-        titlebar::hide_traffic_lights(&window);
+        let _ = window.show();
+        window_chrome::centre_traffic_lights(&window);
         let _ = window.set_focus();
     }
 }
 
 /// The About window: a small fixed dialog with no native chrome, the same
-/// shape as setup. Opened from the title bar's ? button.
+/// shape as setup. Opened from the menu bar icon's dropdown.
 pub fn open_about_window(app: &tauri::AppHandle) {
     sync_activation_policy(app, true);
     if let Some(window) = app.get_webview_window("about") {
@@ -1268,11 +1267,6 @@ pub fn open_about_window(app: &tauri::AppHandle) {
     {
         let _ = window;
     }
-}
-
-#[tauri::command]
-fn open_about(app: tauri::AppHandle) {
-    open_about_window(&app);
 }
 
 /// The version the About window shows, read from the crate rather than
@@ -1540,7 +1534,6 @@ pub fn run() {
             set_settings,
             set_launch_at_login,
             open_setup,
-            open_about,
             app_version,
             list_days,
             days_in_month,

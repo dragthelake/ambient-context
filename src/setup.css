@@ -182,21 +182,6 @@ body {
   padding: 10px 10px 4px;
 }
 
-.window-body::-webkit-scrollbar {
-  width: 14px;
-}
-.window-body::-webkit-scrollbar-track {
-  background: repeating-conic-gradient(
-      var(--chrome-light) 0% 25%,
-      var(--chrome-lighter) 0% 50%
-    )
-    0 0 / 4px 4px;
-}
-.window-body::-webkit-scrollbar-thumb {
-  background: var(--chrome);
-  box-shadow: var(--bevel-out);
-}
-
 /* The eye, in its monitor
 
    The monitor sits on the dialog's face rather than in a sunken well: it
@@ -351,22 +336,24 @@ button {
   font-family: "Funnel Sans", sans-serif;
   font-weight: 600;
   font-size: 13px;
-  padding: 5px 16px 6px;
-  min-width: 120px;
+  box-sizing: border-box;
+  min-width: 75px;
+  min-height: 23px;
+  padding: 0 12px;
   cursor: default; /* win98 buttons never showed a pointer */
 }
 
-/* The pressed look shifts a button's content down and right by a pixel,
-   which is right for a push button and wrong for a tab: a tab's height
-   sets the height of the strip, so growing one on mousedown moves the
-   pane and everything under it. The same goes for a defrag cell, which is
-   a 9x12 tile in a lattice: this padding is taller than the whole cell and
-   shoves its row down a pixel on mousedown. Both are excluded rather than
-   overridden, because this selector outweighs a plain `.tab:active` or
-   `.defrag-cell:active` and would win. */
-button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell) {
+/* The reference sinks the bevel on press and nudges the label with
+   text-shadow. It never repads: padding shifts change the box size and
+   move every neighbour, which is wrong for tabs, map cells, and the
+   compact controls in the day view. */
+button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell):not(.link-button) {
   box-shadow: var(--bevel-in);
-  padding: 6px 15px 5px 17px;
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+button:disabled:active {
+  text-shadow: 1px 1px 0 var(--chrome-lighter);
 }
 
 button:focus-visible {
@@ -579,6 +566,205 @@ input[type="checkbox"]:focus-visible,
 input[type="radio"]:focus-visible {
   outline: 1px dotted var(--ink);
   outline-offset: 2px;
+}
+
+/* Stacked fields and multiline inputs
+
+   The reference's field-row-stacked puts a label over a sunken textarea,
+   full width of the group box. Scrollbars are global, as in 98.css. */
+
+.field-row-stacked {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.field-row-stacked * + * {
+  margin-top: 6px;
+}
+
+.field-row-stacked label {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+.field-row-stacked textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 0;
+  appearance: none;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-y: auto;
+  resize: vertical;
+  user-select: text;
+  cursor: text;
+}
+
+.field-row-stacked textarea:focus {
+  outline: none;
+}
+
+.field-row-stacked textarea:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+/* Trackbar (range input)
+
+   Native macOS sliders break the illusion the same way native checkboxes
+   did. Rebuilt from the Windows 98 trackbar: a 2px sunken groove and an
+   11x21 grip indicator, measured from the reference and recoloured to the
+   VGA palette this stylesheet already uses. */
+
+input[type="range"] {
+  appearance: none;
+  flex: none;
+  width: 180px;
+  height: 21px;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+}
+
+input[type="range"]:focus {
+  outline: none;
+}
+
+input[type="range"]:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  box-sizing: border-box;
+  background: var(--ink);
+  border-right: 1px solid var(--chrome-dark);
+  border-bottom: 1px solid var(--chrome-dark);
+  box-shadow:
+    1px 0 0 var(--chrome-lighter),
+    1px 1px 0 var(--chrome-lighter),
+    0 1px 0 var(--chrome-lighter),
+    -1px 0 0 var(--chrome-dark),
+    -1px -1px 0 var(--chrome-dark),
+    0 -1px 0 var(--chrome-dark),
+    -1px 1px 0 var(--chrome-lighter),
+    1px -1px 0 var(--chrome-dark);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 21px;
+  margin-top: -10px;
+  border: none;
+  box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2211%22%20height%3D%2221%22%20viewBox%3D%220%200%2011%2021%22%20fill%3D%22none%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M0%200V16H2V18H4V20H5V19H3V17H1V1H10V0Z%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%201V16H2V17H3V18H4V19H6V18H7V17H8V16H9V1Z%22%20fill%3D%22%23c0c0c0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%201H10V16H8V18H6V20H5V19H7V17H9Z%22%20fill%3D%22%23808080%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10%200H11V16H9V18H7V20H5V21H6V19H8V17H10Z%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E")
+    no-repeat;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 2px;
+  box-sizing: border-box;
+  background: var(--ink);
+  border-right: 1px solid var(--chrome-dark);
+  border-bottom: 1px solid var(--chrome-dark);
+  box-shadow:
+    1px 0 0 var(--chrome-lighter),
+    1px 1px 0 var(--chrome-lighter),
+    0 1px 0 var(--chrome-lighter),
+    -1px 0 0 var(--chrome-dark),
+    -1px -1px 0 var(--chrome-dark),
+    0 -1px 0 var(--chrome-dark),
+    -1px 1px 0 var(--chrome-lighter),
+    1px -1px 0 var(--chrome-dark);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 21px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2211%22%20height%3D%2221%22%20viewBox%3D%220%200%2011%2021%22%20fill%3D%22none%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M0%200V16H2V18H4V20H5V19H3V17H1V1H10V0Z%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%201V16H2V17H3V18H4V19H6V18H7V17H8V16H9V1Z%22%20fill%3D%22%23c0c0c0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%201H10V16H8V18H6V20H5V19H7V17H9Z%22%20fill%3D%22%23808080%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10%200H11V16H9V18H7V20H5V21H6V19H8V17H10Z%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E")
+    no-repeat;
+  transform: translateY(2px);
+}
+
+input[type="range"]:disabled {
+  opacity: 0.55;
+}
+
+input[type="range"]:disabled::-webkit-slider-runnable-track {
+  background: var(--chrome-dark);
+}
+
+input[type="range"]:disabled::-moz-range-track {
+  background: var(--chrome-dark);
+}
+
+/* Scrollbars
+
+   Global, as in 98.css: every scroller in the dialog, including a
+   textarea's own, gets the checkerboard trough, raised thumb, and arrow
+   buttons. Pane-specific overrides hid that on the prompt field. */
+
+::-webkit-scrollbar {
+  width: 16px;
+}
+
+::-webkit-scrollbar:horizontal {
+  height: 17px;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--chrome);
+}
+
+::-webkit-scrollbar-track {
+  background-image: url("data:image/svg+xml,%3Csvg%20width%3D%222%22%20height%3D%222%22%20viewBox%3D%220%200%202%202%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%200H0V1H1V2H2V1H1V0Z%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%200H1V1H0V2H1V1H2V0Z%22%20fill%3D%22white%22%2F%3E%3C%2Fsvg%3E");
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+}
+
+::-webkit-scrollbar-button:horizontal:start:decrement,
+::-webkit-scrollbar-button:horizontal:end:increment,
+::-webkit-scrollbar-button:vertical:start:decrement,
+::-webkit-scrollbar-button:vertical:end:increment {
+  display: block;
+}
+
+::-webkit-scrollbar-button:vertical:start {
+  height: 17px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M8%206H7V7H6V8H5V9H4V10H11V9H10V8H9V7H8V6Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:vertical:end {
+  height: 17px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M11%206H4V7H5V8H6V9H7V10H8V9H9V8H10V7H11V6Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:horizontal:start {
+  width: 16px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%204H8V5H7V6H6V7H5V8H6V9H7V10H8V11H9V4Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:horizontal:end {
+  width: 16px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M7%204H6V11H7V10H8V9H9V8H10V7H9V6H8V5H7V4Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
 }
 
 /* Status bar */

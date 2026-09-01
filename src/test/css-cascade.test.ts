@@ -70,17 +70,21 @@ describe("the two stylesheets", () => {
     expect(dead).toEqual([]);
   });
 
-  // The press style is written for a push button: it swaps the bevel and
-  // shifts the content a pixel by repadding. On a 9x12 tile in a lattice
-  // that padding is taller than the whole cell, so the row moves on
-  // mousedown. Small elements are excluded from the rule rather than
-  // overriding it, because it outweighs any single-class selector.
-  it("excludes every small element from the global press style", () => {
+  // The press style swaps the bevel and shifts the label with text-shadow.
+  // It must not repad: padding shifts resize the box and move neighbours.
+  it("does not repad buttons on press", () => {
     const pressed = setup.filter(
       (rule) => rule.selector.startsWith("button:active") && rule.decls.has("padding"),
     );
+    expect(pressed).toHaveLength(0);
+  });
+
+  it("excludes chrome that owns its own press treatment from the global press style", () => {
+    const pressed = setup.filter(
+      (rule) => rule.selector.startsWith("button:active") && rule.decls.has("box-shadow"),
+    );
     expect(pressed).toHaveLength(1);
-    for (const excluded of [".titlebar-button", ".tab", ".defrag-cell"]) {
+    for (const excluded of [".titlebar-button", ".tab", ".defrag-cell", ".link-button"]) {
       expect(pressed[0].selector).toContain(`:not(${excluded})`);
     }
   });
@@ -89,6 +93,12 @@ describe("the two stylesheets", () => {
     const selectors = main.map((rule) => rule.selector);
     expect(selectors).toContain(".defrag-cell:active:not(:disabled)");
     expect(selectors).toContain(".defrag-cell:focus-visible");
+  });
+
+  it("keeps defrag cells at map size rather than the Win98 button floor", () => {
+    const cell = main.find((rule) => rule.selector === ".defrag-cell");
+    expect(cell?.decls.get("height")).toBe("11px");
+    expect(cell?.decls.get("min-height")).toBe("0");
   });
 
   it.each([

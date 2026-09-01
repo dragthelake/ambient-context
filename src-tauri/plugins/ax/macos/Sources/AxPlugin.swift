@@ -213,3 +213,46 @@ public func ambientHideWindowButtons(_ windowPointer: Int64) -> Int32 {
     }
     return hidden
 }
+
+/// Moves the traffic-light cluster without touching the title bar container,
+/// which keeps the window layout intact. `x` is the close button's leading
+/// edge in window coordinates; `yFromTop` is the distance from the window's
+/// top edge to the top of the buttons. AppKit is main-thread only.
+@_cdecl("ambient_position_traffic_lights")
+public func ambientPositionTrafficLights(
+    _ windowPointer: Int64,
+    x: Double,
+    yFromTop: Double
+) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    guard let close = window.standardWindowButton(.closeButton),
+          let mini = window.standardWindowButton(.miniaturizeButton),
+          let zoom = window.standardWindowButton(.zoomButton) else {
+        return 0
+    }
+
+    let windowHeight = window.frame.size.height
+    let spaceBetween = mini.frame.origin.x - close.frame.origin.x
+    let buttons = [close, mini, zoom]
+
+    func place() {
+        for (index, button) in buttons.enumerated() {
+            guard let superview = button.superview else { continue }
+            button.isHidden = false
+            let originInWindow = NSPoint(
+                x: x + Double(index) * spaceBetween,
+                y: windowHeight - yFromTop - button.frame.size.height
+            )
+            button.setFrameOrigin(superview.convert(originInWindow, from: nil))
+        }
+    }
+
+    // One layout pass after show, so standardWindowButton frames are real.
+    DispatchQueue.main.async(execute: place)
+
+    return Int32(buttons.count)
+}

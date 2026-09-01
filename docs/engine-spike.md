@@ -232,7 +232,7 @@ with a 600 second default timeout.
 
 | Label | Binary | Args | Success | Auth check |
 |---|---|---|---|---|
-| Claude Code | `claude` | `-p --output-format text` | exit 0, stdout non-empty | `claude auth status` exit 0 and JSON `loggedIn: true` |
+| Claude Code | `claude` | `-p --output-format text --model claude-opus-5 --effort medium` | exit 0, stdout non-empty | `claude auth status` exit 0 and JSON `loggedIn: true` |
 | Codex | `codex` | `exec --skip-git-repo-check --color never -` | exit 0, stdout non-empty | `codex login status` exit 0 |
 | opencode | `opencode` | `run` | exit 0, stdout non-empty | `opencode auth list` reports at least one credential; zero is a warning, not a failure |
 
