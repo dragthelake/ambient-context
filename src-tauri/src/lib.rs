@@ -600,6 +600,13 @@ fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayl
     })
 }
 
+/// Parse all dates before enqueueing any of them. Enqueuing schedules real
+/// work, so failing part way through would leave earlier days running with
+/// their ids discarded and no way for the caller to poll them.
+fn parse_dates(dates: &[String]) -> Result<Vec<chrono::NaiveDate>, String> {
+    dates.iter().map(|date| parse_date(date)).collect()
+}
+
 /// Enqueues one summarise per date and hands back the job ids in the same
 /// order, so the window can poll the batch it just started.
 ///
@@ -616,16 +623,16 @@ fn summarise_days(app: tauri::AppHandle, dates: Vec<String>) -> Result<Vec<Strin
     if config.engine.is_none() {
         return Err("no engine is connected".to_string());
     }
+    let parsed = parse_dates(&dates)?;
     let queue = app.state::<jobs::JobQueue>();
-    let mut ids = Vec::with_capacity(dates.len());
-    for date in &dates {
-        let parsed = parse_date(date)?;
-        ids.push(
+    let ids = parsed
+        .into_iter()
+        .map(|date| {
             queue
-                .enqueue_summarise_with(parsed, ledger::Trigger::OnDemand)
-                .to_string(),
-        );
-    }
+                .enqueue_summarise_with(date, ledger::Trigger::OnDemand)
+                .to_string()
+        })
+        .collect();
     Ok(ids)
 }
 
@@ -1099,6 +1106,40 @@ mod tests {
     fn a_bad_date_is_an_error_rather_than_a_panic() {
         assert!(parse_date("not-a-date").is_err());
         assert!(parse_date("2026-08-28").is_ok());
+    }
+
+    #[test]
+    fn parse_dates_validates_all_before_accepting_any() {
+        // Valid dates should parse successfully.
+        let valid = vec!["2025-01-15".to_string(), "2025-02-20".to_string()];
+        let result = parse_dates(&valid);
+        assert!(result.is_ok());
+        let dates = result.unwrap();
+        assert_eq!(dates.len(), 2);
+
+        // If any date is invalid, the whole batch fails, not just the bad one.
+        let mixed = vec![
+            "2025-01-15".to_string(),
+            "invalid-date".to_string(),
+            "2025-02-20".to_string(),
+        ];
+        let result = parse_dates(&mixed);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_dates_preserves_order() {
+        use chrono::Datelike;
+
+        let dates = vec![
+            "2025-03-10".to_string(),
+            "2025-01-05".to_string(),
+            "2025-02-15".to_string(),
+        ];
+        let result = parse_dates(&dates).expect("dates should parse");
+        assert_eq!(result[0].month(), 3);
+        assert_eq!(result[1].month(), 1);
+        assert_eq!(result[2].month(), 2);
     }
 }
 
