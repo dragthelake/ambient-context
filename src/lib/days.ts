@@ -22,6 +22,8 @@ export type Settings = {
   editor: string | null;
   launch_at_login: boolean;
   max_block_chars: number;
+  sound_enabled: boolean;
+  sound_volume: number;
   write_references: boolean;
   extra_redaction_patterns: string[];
 };

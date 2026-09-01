@@ -1,14 +1,9 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AsciiEye } from "./AsciiEye";
-
-type Permission = "granted" | "notGranted";
-
-type CaptureStatus = {
-  running: boolean;
-  blocks_today: number;
-};
+import { CLOSE_GLYPH, PixelGlyph } from "./PixelGlyph";
+import { EyePanel } from "./EyePanel";
+import { useAppStatus, type CaptureStatus } from "../lib/status";
 
 function looksSynced(folder: string): boolean {
   return (
@@ -23,44 +18,10 @@ function closeWindow() {
 }
 
 export function Setup() {
-  const [permission, setPermission] = useState<Permission>("notGranted");
   const [asked, setAsked] = useState(false);
-  const [folder, setFolder] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  const [capture, setCapture] = useState<CaptureStatus>({
-    running: false,
-    blocks_today: 0,
-  });
-
-  // The toggle lives in the menu bar, so this page only ever observes
-  // capture state; a 1s poll keeps it honest without any event plumbing.
-  useEffect(() => {
-    let cancelled = false;
-    const read = async () => {
-      const next = await invoke<CaptureStatus>("capture_status");
-      if (!cancelled) setCapture(next);
-    };
-    void read();
-    const id = setInterval(read, 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  useEffect(() => {
-    invoke<string | null>("current_folder").then((next) => setFolder(next ?? null));
-    invoke<Permission>("permission_status").then(setPermission);
-  }, []);
-
-  useEffect(() => {
-    if (permission === "granted") return;
-    const id = setInterval(async () => {
-      const next = await invoke<Permission>("permission_status");
-      setPermission(next);
-    }, 700);
-    return () => clearInterval(id);
-  }, [permission]);
+  const { capture, setCapture, permission, folder, setFolder, ready } =
+    useAppStatus();
 
   // Escape closes the window, as it would any dialog.
   useEffect(() => {
@@ -82,8 +43,6 @@ export function Setup() {
     }
   };
 
-  const ready = permission === "granted" && folder !== null;
-
   // Becoming ready mid-session (the grant arriving from System Settings)
   // starts recording the same way a ready launch would.
   useEffect(() => {
@@ -103,31 +62,12 @@ export function Setup() {
           aria-label="Close settings"
           onClick={closeWindow}
         >
-          ×
+          <PixelGlyph pattern={CLOSE_GLYPH} />
         </button>
       </div>
 
       <div className="window-body">
-        <div className="eye-panel">
-          <AsciiEye watching={capture.running} />
-          <p className="eye-caption">
-            {capture.running
-              ? "RECORDING"
-              : ready
-                ? "EYE CLOSED. NOTHING IS BEING RECORDED."
-                : "SETUP REQUIRED. NOTHING IS BEING RECORDED."}
-          </p>
-          <button
-            type="button"
-            className="record-toggle"
-            disabled={!ready && !capture.running}
-            onClick={async () =>
-              setCapture(await invoke<CaptureStatus>("toggle_capture"))
-            }
-          >
-            {capture.running ? "Stop recording" : "Start recording"}
-          </button>
-        </div>
+        <EyePanel capture={capture} ready={ready} onCapture={setCapture} />
 
         <fieldset>
           <legend>What it does</legend>
@@ -236,9 +176,9 @@ export function Setup() {
           <fieldset>
             <legend>You are set up</legend>
             <p>
-              Click the menu bar icon to start and stop capturing, or
-              right-click it and choose Start Capturing. The right-click menu
-              also opens today's file and these settings.
+              Click the menu bar icon to open the main window, or right-click
+              it to start and stop capturing, open today's file and reach
+              these settings.
             </p>
           </fieldset>
         ) : null}

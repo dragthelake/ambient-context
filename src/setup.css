@@ -32,26 +32,47 @@
 }
 
 :root {
-  --desktop: #0e7c7b;
-  --chrome: #c6c3bd;
-  --chrome-light: #e8e5df;
-  --chrome-lighter: #fdfcfa;
-  --chrome-dark: #838078;
-  --chrome-darker: #1b1a17;
-  --title-a: #101078;
-  --title-b: #1c74c8;
-  --ink: #1b1a17;
-  --well: #fdfcfa;
-  --led-green: #1f7a2d;
-  --warn-ink: #7a1c1c;
-  --warn-bg: #efdad5;
+  /* The VGA system palette, sampled from the reference rather than
+     invented: face, highlight, shadow and dark shadow are the four
+     Windows 3D colours, and every bevel in this stylesheet is built out
+     of them. Warmed-up approximations read as a pastiche; these do not. */
+  --desktop: #008080;
+  --chrome: #c0c0c0;
+  --chrome-light: #dfdfdf;
+  --chrome-lighter: #ffffff;
+  --chrome-dark: #808080;
+  --chrome-darker: #000000;
+  /* Windows 98's own title gradient. The reference has it switched off and
+     shows flat #000080, which is the first stop here. */
+  --title-a: #000080;
+  --title-b: #1084d0;
+  --ink: #000000;
+  --well: #ffffff;
+  --led-green: #008000;
+  /* The monitor is a lighter object than the dialog it sits on, lit from
+     the top left. Its screen is grey rather than teal, and simply dims
+     when capture stops: the same picture, unlit. */
+  --crt-case: #d4d4d4;
+  --crt-lit: #ffffff;
+  --crt-shade: #9a9a9a;
+  --crt-cast: #8a8a8a;
+  --crt-screen-on: #dcdcdc;
+  --crt-screen-off: #a6a6a6;
+  --crt-ink: #141414;
+  --crt-ink-dim: #6f6f6f;
+  --warn-ink: #800000;
+  --warn-bg: #dfdfdf;
   --mono: "Fira Code", "SF Mono", Menlo, Monaco, monospace;
 
   /* raised bevel, the load-bearing trick of the whole look */
   --bevel-out: inset -1px -1px var(--chrome-darker), inset 1px 1px var(--chrome-lighter),
     inset -2px -2px var(--chrome-dark), inset 2px 2px var(--chrome-light);
-  --bevel-in: inset 1px 1px var(--chrome-darker), inset -1px -1px var(--chrome-lighter),
-    inset 2px 2px var(--chrome-dark), inset -2px -2px var(--chrome-light);
+  /* Sunken. The two dark tones were the wrong way round: Windows puts the
+     mid grey on the outside and the black on the inside, which is what the
+     reference's checkbox and wells show. Inverted, a sunken edge reads as
+     drawn on rather than cut in. */
+  --bevel-in: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-lighter),
+    inset 2px 2px var(--chrome-darker), inset -2px -2px var(--chrome);
 }
 
 * {
@@ -92,9 +113,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(90deg, var(--title-a), var(--title-b));
+  /* Flat, as the reference: that dialog's palette contains no second blue
+     at all. --title-b stays the accent used by links elsewhere, and
+     putting it back in a linear-gradient here restores Windows 98's own
+     gradient title bar if that is ever wanted. */
+  background: var(--title-a);
   color: var(--chrome-lighter);
-  padding: 3px 4px 3px 8px;
+  padding: 2px 2px 2px 6px;
 }
 
 .titlebar-text {
@@ -104,26 +129,36 @@ body {
   letter-spacing: 0.08em;
 }
 
+/* 16x14 with the reference's own bevel, which is simpler than the window's:
+   one pixel of white on the top and left, then one grey and one black on
+   the bottom and right. The four-layer --bevel-out belongs to windows and
+   push buttons, and reads too heavy at this size. */
 .titlebar-button {
   appearance: none;
   border: none;
-  width: 22px;
-  height: 18px;
+  width: 16px;
+  height: 14px;
   min-width: 0;
-  padding: 0 0 1px;
+  padding: 0;
   display: grid;
   place-items: center;
   background: var(--chrome);
   color: var(--ink);
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: var(--bevel-out);
+  box-shadow: inset -1px -1px var(--chrome-darker),
+    inset 1px 1px var(--chrome-lighter), inset -2px -2px var(--chrome-dark);
 }
 
+/* The glyph inherits the button's ink, so pressed and disabled states
+   carry it without a second colour to keep in step. */
+.pixel-glyph {
+  display: block;
+  fill: currentColor;
+}
+
+/* Pressed: the bevel inverts and the glyph moves down and right by one,
+   as every Windows button of the period did. */
 .titlebar-button:active {
-  box-shadow: var(--bevel-in);
+  box-shadow: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-lighter);
   padding: 1px 0 0 1px;
 }
 
@@ -150,48 +185,115 @@ body {
   box-shadow: var(--bevel-out);
 }
 
-/* The eye */
+/* The eye, in its monitor
+
+   The monitor sits on the dialog's face rather than in a sunken well: it
+   is a drawing of an object, and objects do not need a frame. */
 
 .eye-panel {
-  background: var(--well);
-  box-shadow: var(--bevel-in);
-  padding: 12px 8px 10px;
+  padding: 4px 0 10px;
   margin-bottom: 12px;
   text-align: center;
+}
+
+.crt {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* Every shape in the drawing is outlined, then filled and shaded. The
+   outline keeps it in the same idiom as the rest of the app; the fills are
+   what make it an object with a light on it rather than a diagram. */
+.crt-body {
+  fill: var(--crt-case);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.crt-lit {
+  fill: var(--crt-lit);
+}
+
+.crt-shade {
+  fill: var(--crt-shade);
+}
+
+/* Cast shadows, offset down and right of whatever throws them. */
+.crt-shadow {
+  fill: var(--crt-cast);
+}
+
+/* A recess: the screen well and the moulded strip on the chin. */
+.crt-recess {
+  fill: var(--crt-shade);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.crt-screen-fill {
+  fill: var(--crt-screen-off);
+  transition: fill 140ms linear;
+}
+
+.crt-screen-fill[data-on="true"] {
+  fill: var(--crt-screen-on);
+}
+
+.crt-vent {
+  stroke: var(--crt-shade);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.crt-led {
+  fill: var(--crt-shade);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  transition: fill 140ms linear;
+}
+
+.crt-led.is-on {
+  fill: var(--led-green);
+}
+
+.crt-screen {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
 
 .eye {
   margin: 0;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 7px;
   line-height: 1.05;
   letter-spacing: 0;
-  color: var(--ink);
+  color: var(--crt-ink-dim);
+  transition: color 140ms linear;
   display: inline-block;
   text-align: left;
 }
 
-.eye-caption {
-  margin: 10px 0 0;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  color: var(--chrome-dark);
-}
-
-.record-toggle {
-  margin-top: 10px;
-  min-width: 180px;
+/* A powered screen; the dim state is the same art, unlit. */
+.crt-screen.is-on .eye {
+  color: var(--crt-ink);
 }
 
 /* Group boxes */
 
+/* A group box is an etched groove, not a bevel: one grey rectangle with a
+   white one a pixel down and to the right of it. The grey therefore shows
+   above and left, the white below and right, and the two together read as
+   a line scored into the dialog face. */
 fieldset {
   margin: 0 0 12px;
   padding: 8px 10px 10px;
-  border: none;
-  box-shadow: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-dark),
-    inset 2px 2px var(--chrome-lighter), inset -2px -2px var(--chrome-lighter);
+  border: 1px solid var(--chrome-dark);
+  box-shadow: 1px 1px 0 var(--chrome-lighter),
+    inset 1px 1px 0 var(--chrome-lighter);
 }
 
 legend {
@@ -246,7 +348,12 @@ button {
   cursor: default; /* win98 buttons never showed a pointer */
 }
 
-button:active:not(:disabled):not(.titlebar-button) {
+/* The pressed look shifts a button's content down and right by a pixel,
+   which is right for a push button and wrong for a tab: a tab's height
+   sets the height of the strip, so growing one on mousedown moves the
+   pane and everything under it. Tabs are excluded rather than overridden,
+   because this selector outweighs a plain `.tab:active` and would win. */
+button:active:not(:disabled):not(.titlebar-button):not(.tab) {
   box-shadow: var(--bevel-in);
   padding: 6px 15px 5px 17px;
 }
@@ -337,7 +444,10 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.08em;
   font-weight: 600;
-  color: var(--title-b);
+  /* The title bar's navy, not the lighter accent: on a #c0c0c0 face the
+     bright blue reads as a modern web link, and the navy keeps the link
+     tied to the one other blue in the window. */
+  color: var(--title-a);
   text-decoration: underline;
 }
 
@@ -358,6 +468,106 @@ button:disabled {
   overflow-wrap: anywhere;
   user-select: text;
   cursor: text;
+}
+
+/* About */
+
+.about-window .window-body {
+  text-align: center;
+  padding: 14px 18px 6px;
+}
+
+/* Pixel art, so it must not be smoothed on the way down from 2048px:
+   the bevel is one pixel wide at source and interpolation turns it to
+   mush. Nearest-neighbour keeps the edges hard. */
+.about-icon {
+  display: block;
+  width: 128px;
+  height: 128px;
+  margin: 0 auto 10px;
+  image-rendering: pixelated;
+}
+
+.about-name {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.about-version {
+  margin: 2px 0 12px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--chrome-dark);
+  min-height: 1em;
+}
+
+.about-line {
+  margin: 0 0 8px;
+}
+
+
+/* Checkboxes and radios
+
+   These were native macOS controls, which is the one place the illusion
+   broke completely: a blue rounded tick in a Windows 98 dialog. Both are
+   rebuilt from the reference, 13px square for the box and 12px round for
+   the radio, over the sunken bevel the rest of the app uses. */
+
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  margin: 0;
+}
+
+/* The checkbox is a bevelled well; the radio below is drawn instead, so it
+   deliberately takes none of this. */
+input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+}
+
+/* The radio is drawn rather than bevelled. A sunken box-shadow on a circle
+   offsets the interior instead of producing concentric rings, so it comes
+   out lopsided; two half-arcs split on the 45 degree diagonal give the
+   ring its shadow above-left and its highlight below-right, which is what
+   the reference does. */
+input[type="radio"] {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2012%2012%22%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%225%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%201%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23808080%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%200%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%201%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23000000%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%200%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23c0c0c0%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+}
+
+input[type="radio"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2012%2012%22%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%225%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%201%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23808080%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%200%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%201%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23000000%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%200%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23c0c0c0%22%2F%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%222%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E");
+}
+
+/* The tick is the reference's own bitmap, 9x7, drawn at one image pixel
+   per CSS pixel so it stays hard-edged. */
+input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%209%207%22%20shape-rendering%3D%22crispEdges%22%20fill%3D%22%23000%22%3E%3Crect%20x%3D%227%22%20y%3D%220%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%221%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%221%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%226%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: 2px 3px;
+  background-size: 9px 7px;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  background-color: var(--chrome);
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
 }
 
 /* Status bar */

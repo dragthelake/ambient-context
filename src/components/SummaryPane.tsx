@@ -59,6 +59,29 @@ function render(markdown: string): ReactNode[] {
   return out;
 }
 
+/// The pane's frame and its scrolling interior. Split because a scroll
+/// container's padding lies inside its scrollable area and an inset bevel
+/// paints under its descendants: with both on one element the content
+/// rides over the frame at each end of a scroll. Every return below goes
+/// through here so the five states cannot drift apart.
+function Pane({
+  reading,
+  scrollRef,
+  children,
+}: {
+  reading?: boolean;
+  scrollRef?: (element: HTMLElement | null) => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={reading ? "summary-pane reading" : "summary-pane"}>
+      <div className="summary-pane-scroll" ref={scrollRef}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
 export function SummaryPane({
   markdown,
   hasCapture,
@@ -87,14 +110,14 @@ export function SummaryPane({
 
   if (!hasCapture) {
     return (
-      <section className="summary-pane">
+      <Pane>
         <p className="empty-state">Nothing was recorded on this day.</p>
-      </section>
+      </Pane>
     );
   }
   if (running) {
     return (
-      <section className="summary-pane">
+      <Pane>
         <p className="empty-state is-running">
           Summarising now. The engine is reading the day file; this can take a
           few minutes.
@@ -102,14 +125,14 @@ export function SummaryPane({
             _
           </span>
         </p>
-      </section>
+      </Pane>
     );
   }
   if (markdown) {
     return (
-      <section
-        className="summary-pane reading"
-        ref={(element) => {
+      <Pane
+        reading
+        scrollRef={(element) => {
           setPane(element);
         }}
       >
@@ -119,27 +142,27 @@ export function SummaryPane({
           hasEngine={hasEngine}
         />
         {render(markdown)}
-      </section>
+      </Pane>
     );
   }
   if (!hasEngine) {
     return (
-      <section className="summary-pane">
+      <Pane>
         <p className="empty-state">
           No summary yet, and no engine is connected. Connect one in Settings
           in the left rail, then come back and summarise.
         </p>
-      </section>
+      </Pane>
     );
   }
   return (
-    <section className="summary-pane">
+    <Pane>
       <p className="empty-state">
         No summary yet for this day. Summarise it from the button above.
       </p>
       <button type="button" className="summarise-now" onClick={onSummarise}>
         Summarise now
       </button>
-    </section>
+    </Pane>
   );
 }

@@ -3,62 +3,254 @@
 
 @import "./setup.css";
 
-.main-window {
-  display: flex;
+/* The document behind the window is the teal desktop the setup dialog
+   floats on. The main window fills its frame, so that teal is only ever
+   revealed by an elastic overscroll at the end of a trackpad swipe.
+   `overscroll-behavior` stops the rubber band, and the grey is there so
+   nothing eye-catching sits behind the window even if one gets through.
+
+   Scoped with :has() rather than a bare `body` because App.tsx imports
+   this file for both windows, and the setup dialog keeps its teal. It
+   also outweighs setup.css's own `body` rule, which would otherwise win
+   on source order. */
+
+html:has(.main-window),
+body:has(.main-window) {
+  background: var(--chrome);
+  overscroll-behavior: none;
+}
+
+/* The shell is .window from setup.css; this only says how tall it is and
+   that the traffic lights need room. The titlebar is drawn under them, so
+   the text starts clear of where macOS puts them.
+
+   macOS masks every decorated window to a rounded rect and offers no way
+   to square it off, so the chrome curves to meet the mask rather than
+   being sliced by it. --corner is that mask's radius; the --corner-inner-*
+   pair is that same curve seen from inside the window border, which is
+   what keeps the arcs concentric instead of merely both round. */
+
+/* Two classes, not one: this element is `window main-window`, and
+   App.tsx pulls in Main (and this file) before setup.css, so at equal
+   specificity setup.css's plain `.window` would win on order alone. */
+
+.window.main-window {
+  /* macOS's window corner, and that same corner measured from inside the
+     border: concentric arcs need the inner radius stepped down by the gap
+     between them, or the inner corner reads tighter than the outer one.
+     The border is wider here than the setup dialog's 3px so the frame has
+     something to show as it wraps the curve.
+
+     16px is measured, not guessed: macOS 26 masks its windows to a corner
+     roughly twice the radius earlier versions used, and anything smaller
+     leaves the chrome to be sliced by it. Re-measure if the corner ever
+     looks cut again on a newer macOS. */
+  --border: 5px;
+  --corner: 16px;
+
+  /* Top and bottom are tuned separately. Geometry says both should be
+     `--corner minus --border`, and at the bottom that is what reads
+     correctly. The title bar needs a touch less: it meets the frame as a
+     hard saturated edge with no bevel to soften it, so the same arc that
+     looks right under the status cells looks like it bulges into the
+     corner. Trust the eye over the arithmetic here. */
+  --corner-inner-top: 10px;
+  --corner-inner-bottom: 11px;
+
   height: 100vh;
+  padding: var(--border);
+  border-radius: var(--corner);
+  overflow: hidden;
+}
+
+.main-window .titlebar {
+  /* No inset for traffic lights: they are hidden on this window, so the
+     title sits where a Windows 98 title sits. The height is the
+     reference's 18px scaled to this app's larger type, not the 28px that
+     was only ever there to clear the buttons. */
+  height: 22px;
+  border-radius: var(--corner-inner-top) var(--corner-inner-top) 0 0;
+}
+
+/* The outermost cells are the only ones that meet a corner. */
+.main-window .statusbar-cell:first-child {
+  border-bottom-left-radius: var(--corner-inner-bottom);
+}
+
+.main-window .statusbar-cell:last-child {
+  border-bottom-right-radius: var(--corner-inner-bottom);
+}
+
+/* Two buttons where Windows put its three. Grouped so the gap between
+   them stays even and the pair sits hard against the right edge. */
+
+.titlebar-buttons {
+  display: flex;
+  gap: 3px;
+}
+
+/* The close button keeps the reference's tight 2px inset from the edge,
+   which puts its top right corner exactly on the window's corner arc: at
+   the button's top edge the arc has reached precisely that x, so a square
+   corner gets shaved. Rounding the corner pulls it inside the curve
+   instead of moving the button inward, so the navy surround stays as
+   tight as the reference's. 4px against the window's 10px arc clears it
+   with a pixel and a half to spare. */
+.main-window .titlebar-button:last-child {
+  border-top-right-radius: 4px;
+}
+
+/* Tab strip
+
+   A classic notebook tab: the current one is a touch taller, keeps the
+   bevel open along its bottom edge, and overlaps the pane below by a
+   pixel so the two read as one sheet rather than two stacked boxes. */
+
+.tabstrip {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  /* The first tab is deliberately not flush with the pane below it: the
+     strip is indented a few pixels so the tabs read as sitting on the
+     sheet rather than continuing its edge. The reference lines them up;
+     this does not, by choice.
+
+     The gap above matches the gap the status bar keeps below the pane, so
+     the dialog has one spacing rhythm top and bottom. */
+  padding: 3px 4px 0 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.tab {
+  min-width: 0;
+  /* Tab height tracks the type, the way the reference's 18px tab tracks
+     its 11px face: tight leading, small vertical padding. */
+  line-height: 1.15;
+  padding: 2px 13px 4px;
+  /* Flush with the pane, not over it. The pane's top highlight has to
+     survive as an unbroken line beneath every tab that is not current;
+     pulling all of them down hid that line and made all three read as
+     joined to the sheet, which is to say all three read as selected. */
+  margin-bottom: 0;
+  font-weight: 600;
+  background: var(--chrome);
+  /* Real borders rather than inset shadows, because borders follow the
+     radius and mitre against each other at the corner. As shadows the
+     white top was painted over the dark right edge and the top right
+     corner came out square while the top left curved. Three sides only:
+     the bottom is left open so the current tab can run into the pane. */
+  border: 0 solid;
+  border-width: 1px 1px 0 1px;
+  border-top-color: var(--chrome-lighter);
+  border-left-color: var(--chrome-lighter);
+  border-right-color: var(--chrome-darker);
+  /* The grey the reference puts just inside the black right edge. */
+  box-shadow: inset -1px 0 var(--chrome-dark);
+  border-radius: 3px 3px 0 0;
+}
+
+.tab.is-current {
+  /* The only tab that breaks the pane's top line: it stands 2px taller
+     and runs 3px into the sheet, which is the whole of how a notebook tab
+     says it is the one in front.
+
+     The padding is arithmetic, not taste. Horizontal is identical to an
+     unselected tab so the label cannot move sideways and the tabs after
+     it cannot shift. Vertically, the extra bottom padding is exactly the
+     negative margin, which holds the label on the same line while the tab
+     itself grows upward: text top = bottom - padding-bottom - line-height,
+     so adding 3 to both the overhang and the padding cancels out. */
+  padding: 4px 13px 7px;
+  margin-bottom: -3px;
+  z-index: 2;
+}
+
+.tab:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+/* Pane */
+
+.tabpane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Flush with the window's padding box, which is where the status bar
+     sits too, so the two halves of the dialog share one left and right
+     edge. The tab strip is indented from this by choice; the pane and the
+     status bar are not. */
+  margin: 0;
+  /* The pane is the same face grey as the tab strip, as in the reference:
+     a tabbed dialog is one sheet, and only the bevel says where it starts. */
   background: var(--chrome);
   box-shadow: var(--bevel-out);
-  padding: 3px;
-  gap: 3px;
+  /* The frame never scrolls, so nothing can be painted over it. */
+  overflow: hidden;
 }
 
-/* Left rail */
+/* The scrolling half of the pane. These are two elements because a scroll
+   container's padding lies inside its scrollable area and an inset
+   box-shadow paints beneath its descendants: with the bevel on the
+   scroller, content rides over the frame at the top and bottom of every
+   scroll. The frame stays put and this scrolls inside it.
 
-.rail {
-  width: 140px;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 4px 0;
-}
-
-.rail-item {
-  text-align: left;
-  padding: 6px 10px;
-  min-width: 0;
-}
-
-.rail-item.is-current {
-  box-shadow: var(--bevel-in);
-  font-weight: 700;
-}
-
-.pane {
+   Contain, not none: the pane may still bounce against its own
+   background, but the gesture never chains out to the document. */
+.tabpane-scroll {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
-  background: var(--chrome-light);
-  box-shadow: var(--bevel-in);
-  margin: 4px 4px 4px 0;
-  padding: 0;
+  overscroll-behavior: contain;
+  /* Holds content off the bevel, as the reference's pane does. Each view
+     adds only what it needs on top of this. */
+  padding: 7px;
 }
 
-.pane::-webkit-scrollbar {
+.tabpane-scroll::-webkit-scrollbar {
   width: 14px;
 }
-.pane::-webkit-scrollbar-track {
+.tabpane-scroll::-webkit-scrollbar-track {
   background: repeating-conic-gradient(
       var(--chrome-light) 0% 25%,
       var(--chrome-lighter) 0% 50%
     )
     0 0 / 4px 4px;
 }
-.pane::-webkit-scrollbar-thumb {
+.tabpane-scroll::-webkit-scrollbar-thumb {
   background: var(--chrome);
   box-shadow: var(--bevel-out);
 }
 
+/* Overview */
+
+/* Centred in the pane rather than stacked at the top: the tab has three
+   short groups in a tall window, and left at the top they leave a third of
+   the dialog empty. `safe` keeps the top reachable if the window is short
+   enough for the content to overflow. */
+
+.overview {
+  min-height: 100%;
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
+.overview .eye-panel {
+  margin-bottom: 14px;
+}
+
+.overview .crt {
+  max-width: 300px;
+}
+
 /* Day view */
+
 
 .day-view {
   display: flex;
@@ -77,7 +269,7 @@
 .calendar-rail {
   width: 220px;
   flex-shrink: 0;
-  padding: 10px;
+  padding: 8px;
   border-right: 2px solid;
   border-image: linear-gradient(
       var(--chrome-dark),
@@ -328,14 +520,25 @@
 
 /* Summary pane */
 
+/* Frame and scroller split, as everywhere else a bevelled box scrolls. */
 .summary-pane {
   flex: 1;
-  overflow-y: auto;
-  padding: 14px 18px;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
   margin: 10px 12px 12px;
 }
+
+.summary-pane-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 18px;
+}
+
 
 .empty-state {
   margin: 0;
@@ -403,11 +606,21 @@
 
 .raw-pane {
   flex: 1;
-  overflow-y: auto;
-  padding: 10px 12px;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
   margin: 10px 12px 12px;
+}
+
+/* The scrolling half of the raw pane; the frame above never moves. */
+.raw-pane-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 10px 12px;
 }
 
 .raw-block {
@@ -538,9 +751,7 @@
 }
 
 .propose-field {
-  display: block;
   margin-bottom: 8px;
-  font-weight: 600;
 }
 
 .propose-field textarea {
@@ -621,7 +832,7 @@
 /* Settings sections */
 
 .settings-stack {
-  padding: 10px 12px;
+  padding: 6px 8px;
   display: block;
 }
 
@@ -800,3 +1011,9 @@
 .mcp-status {
   margin-top: 10px;
 }
+
+
+
+
+
+

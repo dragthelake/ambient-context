@@ -102,7 +102,8 @@ export function RawPane({ date, mode }: RawPaneProps) {
     setScrollY(event.currentTarget.scrollTop);
   }, []);
   useEffect(() => {
-    const pane = document.querySelector(".raw-pane");
+    // The scroller, not the frame: the frame does not scroll.
+    const pane = document.querySelector(".raw-pane-scroll");
     if (pane && mode === "raw") pane.scrollTop = scrollY;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [blocks]);
@@ -175,13 +176,18 @@ export function RawPane({ date, mode }: RawPaneProps) {
   );
 
   return (
-    <section
-      className="raw-pane"
-      onScroll={onScroll}
-      ref={(element) => {
-        setPane(element);
-      }}
-    >
+    /* Frame and scroller are separate elements, as in the tab pane: a
+       scroll container's padding sits inside its scrollable area and an
+       inset bevel paints under its descendants, so with both jobs on one
+       element the blocks ride over the frame at each end of a scroll. */
+    <section className="raw-pane">
+      <div
+        className="raw-pane-scroll"
+        onScroll={onScroll}
+        ref={(element) => {
+          setPane(element);
+        }}
+      >
       <HighlightPill
         container={pane}
         buildSelection={buildSelection}
@@ -192,8 +198,16 @@ export function RawPane({ date, mode }: RawPaneProps) {
       {blocks.length === 0 ? (
         <p className="empty-state">Nothing was recorded on this day.</p>
       ) : null}
-      {blocks.map((block) => {
-        const key = `${block.start}-${block.app}`;
+      {blocks.map((block, index) => {
+        // The position is part of the identity because time and app alone
+        // are not unique: a poll every few seconds can close one block and
+        // open another within the same minute in the same app. Blocks
+        // arrive in chronological order and are replaced wholesale when
+        // the day changes, so the index is stable for as long as the row
+        // is on screen. This key is also what the confirmation is keyed
+        // on, so a collision does not merely warn: it puts "Rule added"
+        // on every twin at once.
+        const key = `${index}-${block.start}-${block.app}`;
         return (
           <article
             key={key}
@@ -257,6 +271,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
           </article>
         );
       })}
+      </div>
     </section>
   );
 }
