@@ -70,6 +70,27 @@ describe("the two stylesheets", () => {
     expect(dead).toEqual([]);
   });
 
+  // The press style is written for a push button: it swaps the bevel and
+  // shifts the content a pixel by repadding. On a 9x12 tile in a lattice
+  // that padding is taller than the whole cell, so the row moves on
+  // mousedown. Small elements are excluded from the rule rather than
+  // overriding it, because it outweighs any single-class selector.
+  it("excludes every small element from the global press style", () => {
+    const pressed = setup.filter(
+      (rule) => rule.selector.startsWith("button:active") && rule.decls.has("padding"),
+    );
+    expect(pressed).toHaveLength(1);
+    for (const excluded of [".titlebar-button", ".tab", ".defrag-cell"]) {
+      expect(pressed[0].selector).toContain(`:not(${excluded})`);
+    }
+  });
+
+  it("gives the defrag cell its own pressed and focused treatment", () => {
+    const selectors = main.map((rule) => rule.selector);
+    expect(selectors).toContain(".defrag-cell:active:not(:disabled)");
+    expect(selectors).toContain(".defrag-cell:focus-visible");
+  });
+
   it.each([
     ["setup.css", setup],
     ["main-window.css", main],

@@ -329,7 +329,7 @@ fn tick(app: &AppHandle) {
         // Checked once per job against the snapshot taken when this batch
         // was drained, so a Stop pressed mid-batch cancels the remainder
         // without touching whatever gets queued after this batch finishes.
-        if app.state::<JobQueue>().generation() != generation {
+        if !should_run(generation, app.state::<JobQueue>().generation()) {
             app.state::<JobQueue>()
                 .record(&job.id, JobStatus::Cancelled);
             continue;
@@ -369,6 +369,18 @@ fn persist_last_run(app: &AppHandle) {
     if let Ok(data_dir) = app.path().app_data_dir() {
         write_last_run(&data_dir, Local::now());
     }
+}
+
+/// Whether a job drained into a batch should still run. The runner takes
+/// one snapshot of the cancel generation per batch and asks this before
+/// each job in it: Stop bumps the generation, so a mismatch means Stop
+/// landed after this batch was taken and the rest of it is cancelled.
+///
+/// Pulled out of `tick` because that needs a live `AppHandle` and cannot be
+/// called from a test, which left the decision the Stop button rests on
+/// with nothing exercising it.
+fn should_run(batch_generation: u64, current_generation: u64) -> bool {
+    batch_generation == current_generation
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -487,6 +499,20 @@ impl JobQueue {
     pub fn find(&self, id: &str) -> Option<JobSummary> {
         let history = self.history.lock().expect("job history");
         history.iter().find(|job| job.id == id).cloned()
+    }
+
+    /// The ids of every job still queued or running, oldest first. The
+    /// window adopts these on mount: the runner outlives the webview, so a
+    /// window closed mid-batch and reopened would otherwise show no batch
+    /// at all, with Stop disabled and Summarise offering to enqueue days
+    /// that are already on their way.
+    pub fn outstanding(&self) -> Vec<String> {
+        let history = self.history.lock().expect("job history");
+        history
+            .iter()
+            .filter(|job| matches!(job.status, JobStatus::Queued | JobStatus::Running))
+            .map(|job| job.id.clone())
+            .collect()
     }
 
     /// Takes every queued job when nothing is running, and nothing at all
@@ -888,7 +914,7 @@ mod tests {
         // later finds no mismatch and nothing in it gets cancelled.
         let next = queue.enqueue_summarise(day(2026, 8, 30));
         let generation = queue.generation();
-        assert_eq!(queue.generation(), generation);
+        assert!(should_run(generation, queue.generation()));
         assert_eq!(queue.find(&next.0).unwrap().status, JobStatus::Queued);
     }
 
@@ -928,6 +954,77 @@ mod tests {
         queue.enqueue_summarise(day(2026, 8, 30));
 
         // The in-flight batch's snapshot must still show a mismatch.
-        assert_ne!(queue.generation(), generation);
+        assert!(!should_run(generation, queue.generation()));
+    }
+
+    #[test]
+    fn a_stop_mid_batch_stops_the_runner_at_the_next_job_boundary() {
+        // The runner's own loop over a drained batch, with the engine work
+        // left out: what is under test is the decision `tick` makes before
+        // each job, which is the whole of what Stop does to a batch already
+        // taken off the queue.
+        let queue = JobQueue::for_test();
+        let state = JobState::default();
+        let first = queue.enqueue_summarise(day(2026, 8, 28));
+        let second = queue.enqueue_summarise(day(2026, 8, 29));
+        let third = queue.enqueue_summarise(day(2026, 8, 30));
+
+        let batch = queue.drain_if_idle(&state);
+        let generation = queue.generation();
+
+        let mut ran = Vec::new();
+        for job in &batch {
+            if !should_run(generation, queue.generation()) {
+                queue.record(&job.id, JobStatus::Cancelled);
+                continue;
+            }
+            queue.record(&job.id, JobStatus::Running);
+            ran.push(job.date);
+            queue.record(&job.id, JobStatus::Done);
+            // Stop, pressed while the first day was being summarised.
+            if job.date == day(2026, 8, 28) {
+                queue.cancel_queued();
+            }
+        }
+
+        assert_eq!(ran, vec![day(2026, 8, 28)]);
+        assert_eq!(queue.find(&first.0).unwrap().status, JobStatus::Done);
+        assert_eq!(queue.find(&second.0).unwrap().status, JobStatus::Cancelled);
+        assert_eq!(queue.find(&third.0).unwrap().status, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn a_batch_with_no_stop_runs_every_job_in_it() {
+        let queue = JobQueue::for_test();
+        let state = JobState::default();
+        queue.enqueue_summarise(day(2026, 8, 28));
+        queue.enqueue_summarise(day(2026, 8, 29));
+
+        let batch = queue.drain_if_idle(&state);
+        let generation = queue.generation();
+
+        // Something else queues a job while this batch runs. That is not a
+        // Stop and must not cancel anything.
+        queue.enqueue_summarise(day(2026, 8, 31));
+
+        let ran = batch
+            .iter()
+            .filter(|_| should_run(generation, queue.generation()))
+            .count();
+        assert_eq!(ran, 2);
+    }
+
+    #[test]
+    fn outstanding_is_what_is_queued_or_running_and_nothing_else() {
+        let queue = JobQueue::for_test();
+        let running = queue.enqueue_summarise(day(2026, 8, 28));
+        let done = queue.enqueue_summarise(day(2026, 8, 29));
+        let cancelled = queue.enqueue_summarise(day(2026, 8, 30));
+        let still_queued = queue.enqueue_summarise(day(2026, 8, 31));
+        queue.record(&running.0, JobStatus::Running);
+        queue.record(&done.0, JobStatus::Done);
+        queue.record(&cancelled.0, JobStatus::Cancelled);
+
+        assert_eq!(queue.outstanding(), vec![running.0, still_queued.0]);
     }
 }

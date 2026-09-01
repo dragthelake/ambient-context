@@ -1074,6 +1074,45 @@ body:has(.main-window) {
   background: #d84a3a;
 }
 
+.defrag-cell:active:not(:disabled) {
+  /* The tile flashes by inverting its own outline. Nothing about the box
+     changes: the lattice is one pixel wide and the fills sit flush, so a
+     border width or padding change on press would nudge every cell after
+     it along the row. */
+  border-color: #ffffff;
+}
+
+.defrag-cell:focus-visible {
+  /* A ring in both poles of the palette, drawn outside the tile and over
+     the lattice, so one of the two contrasts whatever the cell and its
+     neighbours are filled with. The global button outline sits at -5px,
+     which on a 9x12 box collapses to nothing at all. */
+  outline: none;
+  box-shadow:
+    0 0 0 1px #ffffff,
+    0 0 0 2px #0a0a0a;
+  /* Grid items honour z-index without positioning, and the ring is drawn
+     outside the cell: without this it is painted over by the cells that
+     come after it in the row. */
+  z-index: 1;
+}
+
+/* Centred over the empty rectangle, saying why it is empty. The panel
+   holds its shape from the first run, so without this it is twenty rows of
+   white with nothing to explain them. */
+.defrag-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+  text-shadow: 1px 1px 0 #ffffff;
+  pointer-events: none;
+}
+
 .defrag-cell:disabled {
   /* Still drawn, just not a target. The default disabled treatment would
      grey the fill and lose the colour the map exists to show. */

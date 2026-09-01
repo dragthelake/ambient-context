@@ -359,9 +359,12 @@ button {
 /* The pressed look shifts a button's content down and right by a pixel,
    which is right for a push button and wrong for a tab: a tab's height
    sets the height of the strip, so growing one on mousedown moves the
-   pane and everything under it. Tabs are excluded rather than overridden,
-   because this selector outweighs a plain `.tab:active` and would win. */
-button:active:not(:disabled):not(.titlebar-button):not(.tab) {
+   pane and everything under it. The same goes for a defrag cell, which is
+   a 9x12 tile in a lattice: this padding is taller than the whole cell and
+   shoves its row down a pixel on mousedown. Both are excluded rather than
+   overridden, because this selector outweighs a plain `.tab:active` or
+   `.defrag-cell:active` and would win. */
+button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell) {
   box-shadow: var(--bevel-in);
   padding: 6px 15px 5px 17px;
 }

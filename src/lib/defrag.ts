@@ -42,25 +42,31 @@ function addDays(date: Date, days: number): Date {
 /// Every day from the first recorded one to today, wrapped into `columns`
 /// and padded with empty cells to at least `MIN_ROWS`. Days with no file
 /// stay in place as empty cells, so a gap in the record reads as a gap.
+///
+/// With nothing recorded at all the result is the same empty rectangle
+/// rather than nothing: the floor exists so the panel holds its shape when
+/// little has been recorded, and a brand new install is that case at its
+/// extreme.
 export function buildCells(
   days: DayEntry[],
   today: string,
   columns: number,
   failed: Set<string>,
 ): Cell[] {
-  if (days.length === 0 || columns <= 0) return [];
-
-  const byDate = new Map(days.map((day) => [day.date, day]));
-  const first = days.reduce(
-    (earliest, day) => (day.date < earliest ? day.date : earliest),
-    days[0].date,
-  );
+  if (columns <= 0) return [];
 
   const cells: Cell[] = [];
-  for (let at = parse(first); iso(at) <= today; at = addDays(at, 1)) {
-    const date = iso(at);
-    const entry = byDate.get(date) ?? null;
-    cells.push({ date, entry, state: stateOf(entry, failed.has(date)) });
+  if (days.length > 0) {
+    const byDate = new Map(days.map((day) => [day.date, day]));
+    const first = days.reduce(
+      (earliest, day) => (day.date < earliest ? day.date : earliest),
+      days[0].date,
+    );
+    for (let at = parse(first); iso(at) <= today; at = addDays(at, 1)) {
+      const date = iso(at);
+      const entry = byDate.get(date) ?? null;
+      cells.push({ date, entry, state: stateOf(entry, failed.has(date)) });
+    }
   }
 
   const rows = Math.max(MIN_ROWS, Math.ceil(cells.length / columns));
@@ -71,10 +77,15 @@ export function buildCells(
   return cells;
 }
 
-function stateOf(entry: DayEntry | null, hasFailed: boolean): CellState {
-  if (!entry || !entry.has_capture) return "empty";
+/// A summary counts as summarised whether or not the raw day file is still
+/// there. The backend lists a date as soon as either file exists, so a day
+/// whose raw context has been deleted after summarising is a real shape,
+/// and drawing it white would say nothing was ever recorded.
+export function stateOf(entry: DayEntry | null, hasFailed: boolean): CellState {
+  if (!entry) return "empty";
   if (hasFailed) return "failed";
-  return entry.has_summary ? "summarised" : "raw";
+  if (entry.has_summary) return "summarised";
+  return entry.has_capture ? "raw" : "empty";
 }
 
 /// Days holding raw context with no summary, oldest first, which is the

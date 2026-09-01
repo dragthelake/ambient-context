@@ -16,6 +16,7 @@ function Probe() {
   return (
     <div>
       <span data-testid="pending">{state.pending.join(",")}</span>
+      <span data-testid="running">{String(state.running)}</span>
       <span data-testid="progress">{`${state.finished}/${state.total}`}</span>
       <span data-testid="status">{state.status}</span>
       <button type="button" onClick={() => void state.start()}>start</button>
@@ -33,6 +34,7 @@ describe("useDefragState", () => {
           { date: "2026-08-31", has_capture: true, has_summary: true, bytes: 1, title: null },
         ];
       }
+      if (command === "running_batch") return [];
       throw new Error(`unexpected ${command}`);
     });
     render(<Probe />);
@@ -53,6 +55,8 @@ describe("useDefragState", () => {
           return ["job-0"];
         case "job_state":
           return { id: "job-0", date: "2026-09-01", status: "queued", stderr: null };
+        case "running_batch":
+          return [];
         default:
           throw new Error(`unexpected ${command}`);
       }
@@ -79,6 +83,8 @@ describe("useDefragState", () => {
           return { id: "job-0", date: "2026-09-01", status: "queued", stderr: null };
         case "cancel_queued_summaries":
           return 1;
+        case "running_batch":
+          return [];
         default:
           throw new Error(`unexpected ${command}`);
       }
@@ -117,6 +123,7 @@ describe("useDefragState", () => {
         // unmount.
         return calls === 1 ? [] : pendingListDays;
       }
+      if (command === "running_batch") return [];
       throw new Error(`unexpected ${command}`);
     });
     let hook: ReturnType<typeof useDefragState> | undefined;
@@ -132,6 +139,136 @@ describe("useDefragState", () => {
     await expect(inFlight).resolves.toBeUndefined();
   });
 
+  it("reports the count and the first failure when jobs in a batch fail", async () => {
+    mockInvoke((command, args) => {
+      switch (command) {
+        case "list_days":
+          return [
+            { date: "2026-08-31", has_capture: true, has_summary: false, bytes: 1, title: null },
+            { date: "2026-09-01", has_capture: true, has_summary: false, bytes: 1, title: null },
+          ];
+        case "running_batch":
+          return [];
+        case "summarise_days":
+          return ["job-0", "job-1"];
+        case "job_state":
+          return args?.jobId === "job-0"
+            ? { id: "job-0", date: "2026-08-31", status: "failed", stderr: "engine died" }
+            : { id: "job-1", date: "2026-09-01", status: "failed", stderr: "and again" };
+        default:
+          throw new Error(`unexpected ${command}`);
+      }
+    });
+    render(<Probe />);
+    await waitFor(() =>
+      expect(screen.getByTestId("pending").textContent).toBe("2026-08-31,2026-09-01"),
+    );
+
+    vi.useFakeTimers();
+    await act(async () => {
+      screen.getByText("start").click();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+
+    // Failures count towards completion so the bar can reach the end, which
+    // means "every job finished" is not "every job worked". A run that
+    // summarised nothing must not report Ready beside a full bar, and the
+    // failure quoted is the first, which is the one that explains the run.
+    expect(screen.getByTestId("progress").textContent).toBe("2/2");
+    expect(screen.getByTestId("status").textContent).toBe(
+      "Finished, 2 failed: engine died",
+    );
+    vi.useRealTimers();
+  });
+
+  it("clears the last batch when starting the next one is rejected", async () => {
+    let rejecting = false;
+    mockInvoke((command) => {
+      switch (command) {
+        case "list_days":
+          return [{ date: "2026-09-01", has_capture: true, has_summary: false, bytes: 1, title: null }];
+        case "running_batch":
+          return [];
+        case "summarise_days":
+          if (rejecting) throw new Error("no engine is connected");
+          return ["job-0"];
+        case "job_state":
+          return { id: "job-0", date: "2026-09-01", status: "queued", stderr: null };
+        default:
+          throw new Error(`unexpected ${command}`);
+      }
+    });
+    render(<Probe />);
+    await waitFor(() =>
+      expect(screen.getByTestId("pending").textContent).toBe("2026-09-01"),
+    );
+    await act(async () => {
+      screen.getByText("start").click();
+    });
+    expect(screen.getByTestId("progress").textContent).toBe("0/1");
+
+    // A rejected start never sets new ids. Leaving the last batch's ids in
+    // place leaves `running` true against jobs that already finished, which
+    // enables Stop, disables Summarise, and polls every dead id.
+    rejecting = true;
+    await act(async () => {
+      screen.getByText("start").click();
+    });
+    expect(screen.getByTestId("progress").textContent).toBe("0/0");
+    expect(screen.getByTestId("running").textContent).toBe("false");
+    expect(screen.getByTestId("status").textContent).toContain("no engine is connected");
+  });
+
+  it("adopts a batch that is still running when the window opens", async () => {
+    mockInvoke((command) => {
+      switch (command) {
+        case "list_days":
+          return [{ date: "2026-09-01", has_capture: true, has_summary: false, bytes: 1, title: null }];
+        case "running_batch":
+          return ["job-4", "job-5"];
+        case "job_state":
+          return { id: "job-4", date: "2026-09-01", status: "running", stderr: null };
+        default:
+          throw new Error(`unexpected ${command}`);
+      }
+    });
+    render(<Probe />);
+    // The runner outlives the window, so a window reopened mid-batch has to
+    // pick the batch back up: Stop is unreachable otherwise, and Summarise
+    // would offer to enqueue days that are already on their way.
+    await waitFor(() => expect(screen.getByTestId("progress").textContent).toBe("0/2"));
+    expect(screen.getByTestId("running").textContent).toBe("true");
+    expect(screen.getByTestId("status").textContent).toBe("Summarising 2 days");
+  });
+
+  it("recomputes today when the day list reloads", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 8, 1, 23, 30));
+    mockInvoke((command) => {
+      if (command === "list_days") return [];
+      if (command === "running_batch") return [];
+      throw new Error(`unexpected ${command}`);
+    });
+    let hook: ReturnType<typeof useDefragState> | undefined;
+    function Capture() {
+      hook = useDefragState();
+      return null;
+    }
+    render(<Capture />);
+    await waitFor(() => expect(hook!.today).toBe("2026-09-01"));
+
+    // The window sits open across midnight. A `today` fixed at mount stops
+    // the map one cell short of the day being captured right now.
+    vi.setSystemTime(new Date(2026, 8, 2, 0, 30));
+    await act(async () => {
+      await hook!.reload();
+    });
+    expect(hook!.today).toBe("2026-09-02");
+    vi.useRealTimers();
+  });
+
   it("does not double count a cancelled job when polling ticks overlap", async () => {
     mockInvoke((command) => {
       switch (command) {
@@ -139,6 +276,8 @@ describe("useDefragState", () => {
           return [{ date: "2026-09-01", has_capture: true, has_summary: false, bytes: 1, title: null }];
         case "summarise_days":
           return ["job-0"];
+        case "running_batch":
+          return [];
         default:
           throw new Error(`unexpected ${command}`);
       }
@@ -163,6 +302,8 @@ describe("useDefragState", () => {
           return new Promise((resolve) => {
             jobStateResolvers.push(resolve);
           });
+        case "running_batch":
+          return [];
         default:
           throw new Error(`unexpected ${command}`);
       }

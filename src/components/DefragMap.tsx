@@ -38,14 +38,17 @@ export function DefragMap({
   today: string;
   onOpenDay: (date: string) => void;
 }) {
-  const well = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLDivElement>(null);
   const [columns, setColumns] = useState(1);
   const [hovered, setHovered] = useState<Cell | null>(null);
 
   // Measured, not assumed: the pane is resizable and the map is the only
-  // thing on the tab whose shape depends on its own width.
+  // thing on the tab whose shape depends on its own width. Measured on the
+  // grid rather than the well, because the well's clientWidth includes the
+  // padding that holds the grid inside its bevel, and columns counted from
+  // that overflow the space the cells actually have.
   useLayoutEffect(() => {
-    const node = well.current;
+    const node = field.current;
     if (!node) return;
     const measure = () =>
       setColumns(Math.max(1, Math.floor(node.clientWidth / CELL_W)));
@@ -58,9 +61,10 @@ export function DefragMap({
   const cells = buildCells(days, today, columns, failed);
 
   return (
-    <div className="defrag-well" ref={well}>
+    <div className="defrag-well">
       <div
         className="defrag-grid"
+        ref={field}
         style={{ gridTemplateColumns: `repeat(${columns}, ${CELL_W}px)` }}
       >
         {cells.map((cell, index) => (
@@ -68,7 +72,7 @@ export function DefragMap({
             key={cell.date || `pad-${index}`}
             type="button"
             className={`defrag-cell is-${cell.state}`}
-            disabled={cell.entry === null}
+            disabled={cell.state === "empty"}
             aria-label={cell.date ? longDate(cell.date) : undefined}
             onMouseEnter={() => setHovered(cell)}
             onMouseLeave={() => setHovered(null)}
@@ -78,11 +82,19 @@ export function DefragMap({
           />
         ))}
       </div>
+      {days.length === 0 ? (
+        <p className="defrag-empty">
+          Nothing recorded yet. Each day you capture fills one cell.
+        </p>
+      ) : null}
       {hovered?.entry ? (
         <div className="defrag-info" role="tooltip">
           <strong>{longDate(hovered.date)}</strong>
           <span>{STATE_WORDS[hovered.state]}</span>
-          <span>{size(hovered.entry.bytes)}</span>
+          {/* No size for a day whose raw context is gone: the file's
+              absence reads as 0 B, which looks like an empty day rather
+              than a summarised one. */}
+          {hovered.entry.has_capture ? <span>{size(hovered.entry.bytes)}</span> : null}
           {hovered.entry.title ? <span>{hovered.entry.title}</span> : null}
           <span className="defrag-info-hint">Click to open in Context</span>
         </div>

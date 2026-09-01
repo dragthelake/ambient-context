@@ -113,6 +113,8 @@ function handler(command: string) {
       return [];
     case "cancel_queued_summaries":
       return 0;
+    case "running_batch":
+      return [];
     case "take_pending_day":
       return null;
     case "days_in_month":

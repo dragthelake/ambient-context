@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { DefragMap } from "../components/DefragMap";
+import { MIN_ROWS } from "../lib/defrag";
 import type { DayEntry } from "../lib/days";
 
 afterEach(cleanup);
@@ -55,10 +56,41 @@ describe("DefragMap", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("renders nothing but the well when no day has been recorded", () => {
+  it("holds the panel's shape and says why it is empty with nothing recorded", () => {
     render(
       <DefragMap days={[]} failed={new Set()} today="2026-09-01" onOpenDay={vi.fn()} />,
     );
-    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    // The floor exists so the panel keeps its shape when little has been
+    // recorded, and a brand new install is that case at its extreme. It
+    // collapsing to a sliver is what a first-run user would see.
+    const cells = screen.getAllByRole("button");
+    expect(cells).toHaveLength(MIN_ROWS);
+    expect(cells.every((cell) => (cell as HTMLButtonElement).disabled)).toBe(true);
+    expect(screen.getByText(/Nothing recorded yet/)).toBeTruthy();
+  });
+
+  it("treats a day with a summary but no raw file as summarised", () => {
+    const onOpenDay = vi.fn();
+    render(
+      <DefragMap
+        days={[entry("2026-09-01", { has_capture: false, has_summary: true, bytes: 0 })]}
+        failed={new Set()}
+        today="2026-09-01"
+        onOpenDay={onOpenDay}
+      />,
+    );
+    const cell = screen.getByRole("button", { name: /1 September 2026/ });
+    expect((cell as HTMLButtonElement).disabled).toBe(false);
+    expect(cell.className).toContain("is-summarised");
+
+    // The raw file is gone, so there is no size to report: 0 B here reads
+    // as an empty day rather than a summarised one.
+    fireEvent.mouseEnter(cell);
+    const info = screen.getByRole("tooltip").textContent ?? "";
+    expect(info).toContain("Summarised");
+    expect(info).not.toContain("0 B");
+
+    fireEvent.click(cell);
+    expect(onOpenDay).toHaveBeenCalledWith("2026-09-01");
   });
 });

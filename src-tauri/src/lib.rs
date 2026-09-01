@@ -644,6 +644,16 @@ fn cancel_queued_summaries(app: tauri::AppHandle) -> usize {
     app.state::<jobs::JobQueue>().cancel_queued()
 }
 
+/// The ids of the jobs still queued or running. The window calls this on
+/// mount and adopts them as its current batch: the runner keeps working
+/// after the webview is destroyed, so a window closed mid-run and reopened
+/// would otherwise show no batch, leave Stop disabled while days are still
+/// being summarised, and offer to enqueue those same days again.
+#[tauri::command]
+fn running_batch(app: tauri::AppHandle) -> Vec<String> {
+    app.state::<jobs::JobQueue>().outstanding()
+}
+
 /// One job by id, queued or finished, for the window to poll after it has
 /// pressed Summarise.
 #[tauri::command]
@@ -1506,6 +1516,7 @@ pub fn run() {
             summarise_now,
             summarise_days,
             cancel_queued_summaries,
+            running_batch,
             job_status,
             job_state,
             engine_detect,

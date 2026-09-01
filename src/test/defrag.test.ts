@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCells, MIN_ROWS, pendingDates } from "../lib/defrag";
+import { buildCells, MIN_ROWS, pendingDates, stateOf } from "../lib/defrag";
 import type { DayEntry } from "../lib/days";
 
 function entry(date: string, over: Partial<DayEntry> = {}): DayEntry {
@@ -59,8 +59,32 @@ describe("buildCells", () => {
     expect(cells.length % 10).toBe(0);
   });
 
-  it("returns nothing when no day has been recorded", () => {
-    expect(buildCells([], "2026-09-01", 10, new Set())).toEqual([]);
+  it("builds the empty rectangle when no day has been recorded", () => {
+    // Zero days is the case MIN_ROWS exists for at its extreme: returning
+    // nothing collapses the panel to the height of its own padding.
+    const cells = buildCells([], "2026-09-01", 10, new Set());
+    expect(cells).toHaveLength(MIN_ROWS * 10);
+    expect(cells.every((cell) => cell.state === "empty" && cell.entry === null)).toBe(true);
+  });
+
+  it("has no cells to lay out when the well has not been measured yet", () => {
+    expect(buildCells([entry("2026-09-01")], "2026-09-01", 0, new Set())).toEqual([]);
+  });
+});
+
+describe("stateOf", () => {
+  it("counts a summary as summarised even with the raw file gone", () => {
+    const day = entry("2026-09-01", { has_capture: false, has_summary: true });
+    expect(stateOf(day, false)).toBe("summarised");
+  });
+
+  it("is empty for a day with neither file, and for no day at all", () => {
+    expect(stateOf(entry("2026-09-01", { has_capture: false }), false)).toBe("empty");
+    expect(stateOf(null, false)).toBe("empty");
+  });
+
+  it("puts a failed attempt above whatever the files say", () => {
+    expect(stateOf(entry("2026-09-01", { has_summary: true }), true)).toBe("failed");
   });
 });
 
