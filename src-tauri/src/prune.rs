@@ -105,7 +105,23 @@ pub fn normalise_line(line: &str) -> Option<String> {
     if collapsed.split_whitespace().count() < 4 && !is_high_value(&collapsed) {
         return None;
     }
-    Some(collapsed)
+    Some(escape_heading(collapsed))
+}
+
+/// A captured line that begins like a markdown heading would be read back
+/// as a block boundary: a day file viewed in an editor, or a plan quoting
+/// one, writes `## 09:14–09:41 · Zed` into a body and every reader from
+/// `parse_blocks` to the citation check then sees a block that never
+/// happened. A leading backslash keeps it a body line and still renders as
+/// the same text.
+fn escape_heading(line: String) -> String {
+    static HEADING: OnceLock<Regex> = OnceLock::new();
+    let heading = HEADING.get_or_init(|| Regex::new(r"^#{1,6}\s").unwrap());
+    if heading.is_match(&line) {
+        format!("\\{line}")
+    } else {
+        line
+    }
 }
 
 /// Newsletter bodies arrive as one enormous line. Past this many
@@ -233,6 +249,22 @@ mod tests {
         assert_eq!(normalise_line("Shell"), None);
         assert_eq!(normalise_line("Open File"), None);
         assert_eq!(normalise_line("Reply All Forward"), None);
+    }
+
+    #[test]
+    fn a_body_line_that_looks_like_a_heading_is_escaped() {
+        assert_eq!(
+            normalise_line("## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs").as_deref(),
+            Some("\\## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs")
+        );
+        assert_eq!(
+            normalise_line("## Owed to me").as_deref(),
+            Some("\\## Owed to me")
+        );
+        assert_eq!(
+            normalise_line("#hashtag is not a heading here").as_deref(),
+            Some("#hashtag is not a heading here")
+        );
     }
 
     #[test]

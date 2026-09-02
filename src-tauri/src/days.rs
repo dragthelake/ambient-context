@@ -73,7 +73,9 @@ pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
 pub fn timeline(folder: &Path, date: NaiveDate) -> Option<String> {
     let text = read_day(folder, date, DayFile::Apps)?;
     let mut out = String::new();
-    for line in text.lines().filter(|l| l.starts_with("## ")) {
+    // Only lines the heading parser accepts: a body line that begins with
+    // `## ` (a diff view, a quoted plan) is not a block.
+    for line in text.lines().filter(|l| parse_heading(l).is_some()) {
         out.push_str(line);
         out.push('\n');
     }
@@ -356,6 +358,18 @@ mod tests {
         assert_eq!(out.lines().count(), 3);
         assert!(out.lines().all(|l| l.starts_with("## ")));
         assert!(!out.contains("routed:"));
+    }
+
+    #[test]
+    fn timeline_skips_body_lines_that_only_look_like_headings() {
+        let dir = tempdir().unwrap();
+        let text = "---\n---\n\n## 09:00\u{2013}09:30 \u{00b7} GitHub Desktop \u{00b7} diff\n\n## Owed to me\n\\## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs\n";
+        write(dir.path(), date(2026, 8, 27), DayFile::Apps, text);
+        let out = timeline(dir.path(), date(2026, 8, 27)).unwrap();
+        assert_eq!(
+            out,
+            "## 09:00\u{2013}09:30 \u{00b7} GitHub Desktop \u{00b7} diff\n"
+        );
     }
 
     #[test]
