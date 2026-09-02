@@ -591,6 +591,16 @@ body:has(.main-window) {
   font-size: 13px;
 }
 
+.raw-replay {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--title-b);
+  border: 1px solid var(--title-b);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
 .raw-block-title {
   color: var(--chrome-dark);
   font-size: 12px;

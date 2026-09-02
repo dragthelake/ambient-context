@@ -1,8 +1,10 @@
 use crate::writer::{self, DayFile};
 use chrono::{Datelike, NaiveDate};
+use regex::Regex;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::sync::OnceLock;
 
 /// One day as the window sees it. `has_capture` and `has_summary` are the
 /// two marks the calendar draws; `bytes` is the sum of the three day files;
@@ -93,7 +95,7 @@ pub fn spans(timeline: &str) -> Vec<(u32, u32)> {
     timeline
         .lines()
         .filter_map(|line| {
-            let (start, end, _, _) = parse_heading(line)?;
+            let (start, end, _, _, _) = parse_heading(line)?;
             let s = minutes(&start)?;
             let mut e = minutes(&end)?;
             if e < s {
@@ -231,6 +233,9 @@ pub struct RawBlock {
     pub file: Option<String>,
     pub url: Option<String>,
     pub routed: Option<String>,
+    /// The day this block is a record of, when the writer judged it a
+    /// replay of an earlier day rather than work done now.
+    pub replay: Option<String>,
     pub lines: Vec<String>,
 }
 
@@ -238,8 +243,26 @@ pub struct RawBlock {
 /// an en dash between the times and a middle dot between the fields. The
 /// title is whatever is left after the app, separators and all, because a
 /// Slack window title contains middle dots of its own.
-fn parse_heading(line: &str) -> Option<(String, String, String, Option<String>)> {
+/// Takes a trailing ` [replay: YYYY-MM-DD]` off the end of a heading. It
+/// is trimmed from the whole line rather than split for, because a window
+/// title can hold anything, including brackets.
+fn take_replay(line: &str) -> (&str, Option<String>) {
+    static MARKER: OnceLock<Regex> = OnceLock::new();
+    let marker = MARKER.get_or_init(|| Regex::new(r" \[replay: (\d{4}-\d{2}-\d{2})\]$").unwrap());
+    match marker.captures(line) {
+        Some(found) => (
+            &line[..found.get(0).unwrap().start()],
+            Some(found[1].to_string()),
+        ),
+        None => (line, None),
+    }
+}
+
+type Heading = (String, String, String, Option<String>, Option<String>);
+
+fn parse_heading(line: &str) -> Option<Heading> {
     let rest = line.strip_prefix("## ")?;
+    let (rest, replay) = take_replay(rest);
     let mut fields = rest.splitn(3, '\u{00b7}');
     let times = fields.next()?.trim();
     let app = fields.next()?.trim();
@@ -255,6 +278,7 @@ fn parse_heading(line: &str) -> Option<(String, String, String, Option<String>)>
         end.to_string(),
         app.to_string(),
         title.map(str::to_string),
+        replay,
     ))
 }
 
@@ -262,7 +286,7 @@ pub fn parse_blocks(day_text: &str) -> Vec<RawBlock> {
     let mut blocks: Vec<RawBlock> = Vec::new();
     for line in day_text.lines() {
         if line.starts_with("## ") {
-            if let Some((start, end, app, title)) = parse_heading(line) {
+            if let Some((start, end, app, title, replay)) = parse_heading(line) {
                 blocks.push(RawBlock {
                     start,
                     end,
@@ -271,6 +295,7 @@ pub fn parse_blocks(day_text: &str) -> Vec<RawBlock> {
                     file: None,
                     url: None,
                     routed: None,
+                    replay,
                     lines: Vec::new(),
                 });
             }
@@ -419,7 +444,41 @@ mod tests {
         assert_eq!(blocks[0].file.as_deref(), Some("/x/writer.rs"));
     }
 
-    const DAY: &str = "---\ndate: 2026-08-25\ncaptured_by: Ambient Context 0.3.0\n---\n\n## 09:14\u{2013}09:41 \u{00b7} Linear \u{00b7} YN-102 Proposal protocol\n\nfile: /Users/x/report.pdf\nurl: https://linear.app/empty/issue/YN-102\n\nread the issue\nwrote a comment\n\n## 09:41\u{2013}10:02 \u{00b7} Safari\n\nsome page text\n\n## 10:02\u{2013}10:20 \u{00b7} Slack \u{00b7} #empty-build \u{00b7} thread\n";
+    const DAY: &str = "---\ndate: 2026-08-25\ncaptured_by: Ambient Context 0.2.0\n---\n\n## 09:14\u{2013}09:41 \u{00b7} Linear \u{00b7} YN-102 Proposal protocol\n\nfile: /Users/x/report.pdf\nurl: https://linear.app/empty/issue/YN-102\n\nread the issue\nwrote a comment\n\n## 09:41\u{2013}10:02 \u{00b7} Safari\n\nsome page text\n\n## 10:02\u{2013}10:20 \u{00b7} Slack \u{00b7} #empty-build \u{00b7} thread\n";
+
+    #[test]
+    fn a_replay_marker_is_lifted_off_the_heading() {
+        let text =
+            "## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} 2026-08-28.md [replay: 2026-08-28]\n";
+        let blocks = parse_blocks(text);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].title.as_deref(), Some("2026-08-28.md"));
+        assert_eq!(blocks[0].replay.as_deref(), Some("2026-08-28"));
+    }
+
+    #[test]
+    fn a_marked_block_with_no_title_keeps_its_app() {
+        let blocks = parse_blocks("## 09:14\u{2013}09:41 \u{00b7} Safari [replay: 2026-08-28]\n");
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].app, "Safari");
+        assert_eq!(blocks[0].title, None);
+        assert_eq!(blocks[0].replay.as_deref(), Some("2026-08-28"));
+    }
+
+    #[test]
+    fn an_unmarked_block_has_no_replay_date() {
+        assert_eq!(parse_blocks(DAY)[0].replay, None);
+    }
+
+    #[test]
+    fn the_timeline_keeps_the_marker_so_the_prompts_see_it() {
+        let dir = tempdir().unwrap();
+        let text = "---\n---\n\n## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} 2026-08-28.md [replay: 2026-08-28]\n";
+        write(dir.path(), date(2026, 8, 27), DayFile::Apps, text);
+        let out = timeline(dir.path(), date(2026, 8, 27)).unwrap();
+        assert!(out.contains("[replay: 2026-08-28]"));
+        assert_eq!(spans(&out), vec![(554, 581)]);
+    }
 
     #[test]
     fn parses_every_block_in_a_day() {

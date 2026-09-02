@@ -23,6 +23,7 @@ const BLOCK = {
   file: null,
   url: null,
   routed: null,
+  replay: null,
   lines: ["a line"],
 };
 
@@ -62,6 +63,24 @@ describe("RawPane", () => {
     });
 
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("marks a block that replays an earlier day", async () => {
+    mockInvoke((command) => {
+      switch (command) {
+        case "read_day_blocks":
+          return [{ ...BLOCK, replay: "2026-08-28" }];
+        case "get_rules":
+          return { rules: [], built_ins: [], next_id: "r1", error: null };
+        case "get_settings":
+          return { agent: null };
+        default:
+          throw new Error(`unexpected command ${command}`);
+      }
+    });
+
+    render(<RawPane date="2026-07-04" mode="raw" file="apps" />);
+    expect(await screen.findByText("replay: 2026-08-28")).toBeTruthy();
   });
 
   // Two blocks in the same minute from the same app are ordinary: a poll

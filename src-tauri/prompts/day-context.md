@@ -18,6 +18,9 @@ precision and honesty matter more than completeness.
   support and no more.
 - `Nothing evident.` in a file means the earlier pass found nothing of
   that kind, not that capture was missing.
+- A heading marked `[replay: DATE]` is a record of an earlier day being
+  reviewed. Anything about it is evidence that the user looked at it today,
+  never that the work happened today.
 - Time is the strongest signal. A 40-minute block outweighs ten 30-second
   blocks. Repeated returns to the same thread matter more than any single
   visit.

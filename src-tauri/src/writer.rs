@@ -198,8 +198,45 @@ pub fn escape_cell(text: &str) -> String {
     text.replace('|', "\\|")
 }
 
+/// Query parameters that say where a link was clicked from, not which
+/// page it points at. Two visits to the same page through different
+/// campaigns are one page, and the totals should say so.
+const TRACKING_PARAMS: &[&str] = &["fbclid", "gclid", "ref", "ref_src", "igshid"];
+
+fn is_tracking(name: &str) -> bool {
+    name.starts_with("utm_") || TRACKING_PARAMS.contains(&name)
+}
+
+/// The URL without its tracking parameters. The fragment is kept, because
+/// it is often the section of the page that was actually read, and the
+/// `?` goes when nothing is left in front of it.
+pub fn strip_tracking(url: &str) -> String {
+    let (head, fragment) = match url.split_once('#') {
+        Some((head, fragment)) => (head, Some(fragment)),
+        None => (url, None),
+    };
+    let Some((base, query)) = head.split_once('?') else {
+        return url.to_string();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| !is_tracking(pair.split_once('=').map_or(*pair, |(name, _)| name)))
+        .collect();
+    let mut out = base.to_string();
+    if !kept.is_empty() {
+        out.push('?');
+        out.push_str(&kept.join("&"));
+    }
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
 pub fn render_website_row(block: &Block) -> String {
-    let url = block.url.clone().unwrap_or_default();
+    let url = strip_tracking(&block.url.clone().unwrap_or_default());
     let domain = crate::rules::domain_of(&url).unwrap_or_default();
     format!(
         "| {} | {} | {} | {} | {} | {} |\n",
@@ -216,7 +253,12 @@ pub fn render_website_row(block: &Block) -> String {
 /// the caller decides which lines are worth writing (usually the novel
 /// ones). A block with no novel lines still renders, because the heading
 /// is the day's timeline even when the content was all seen before.
-pub fn render_block(block: &Block, lines: &[String], shape: Shape) -> String {
+pub fn render_block(
+    block: &Block,
+    lines: &[String],
+    shape: Shape,
+    replay: Option<NaiveDate>,
+) -> String {
     let mut out = String::new();
     out.push_str("\n## ");
     out.push_str(&block.start.format("%H:%M").to_string());
@@ -229,6 +271,11 @@ pub fn render_block(block: &Block, lines: &[String], shape: Shape) -> String {
             out.push_str(" \u{00b7} ");
             out.push_str(title);
         }
+    }
+    // Last on the line, so a title carrying middle dots of its own still
+    // parses and the marker is found by trimming the end.
+    if let Some(date) = replay {
+        out.push_str(&format!(" [replay: {}]", date.format("%Y-%m-%d")));
     }
     out.push_str("\n\n");
     // The reference outranks the scraped text: it points at the real
@@ -249,8 +296,9 @@ pub fn render_block(block: &Block, lines: &[String], shape: Shape) -> String {
         }
     }
     // A headings-only block keeps its place in the timeline and its
-    // reference, and gives up its text.
-    if block.headings_only {
+    // reference, and gives up its text. So does a replayed one: its text
+    // is an earlier day's, already recorded on that day.
+    if block.headings_only || replay.is_some() {
         return out;
     }
     let mut written = 0usize;
@@ -276,6 +324,7 @@ fn render_routed(block: &Block, kind: Kind) -> String {
             max_block_chars: 0,
             write_references: false,
         },
+        None,
     );
     if let Some(name) = kind.routed_name() {
         out.push_str("routed: ");
@@ -304,6 +353,9 @@ pub fn append_block(
     rules: &Rules,
 ) -> std::io::Result<()> {
     let date = block.start.date_naive();
+    // A block that is a record of an earlier day: its lines are that day's
+    // and must not be counted as today's work or spend today's dedup set.
+    let replay = crate::replay::detect(folder, block);
     let kind = route::kind(
         rules,
         &block.app,
@@ -314,7 +366,7 @@ pub fn append_block(
 
     match kind {
         Kind::App => {
-            let novel = if block.headings_only {
+            let novel = if block.headings_only || replay.is_some() {
                 Vec::new()
             } else {
                 dedup.novel_lines(folder, block)
@@ -324,7 +376,7 @@ pub fn append_block(
                 &apps,
                 date,
                 DayFile::Apps,
-                &render_block(block, &novel, shape),
+                &render_block(block, &novel, shape, replay),
             )?;
         }
         Kind::Website => {
@@ -342,7 +394,7 @@ pub fn append_block(
                 lines: crate::prune::for_kind(kind, block.lines.clone()),
                 ..block.clone()
             };
-            let novel = if cleaned.headings_only {
+            let novel = if cleaned.headings_only || replay.is_some() {
                 Vec::new()
             } else {
                 dedup.novel_lines(folder, &cleaned)
@@ -353,7 +405,7 @@ pub fn append_block(
                 &DayFile::Messages.path(folder, date),
                 date,
                 DayFile::Messages,
-                &render_block(&cleaned, &novel, shape),
+                &render_block(&cleaned, &novel, shape, replay),
             )?;
         }
     }
@@ -690,8 +742,109 @@ mod tests {
     }
 
     #[test]
+    fn a_replayed_block_is_marked_in_the_heading_and_keeps_no_body() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(crate::summarise::summaries_dir(dir.path())).unwrap();
+        fs::write(
+            crate::summarise::summary_path(
+                dir.path(),
+                NaiveDate::from_ymd_opt(2026, 8, 24).unwrap(),
+            ),
+            "# A day\n\nShipped the writer.\nFixed the segmenter.\nRead the Tauri docs.\n",
+        )
+        .unwrap();
+        let lines = [
+            "Shipped the writer.",
+            "Fixed the segmenter.",
+            "Read the Tauri docs.",
+        ];
+        let replayed = block("Zed", "2026-08-24.md", None, None, 14, 41, &lines);
+        let mut dedup = DayDedup::new();
+        append_block(
+            dir.path(),
+            &replayed,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let apps = read(dir.path(), DayFile::Apps);
+        assert!(
+            apps.contains("\u{00b7} 2026-08-24.md [replay: 2026-08-24]\n"),
+            "the marker ends the heading line: {apps}"
+        );
+        assert!(!apps.contains("Shipped the writer."), "the body is dropped");
+
+        // The replayed lines never entered the dedup set, so writing them
+        // again as real work still records them.
+        let real = block(
+            "Zed",
+            "notes.md",
+            None,
+            None,
+            45,
+            50,
+            &[
+                "Shipped the writer.",
+                "Fixed the segmenter.",
+                "Read the Tauri docs.",
+                "fn append_block",
+                "fn render_block",
+                "fn strip_tracking",
+                "fn render_routed",
+            ],
+        );
+        append_block(
+            dir.path(),
+            &real,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Apps).contains("Shipped the writer."));
+    }
+
+    #[test]
+    fn strip_tracking_removes_campaign_parameters_and_keeps_the_rest() {
+        assert_eq!(
+            strip_tracking("https://v2.tauri.app/learn/?utm_source=x&page=2&fbclid=abc"),
+            "https://v2.tauri.app/learn/?page=2"
+        );
+    }
+
+    #[test]
+    fn strip_tracking_drops_the_question_mark_when_nothing_is_left() {
+        assert_eq!(
+            strip_tracking("https://example.com/a?utm_medium=email&gclid=1&ref=news"),
+            "https://example.com/a"
+        );
+    }
+
+    #[test]
+    fn strip_tracking_keeps_the_fragment_and_leaves_a_clean_url_alone() {
+        assert_eq!(
+            strip_tracking("https://example.com/a?igshid=9&id=7#section-2"),
+            "https://example.com/a?id=7#section-2"
+        );
+        assert_eq!(
+            strip_tracking("https://example.com/a#top"),
+            "https://example.com/a#top"
+        );
+    }
+
+    #[test]
+    fn a_visit_row_is_written_without_tracking_parameters() {
+        let mut visit = arc();
+        visit.url = Some("https://v2.tauri.app/learn/system-tray/?utm_source=news".to_string());
+        let row = render_website_row(&visit);
+        assert!(row.contains("| https://v2.tauri.app/learn/system-tray/ |"));
+        assert!(!row.contains("utm_source"));
+    }
+
+    #[test]
     fn renders_a_heading_with_time_range_app_and_title() {
-        let out = render_block(&zed(), &zed().lines, Shape::default());
+        let out = render_block(&zed(), &zed().lines, Shape::default(), None);
         assert!(out.contains("## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs"));
     }
 
@@ -700,7 +853,7 @@ mod tests {
         let mut block = block_at(9, 14, 41);
         block.document = Some("/Users/x/report.pdf".to_string());
         block.url = Some("https://v2.tauri.app/".to_string());
-        let out = render_block(&block, &block.lines.clone(), Shape::default());
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
         assert!(out.contains("file: /Users/x/report.pdf\n"));
         assert!(out.contains("url: https://v2.tauri.app/\n"));
         assert!(
@@ -713,7 +866,7 @@ mod tests {
     fn renders_without_a_title_when_there_is_none() {
         let mut block = block_at(9, 14, 41);
         block.title = None;
-        let out = render_block(&block, &block.lines.clone(), Shape::default());
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
         assert!(out.contains("\u{00b7} Zed\n"));
     }
 
@@ -973,7 +1126,7 @@ mod tests {
         let mut block = block_at(9, 14, 41);
         block.headings_only = true;
         block.url = Some("https://news.ycombinator.com/".to_string());
-        let out = render_block(&block, &block.lines.clone(), Shape::default());
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
         assert!(out.contains("09:14"));
         assert!(out.contains("url: https://news.ycombinator.com/"));
         assert!(!out.contains("read the issue"));
@@ -1016,7 +1169,7 @@ mod tests {
             max_block_chars: 20,
             write_references: true,
         };
-        let out = render_block(&block, &block.lines.clone(), shape);
+        let out = render_block(&block, &block.lines.clone(), shape, None);
         assert!(out.ends_with("[truncated]\n"));
         assert!(out.contains("line 0"));
         assert!(!out.contains("line 9"));
@@ -1031,7 +1184,7 @@ mod tests {
             max_block_chars: 0,
             write_references: false,
         };
-        let out = render_block(&block, &block.lines.clone(), shape);
+        let out = render_block(&block, &block.lines.clone(), shape, None);
         assert!(!out.contains("file:"));
         assert!(!out.contains("url:"));
         assert!(out.contains("read the issue"));

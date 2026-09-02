@@ -222,6 +222,14 @@ export function RawPane({ date, mode, file }: RawPaneProps) {
                 {block.start}–{block.end}
               </span>
               <span className="raw-block-app">{block.app}</span>
+              {block.replay ? (
+                <span
+                  className="raw-replay"
+                  title="This block was a record of an earlier day being reviewed, so its text was not recorded again."
+                >
+                  replay: {block.replay}
+                </span>
+              ) : null}
               {block.title ? (
                 <span className="raw-block-title">{block.title}</span>
               ) : null}

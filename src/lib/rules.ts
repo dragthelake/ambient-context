@@ -32,6 +32,9 @@ export type RawBlock = {
   file: string | null;
   url: string | null;
   routed?: string | null;
+  /// The day this block is a record of, set when the writer judged it a
+  /// replay of an earlier day rather than work done now.
+  replay?: string | null;
   lines: string[];
 };
 

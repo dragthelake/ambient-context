@@ -15,6 +15,9 @@ learn what was worked on, which tools appeared, and what went wrong.
 - Body lines are deduplicated across the day and are accessibility-tree
   scrape: visual order, interface residue, partial viewport. A block with
   no body is a return to something already recorded, never "nothing".
+- A heading marked `[replay: DATE]` is a record of an earlier day being
+  reviewed. Anything about it is evidence that the user looked at it today,
+  never that the work happened today.
 - Time is the strongest signal. Repeated returns to the same file matter
   more than any single visit.
 
