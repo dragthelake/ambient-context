@@ -88,13 +88,14 @@ For anything else that speaks stdio MCP:
 
 ## The tools
 
-Eighteen tools, in the order of the spec's table. Every date is `YYYY-MM-DD`.
+Twenty tools, in the order of the spec's table. Every date is `YYYY-MM-DD`.
 Every write names the calling client in the ledger.
 
 ### `capture_status`
 
 Reports whether capture is running, how many blocks were recorded today,
-which app is focused, and the eight most recent summary jobs. Needs the app
+which app is focused, and the eight most recent jobs with their status,
+kind (`summarise` or `ingest`) and step text while running. Needs the app
 running. Input:
 
 ```json
@@ -104,7 +105,9 @@ running. Input:
 Result:
 
 ```json
-{ "running": true, "blocks_today": 12, "focused_app": "Xcode", "jobs": [] }
+{ "running": true, "blocks_today": 12, "focused_app": "Xcode",
+  "jobs": [ { "id": "job-7", "date": "2026-08-30", "kind": { "kind": "ingest", "force": false },
+    "status": "running", "step": "ingesting apps (2 of 3)" } ] }
 ```
 
 Errors: `not_running` when the app is closed.
@@ -173,6 +176,33 @@ Returns one day's generated summary. Works with the app closed. Input:
 `date` only. Result: the summary markdown as one content block. Errors:
 "There is no summary for {date} yet. Call summarise_day to generate one."
 
+### `read_kb`
+
+Returns the structured notes the ingest step built for one day: people,
+commitments, threads, products, issues and reading, every line cited with a
+time range. Works with the app closed. Input:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "date": { "type": "string" },
+    "file": {
+      "type": "string",
+      "enum": ["people.md", "commitments.md", "threads.md", "products.md",
+        "issues.md", "reading.md", "manifest.md"]
+    }
+  },
+  "required": ["date"],
+  "additionalProperties": false
+}
+```
+
+Leave `file` out to receive all six files concatenated, with `(not ingested)`
+for any file not yet written. Result: the requested KB text as one content
+block. Errors: "There is no knowledge base for {date} yet. Call ingest_day
+to build one."
+
 ### `search_record`
 
 Case-insensitive substring search across every day file and every summary.
@@ -204,8 +234,9 @@ Errors: "There are no ledger entries for {date}."
 ### `summarise_day`
 
 Queues a summary for one day using the connected agent, replacing any
-existing summary. Returns a job id immediately; poll `capture_status` until
-the job reports done or failed. Needs the app running with an agent. Input:
+existing summary. Runs the ingest calls first for anything out of date, then
+the summary. Returns a job id immediately; poll `capture_status` until the
+job reports done or failed. Needs the app running with an agent. Input:
 `date` only. Result:
 
 ```json
@@ -215,6 +246,28 @@ the job reports done or failed. Needs the app running with an agent. Input:
 
 Errors: `no_agent`, `not_found` (no capture for that date), `invalid`
 (bad date or no folder), `not_running`.
+
+### `ingest_day`
+
+Queues the three ingest calls for one day (messages, apps, websites) without
+summarising. Calls whose inputs have not changed are skipped unless `force`
+is true. Returns a job id; poll `capture_status`. Needs the app running with
+an agent. Input:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "date": { "type": "string" },
+    "force": { "type": "boolean" }
+  },
+  "required": ["date"],
+  "additionalProperties": false
+}
+```
+
+Result: `{ "job_id": "job-7", "status": "queued", "note": "..." }`. Errors:
+same as `summarise_day`.
 
 ### `list_rules`
 

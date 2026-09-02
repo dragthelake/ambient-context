@@ -111,7 +111,7 @@ export function McpSettings() {
       <legend>MCP server</legend>
       <p>
         Ambient Context is also an MCP server: the same program with an{" "}
-        <code>mcp</code> subcommand. It exposes eighteen tools covering
+        <code>mcp</code> subcommand. It exposes twenty tools covering
         everything in this app. Reading days, summaries and settings works
         whether or not Ambient Context is open; changing anything needs it
         open, and every change is written to the day's ledger with your

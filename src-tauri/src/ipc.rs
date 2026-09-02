@@ -21,6 +21,12 @@ pub enum Request {
         date: String,
         client: String,
     },
+    IngestDay {
+        date: String,
+        #[serde(default)]
+        force: bool,
+        client: String,
+    },
     JobStatus {
         id: String,
     },

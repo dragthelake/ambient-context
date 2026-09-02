@@ -56,6 +56,11 @@ fn build(
             date: date()?,
             client,
         },
+        "ingest_day" => Request::IngestDay {
+            date: date()?,
+            force: arguments["force"].as_bool().unwrap_or(false),
+            client,
+        },
         "open_day" => Request::OpenDay { date: date()? },
         "add_rule" => Request::AddRule {
             rule: rule()?,
@@ -117,6 +122,15 @@ mod tests {
                 Request::SummariseDay { date, client } => Response::Ok(serde_json::json!({
                     "job_id": format!("job-{date}-{client}"), "status": "queued"
                 })),
+                Request::IngestDay {
+                    date,
+                    force,
+                    client,
+                } => Response::Ok(serde_json::json!({
+                    "job_id": format!("ingest-{date}-{client}"),
+                    "status": "queued",
+                    "force": force,
+                })),
                 Request::RemoveRule { id, .. } => {
                     Response::err("locked", format!("{id} is a built-in protection."))
                 }
@@ -169,6 +183,22 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("built-in protection"));
+    }
+
+    #[test]
+    fn ingest_day_maps_date_force_and_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut server = server_with_app(dir.path());
+        let out = call(
+            &mut server,
+            "ingest_day",
+            &serde_json::json!({ "date": "2026-08-30", "force": true }),
+        );
+        assert_eq!(
+            out["structuredContent"]["job_id"],
+            "ingest-2026-08-30-Claude Code"
+        );
+        assert_eq!(out["structuredContent"]["force"], true);
     }
 
     #[test]

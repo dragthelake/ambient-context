@@ -11,6 +11,11 @@ pub fn handle(app: &AppHandle, request: Request) -> Response {
         Request::StartCapture { client } => start_capture(app, &client),
         Request::StopCapture { client } => stop_capture(app, &client),
         Request::SummariseDay { date, client } => summarise_day(app, &date, &client),
+        Request::IngestDay {
+            date,
+            force,
+            client,
+        } => ingest_day(app, &date, force, &client),
         Request::JobStatus { id } => job_status(app, &id),
         Request::OpenDay { date } => open_day(app, &date),
         Request::SetConfig { patch, client } => writes::set_config(app, patch, &client),
@@ -95,6 +100,41 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
     let queue = app.state::<jobs::JobQueue>();
     let id = queue.enqueue_summarise_with(
         date,
+        ledger::Trigger::Mcp {
+            client: client.to_string(),
+        },
+    );
+    Response::Ok(serde_json::json!({
+        "job_id": id.to_string(),
+        "status": "queued",
+        "note": "Poll capture_status and look for this job id under jobs.",
+    }))
+}
+
+fn ingest_day(app: &AppHandle, date: &str, force: bool, client: &str) -> Response {
+    let Ok(date) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
+        return Response::err(
+            "invalid",
+            format!("{date} is not a date in YYYY-MM-DD form."),
+        );
+    };
+    let config = settings::load(app);
+    if config.agent.is_none() {
+        return Response::err(
+            "no_agent",
+            "No agent is connected. Connect one on the Agent tab, then try again.",
+        );
+    }
+    let Some(folder) = config.folder.clone() else {
+        return Response::err("invalid", "No capture folder is set.");
+    };
+    if crate::days::read_day(&folder, date, crate::writer::DayFile::Apps).is_none() {
+        return Response::err("not_found", format!("There is no capture for {date}."));
+    }
+    let queue = app.state::<jobs::JobQueue>();
+    let id = queue.enqueue_ingest_with(
+        date,
+        force,
         ledger::Trigger::Mcp {
             client: client.to_string(),
         },

@@ -60,7 +60,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "capture_status",
             title: "Capture status",
-            description: "Reports whether capture is running, how many blocks were recorded today, which app is focused, and the eight most recent summary jobs with their status. Poll this after summarise_day to see whether a job finished.",
+            description: "Reports whether capture is running, how many blocks were recorded today, which app is focused, and the eight most recent jobs with their status, kind and step. Poll this after summarise_day or ingest_day to see whether a job finished.",
             input_schema: none(),
             read_only: true, destructive: false, idempotent: true,
         },
@@ -112,6 +112,23 @@ pub fn defs() -> Vec<Def> {
             read_only: true, destructive: false, idempotent: true,
         },
         Def {
+            name: "read_kb",
+            title: "Read a day's knowledge base",
+            description: "Returns the structured notes the ingest step built for one day: people, commitments, threads, products, issues and reading, every line cited with a time range. Supply file to read one of them or the manifest; leave it out for all six. Works with the app closed.",
+            input_schema: args(
+                json!({
+                    "date": date_property(),
+                    "file": {
+                        "type": "string",
+                        "enum": ["people.md", "commitments.md", "threads.md", "products.md", "issues.md", "reading.md", "manifest.md"],
+                        "description": "One file, or leave out for all six."
+                    }
+                }),
+                &["date"],
+            ),
+            read_only: true, destructive: false, idempotent: true,
+        },
+        Def {
             name: "search_record",
             title: "Search the record",
             description: "Case-insensitive substring search across every day file and every summary. Returns the date, the layer (apps, websites, messages or summary), the line number, the matching line and two lines of context either side.",
@@ -134,8 +151,21 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "summarise_day",
             title: "Summarise a day",
-            description: "Queues a summary for one day using the agent the user connected, and replaces the existing summary if there is one. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an agent connected.",
+            description: "Queues a summary for one day using the agent the user connected, and replaces the existing summary if there is one. Runs the ingest calls first for anything out of date, then the summary. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an agent connected.",
             input_schema: args(json!({ "date": date_property() }), &["date"]),
+            read_only: false, destructive: true, idempotent: false,
+        },
+        Def {
+            name: "ingest_day",
+            title: "Build a day's knowledge base",
+            description: "Queues the three ingest calls for one day (messages, apps, websites) without summarising. Calls whose inputs have not changed are skipped unless force is true. Returns a job id; poll capture_status. Needs Ambient Context running with an agent connected.",
+            input_schema: args(
+                json!({
+                    "date": date_property(),
+                    "force": { "type": "boolean", "description": "Re-run every call even when nothing changed. Defaults to false." }
+                }),
+                &["date"],
+            ),
             read_only: false, destructive: true, idempotent: false,
         },
         Def {
@@ -339,6 +369,17 @@ fn read_call(
             };
             run().unwrap_or_else(|error| error)
         }
+        "read_kb" => {
+            let run = || -> Result<serde_json::Value, serde_json::Value> {
+                let dir = folder(server)?;
+                let date = required_date(arguments)?;
+                let file = arguments["file"].as_str();
+                files::read_kb(&dir, date, file)
+                    .map(ok_text)
+                    .map_err(|error| tool_error(error.to_string()))
+            };
+            run().unwrap_or_else(|error| error)
+        }
         "read_ledger" => {
             let run = || -> Result<serde_json::Value, serde_json::Value> {
                 let dir = folder(server)?;
@@ -380,15 +421,17 @@ mod tests {
     use super::*;
     use chrono::NaiveDate;
 
-    const EXPECTED: [&str; 18] = [
+    const EXPECTED: [&str; 20] = [
         "add_rule",
         "capture_status",
         "get_config",
         "get_prompt",
+        "ingest_day",
         "list_days",
         "list_rules",
         "open_day",
         "read_day",
+        "read_kb",
         "read_ledger",
         "read_summary",
         "remove_rule",
@@ -402,7 +445,7 @@ mod tests {
     ];
 
     #[test]
-    fn there_are_exactly_eighteen_tools_and_they_are_the_spec_table() {
+    fn there_are_exactly_twenty_tools_and_they_are_the_spec_table() {
         let mut names: Vec<&str> = defs().iter().map(|def| def.name).collect();
         names.sort_unstable();
         assert_eq!(names, EXPECTED);
@@ -438,6 +481,7 @@ mod tests {
             "capture_status",
             "list_days",
             "read_day",
+            "read_kb",
             "read_summary",
             "search_record",
             "read_ledger",
@@ -460,6 +504,7 @@ mod tests {
             "update_rule",
             "remove_rule",
             "summarise_day",
+            "ingest_day",
         ] {
             let def = defs().into_iter().find(|def| def.name == name).unwrap();
             assert!(def.destructive, "{name} overwrites and should say so");
@@ -542,6 +587,41 @@ mod tests {
         )
         .unwrap();
         (config, folder)
+    }
+
+    fn server_with_folder(folder: &std::path::Path) -> crate::mcp::Server {
+        std::fs::write(
+            folder.join("settings.json"),
+            format!(r#"{{"folder":"{}"}}"#, folder.display()),
+        )
+        .unwrap();
+        server_on(folder)
+    }
+
+    #[test]
+    fn read_kb_returns_one_file_or_all_six() {
+        let dir = tempfile::tempdir().unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 8, 30).unwrap();
+        let kb = crate::ingest::kb_dir(dir.path(), date);
+        std::fs::create_dir_all(&kb).unwrap();
+        std::fs::write(kb.join("people.md"), "---\n---\n\n## Dan\nx 09:00-09:10\n").unwrap();
+        let mut server = server_with_folder(dir.path());
+        let out = call(
+            &mut server,
+            "read_kb",
+            &json!({ "date": "2026-08-30", "file": "people.md" }),
+        );
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("## Dan"));
+        let out = call(&mut server, "read_kb", &json!({ "date": "2026-08-30" }));
+        assert!(out["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("# threads.md\n\n(not ingested)"));
+        let out = call(&mut server, "read_kb", &json!({ "date": "2026-08-31" }));
+        assert!(out["isError"].as_bool().unwrap_or(false));
     }
 
     #[test]

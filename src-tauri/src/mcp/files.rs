@@ -7,6 +7,7 @@ pub enum FileError {
     NoCapture(NaiveDate),
     NoSummary(NaiveDate),
     NoLedger(NaiveDate),
+    NoKb(NaiveDate),
     BadTime(String),
     NoFolder,
 }
@@ -20,6 +21,10 @@ impl std::fmt::Display for FileError {
                 "There is no summary for {date} yet. Call summarise_day to generate one."
             ),
             FileError::NoLedger(date) => write!(f, "There are no ledger entries for {date}."),
+            FileError::NoKb(date) => write!(
+                f,
+                "There is no knowledge base for {date} yet. Call ingest_day to build one."
+            ),
             FileError::BadTime(value) => {
                 write!(
                     f,
@@ -117,6 +122,10 @@ fn heading_time(line: &str) -> Option<&str> {
 
 pub fn read_summary(folder: &Path, date: NaiveDate) -> Result<String, FileError> {
     crate::days::read_summary(folder, date).ok_or(FileError::NoSummary(date))
+}
+
+pub fn read_kb(folder: &Path, date: NaiveDate, file: Option<&str>) -> Result<String, FileError> {
+    crate::ingest::read_kb(folder, date, file).ok_or(FileError::NoKb(date))
 }
 
 pub fn read_ledger(folder: &Path, date: NaiveDate) -> Result<String, FileError> {
