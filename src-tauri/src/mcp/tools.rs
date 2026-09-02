@@ -81,17 +81,22 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "list_days",
             title: "List recorded days",
-            description: "Lists every day in the capture folder with its date, whether a summary exists, the size of the day file in bytes, and the summary's title where there is one.",
+            description: "Lists every day in the capture folder with its date, whether capture and summary exist, whether a KB folder exists, the combined size of the three day files in bytes, and the summary's title where there is one.",
             input_schema: none(),
             read_only: true, destructive: false, idempotent: true,
         },
         Def {
             name: "read_day",
             title: "Read a day's record",
-            description: "Returns the raw record for one day exactly as it is on disk: time-stamped blocks with the application, window title and file or url reference. Supply from and to to keep only the blocks that start inside that time range.",
+            description: "Returns one of the day's raw files exactly as it is on disk. Supply from and to to keep only the blocks that start inside that time range on apps and messages; websites is returned whole. apps is the timeline with native app bodies, websites is the visit table, messages is message bodies.",
             input_schema: args(
                 json!({
                     "date": date_property(),
+                    "file": {
+                        "type": "string",
+                        "enum": ["apps", "websites", "messages"],
+                        "description": "Which of the day's files to return. apps is the timeline with native app bodies, websites is the visit table, messages is message bodies. Defaults to apps."
+                    },
                     "from": { "type": "string", "description": "Optional start time, 24-hour HH:MM. Blocks starting before it are dropped." },
                     "to": { "type": "string", "description": "Optional end time, 24-hour HH:MM, exclusive. Blocks starting at or after it are dropped." }
                 }),
@@ -109,7 +114,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "search_record",
             title: "Search the record",
-            description: "Case-insensitive substring search across every day file and every summary. Returns the date, the layer, the line number, the matching line and two lines of context either side.",
+            description: "Case-insensitive substring search across every day file and every summary. Returns the date, the layer (apps, websites, messages or summary), the line number, the matching line and two lines of context either side.",
             input_schema: args(
                 json!({
                     "query": { "type": "string", "description": "The text to look for. Matching is plain substring, not regular expressions." },
@@ -311,9 +316,16 @@ fn read_call(
             let run = || -> Result<serde_json::Value, serde_json::Value> {
                 let dir = folder(server)?;
                 let date = required_date(arguments)?;
+                let file = arguments["file"]
+                    .as_str()
+                    .map(crate::writer::DayFile::from_name)
+                    .unwrap_or(Some(crate::writer::DayFile::Apps))
+                    .ok_or_else(|| {
+                        tool_error("file must be one of apps, websites or messages")
+                    })?;
                 let from = arguments["from"].as_str();
                 let to = arguments["to"].as_str();
-                files::read_day(&dir, date, crate::writer::DayFile::Apps, from, to)
+                files::read_day(&dir, date, file, from, to)
                     .map(ok_text)
                     .map_err(|error| tool_error(error.to_string()))
             };
@@ -535,6 +547,47 @@ mod tests {
     }
 
     #[test]
+    fn read_day_returns_the_named_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let date = NaiveDate::from_ymd_opt(2026, 8, 30).unwrap();
+        for (file, text) in [
+            (crate::writer::DayFile::Apps, "apps text"),
+            (crate::writer::DayFile::Websites, "websites text"),
+        ] {
+            let path = file.path(dir.path(), date);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+        std::fs::write(
+            dir.path().join("settings.json"),
+            format!(r#"{{"folder":"{}"}}"#, dir.path().display()),
+        )
+        .unwrap();
+        let mut server = server_on(dir.path());
+        let out = call(
+            &mut server,
+            "read_day",
+            &json!({ "date": "2026-08-30", "file": "websites" }),
+        );
+        assert_eq!(out["content"][0]["text"], "websites text");
+        let out = call(
+            &mut server,
+            "read_day",
+            &json!({ "date": "2026-08-30", "file": "photos" }),
+        );
+        assert!(out["isError"].as_bool().unwrap_or(false));
+        let out = call(
+            &mut server,
+            "read_day",
+            &json!({ "date": "2026-08-30", "file": "messages" }),
+        );
+        assert!(
+            out["isError"].as_bool().unwrap_or(false),
+            "no messages.md that day"
+        );
+    }
+
+    #[test]
     fn read_day_returns_the_text_as_one_content_block() {
         let (config, _folder) = set_up();
         let mut server = server_on(config.path());
@@ -589,7 +642,7 @@ mod tests {
             &json!({ "query": "postgres" }),
         );
         assert_eq!(out["isError"], false);
-        assert_eq!(out["structuredContent"]["hits"][0]["layer"], "day");
+        assert_eq!(out["structuredContent"]["hits"][0]["layer"], "apps");
     }
 
     #[test]

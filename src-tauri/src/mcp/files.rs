@@ -78,7 +78,8 @@ pub fn read_day(
     to: Option<&str>,
 ) -> Result<String, FileError> {
     let text = crate::days::read_day(folder, date, file).ok_or(FileError::NoCapture(date))?;
-    if from.is_none() && to.is_none() {
+    // Time filtering only makes sense on block files.
+    if from.is_none() && to.is_none() || file == crate::writer::DayFile::Websites {
         return Ok(text);
     }
     let from = from.map(valid_time).transpose()?.unwrap_or("00:00");
@@ -140,13 +141,14 @@ pub fn search_record(folder: &Path, query: &str, limit: usize) -> Vec<Hit> {
     let mut hits = Vec::new();
     for day in crate::days::list_days(folder) {
         let date = day.date.to_string();
-        let sources = [
-            ("day", crate::writer::DayFile::Apps.path(folder, day.date)),
-            (
-                "summary",
-                folder.join("Summaries").join(format!("{date}.md")),
-            ),
-        ];
+        let mut sources: Vec<(&'static str, std::path::PathBuf)> = crate::writer::DayFile::all()
+            .iter()
+            .map(|file| (file.kind_name(), file.path(folder, day.date)))
+            .collect();
+        sources.push((
+            "summary",
+            folder.join("Summaries").join(format!("{date}.md")),
+        ));
         for (layer, path) in sources {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
@@ -395,7 +397,7 @@ mod tests {
         let dir = folder_with_a_day();
         let hits = search_record(dir.path(), "POSTGRES", 20);
         assert_eq!(hits.len(), 2, "{hits:?}");
-        assert!(hits.iter().any(|hit| hit.layer == "day"));
+        assert!(hits.iter().any(|hit| hit.layer == "apps"));
         assert!(hits.iter().any(|hit| hit.layer == "summary"));
     }
 

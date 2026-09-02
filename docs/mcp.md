@@ -124,7 +124,8 @@ recorded is removed. Needs the app running. Input and result as for
 
 ### `list_days`
 
-Lists every day in the capture folder with date, summary presence, byte size
+Lists every day in the capture folder with date, whether capture and summary
+exist, whether a KB folder exists, byte size (the sum of the three day files)
 and summary title. Works with the app closed. Input: the empty object.
 Result:
 
@@ -133,7 +134,7 @@ Result:
   "folder": "/Users/x/Ambient Context",
   "days": [
     { "date": "2026-08-30", "has_capture": true, "has_summary": false,
-      "bytes": 48211, "title": null }
+      "has_kb": false, "bytes": 48211, "title": null }
   ]
 }
 ```
@@ -142,15 +143,18 @@ Errors: tool error "No capture folder is set" when settings has no folder.
 
 ### `read_day`
 
-Returns one day's raw record exactly as it is on disk. Optional `from` and
-`to` (24-hour `HH:MM`, `to` exclusive) keep only the blocks that start in the
-range. Works with the app closed. Input:
+Returns one of the day's raw files exactly as it is on disk. Optional `file`
+is `apps` (default), `websites` or `messages`. Optional `from` and `to`
+(24-hour `HH:MM`, `to` exclusive) keep only the blocks that start in the
+range on `apps` and `messages`; `websites` is returned whole. Works with the
+app closed. Input:
 
 ```json
 {
   "type": "object",
   "properties": {
     "date": { "type": "string", "description": "A date in YYYY-MM-DD form, for example 2026-08-30." },
+    "file": { "type": "string", "enum": ["apps", "websites", "messages"] },
     "from": { "type": "string" },
     "to": { "type": "string" }
   },
@@ -159,8 +163,9 @@ range. Works with the app closed. Input:
 }
 ```
 
-Result: the day file text as one content block. Errors: `NoCapture` ("There
-is no capture for 2026-08-29."), `BadTime` for a malformed time.
+Result: the requested day file text as one content block. Errors: `NoCapture`
+("There is no capture for 2026-08-29."), `BadTime` for a malformed time,
+tool error when `file` is not one of apps, websites or messages.
 
 ### `read_summary`
 
@@ -186,7 +191,8 @@ Works with the app closed. Input:
 ```
 
 Result: `{ "query": "...", "hits": [ { "date", "layer", "line", "text",
-"context" } ], "truncated": false }`. `layer` is `"day"` or `"summary"`.
+"context" } ], "truncated": false }`. `layer` is `"apps"`, `"websites"`,
+`"messages"` or `"summary"`.
 
 ### `read_ledger`
 
