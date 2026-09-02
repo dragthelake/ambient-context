@@ -474,6 +474,12 @@ pub fn needs_ingest(folder: &Path, date: NaiveDate, call: Call, hashes: &Hashes)
     let Some(record) = manifest.calls.get(call.action()) else {
         return true;
     };
+    // A manifest that outlives its files (the user deleted the .md files
+    // but not manifest.md) must not skip the call.
+    let dir = kb_dir(folder, date);
+    if call.files().iter().any(|name| !dir.join(name).is_file()) {
+        return true;
+    }
     match record.disposition.as_str() {
         "accepted" => {
             record.input_sha256 != hashes.input
@@ -664,6 +670,18 @@ mod tests {
             needs_ingest(dir.path(), date(), Call::Apps, &hashes),
             "no manifest"
         );
+        let fm = Frontmatter {
+            date: date(),
+            source: "apps.md".into(),
+            generated_by: "stub".into(),
+            prompt_sha256: "p1".into(),
+        };
+        let files: Vec<(String, String)> = Call::Apps
+            .files()
+            .iter()
+            .map(|n| ((*n).to_string(), "Nothing evident.".to_string()))
+            .collect();
+        write_call(dir.path(), date(), Call::Apps, &files, &fm).unwrap();
         record_call(
             dir.path(),
             date(),
@@ -700,6 +718,48 @@ mod tests {
         assert_eq!(manifest.calls["ingest_apps"].engine, "stub");
         let text = std::fs::read_to_string(kb_dir(dir.path(), date()).join("manifest.md")).unwrap();
         assert!(text.contains("ingest_apps.disposition: accepted\n"));
+    }
+
+    #[test]
+    fn needs_ingest_when_a_recorded_file_is_missing_from_disk() {
+        let dir = tempdir().unwrap();
+        let hashes = Hashes {
+            input: "i1".into(),
+            timeline: "t1".into(),
+            prompt: "p1".into(),
+        };
+        let fm = Frontmatter {
+            date: date(),
+            source: "apps.md".into(),
+            generated_by: "stub".into(),
+            prompt_sha256: "p1".into(),
+        };
+        let files: Vec<(String, String)> = Call::Apps
+            .files()
+            .iter()
+            .map(|n| ((*n).to_string(), "Nothing evident.".to_string()))
+            .collect();
+        write_call(dir.path(), date(), Call::Apps, &files, &fm).unwrap();
+        record_call(
+            dir.path(),
+            date(),
+            Call::Apps,
+            CallRecord {
+                disposition: "accepted".into(),
+                input_sha256: "i1".into(),
+                timeline_sha256: "t1".into(),
+                prompt_sha256: "p1".into(),
+                engine: "stub".into(),
+                at: String::new(),
+            },
+        )
+        .unwrap();
+        assert!(!needs_ingest(dir.path(), date(), Call::Apps, &hashes));
+        std::fs::remove_file(kb_dir(dir.path(), date()).join("issues.md")).unwrap();
+        assert!(
+            needs_ingest(dir.path(), date(), Call::Apps, &hashes),
+            "manifest outlived its files"
+        );
     }
 
     #[test]

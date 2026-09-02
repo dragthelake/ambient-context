@@ -368,6 +368,7 @@ const PREVIOUS_BUNDLED_AGENTS: &[&str] = &[
     "3102846b796ab65642806000543c289e49131d53001b53cada23b0f88467f0af",
     "5302950a122a3433f6a4dbbb0a285f83397d516bf9b7a1ba17619384637dd2ae",
     "3e2ba105d4490c78b7a998c1b048215e385806d41e40733211f694e313aa6dba",
+    "e832325a4b8ae2884822de3e48a86a2bf8ae636f33900025c24bb10e1a116db8",
 ];
 
 fn is_bundled_agents_file(text: &str, current: &str) -> bool {

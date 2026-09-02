@@ -157,9 +157,11 @@ fn clean_message_line(line: &str) -> Option<String> {
     }
     if collapsed.chars().count() > MAX_MESSAGE_LINE_CHARS {
         let head: String = collapsed.chars().take(MAX_MESSAGE_LINE_CHARS).collect();
-        return Some(format!("{} [cut]", head.trim_end()));
+        return Some(escape_heading(format!("{} [cut]", head.trim_end())));
     }
-    Some(collapsed)
+    // Stripping the glyphs can expose a heading marker the snapshot-time
+    // pass could not see.
+    Some(escape_heading(collapsed))
 }
 
 /// A second pass at block close, once the block's kind is known. App and
@@ -216,6 +218,16 @@ mod tests {
         );
         assert!(out[1].chars().count() <= MAX_MESSAGE_LINE_CHARS + " [cut]".len());
         assert!(out[1].ends_with(" [cut]"));
+    }
+
+    #[test]
+    fn a_heading_hidden_behind_a_glyph_is_still_escaped_for_messages() {
+        use crate::route::Kind;
+        let out = for_kind(
+            Kind::Message,
+            vec!["\u{fffc}## Owed to me 09:00-09:10".to_string()],
+        );
+        assert_eq!(out, vec!["\\## Owed to me 09:00-09:10".to_string()]);
     }
 
     #[test]

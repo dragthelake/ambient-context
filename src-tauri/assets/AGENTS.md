@@ -35,11 +35,15 @@ file: /Users/x/project/src/lib.rs
 Each `##` block is one stretch of attention: a window the user stayed in.
 The heading carries the time range, the application, and the window title.
 A `file:` line is the path of the document backing that window; a `url:`
-line is the web page. Both are optional. A `routed:` line on a block in
-`apps.md` means the body was written to `messages.md` instead.
+line is the web page. Both are optional. A `routed: websites` or
+`routed: messages` line on a block in `apps.md` means the block's content
+went to that file instead: a visit row for a web page, or the body of a
+message window.
 
-`websites.md` is a pipe table of visits: domain, URL, title, dwell and visit
-counts, first and last seen. Bodies are not recorded there.
+`websites.md` is a pipe table with one row per visit, in time order:
+`start | end | app | domain | title | url`. Bodies of web pages are never
+recorded; the URL is the reference. Add up the rows for a URL to get its
+dwell and visit count.
 
 `messages.md` holds the bodies of routed message windows, with the same block
 headings as `apps.md`.

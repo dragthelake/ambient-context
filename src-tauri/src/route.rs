@@ -50,8 +50,14 @@ pub const BROWSERS: &[&str] = &[
     "Opera",
 ];
 
-fn contains_ci(haystack: &str, needle: &str) -> bool {
-    haystack.to_lowercase().contains(&needle.to_lowercase())
+/// Whether an application name carries `name` as a whole word. A substring
+/// test would make "Elmedia Player" a browser (Dia) and "Linearity Curve" a
+/// message surface (Linear), and a misrouted browser block loses its body.
+fn names_match(app: &str, name: &str) -> bool {
+    let wanted = name.to_lowercase();
+    app.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .any(|word| word == wanted)
 }
 
 /// The path of a URL, `/` when there is none.
@@ -103,7 +109,7 @@ fn is_http(url: &str) -> bool {
 }
 
 pub fn is_browser(app: &str) -> bool {
-    BROWSERS.iter().any(|b| contains_ci(app, b))
+    BROWSERS.iter().any(|b| names_match(app, b))
 }
 
 /// Precedence: user route rule, built-in message table, http(s) means
@@ -112,7 +118,7 @@ pub fn kind(rules: &Rules, app: &str, title: Option<&str>, url: Option<&str>) ->
     if rules::decide(rules, app, title, url) == rules::Decision::RouteMessages {
         return Kind::Message;
     }
-    if MESSAGE_APPS.iter().any(|m| contains_ci(app, m)) {
+    if MESSAGE_APPS.iter().any(|m| names_match(app, m)) {
         return Kind::Message;
     }
     if let Some(url) = url {
@@ -183,6 +189,27 @@ mod tests {
                 "{browser}"
             );
         }
+    }
+
+    #[test]
+    fn app_names_match_whole_words_not_substrings() {
+        assert_eq!(
+            kind(&no_rules(), "Elmedia Player", Some("clip.mp4"), None),
+            Kind::App
+        );
+        assert_eq!(kind(&no_rules(), "Linearity Curve", None, None), Kind::App);
+        assert_eq!(
+            kind(&no_rules(), "Google Chrome", Some("page"), None),
+            Kind::Website
+        );
+        assert_eq!(
+            kind(&no_rules(), "Microsoft Edge", Some("page"), None),
+            Kind::Website
+        );
+        assert_eq!(
+            kind(&no_rules(), "Brave Browser", Some("page"), None),
+            Kind::Website
+        );
     }
 
     #[test]

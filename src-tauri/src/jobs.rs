@@ -219,8 +219,17 @@ pub fn ingest_call(
         generated_by: p.ingest_agent.label.clone(),
         prompt_sha256: prompt_sha.clone(),
     };
-    ingest::write_call(p.folder, date, call, &split.files, &fm)
-        .map_err(|e| format!("the KB could not be written: {e}"))?;
+    if let Err(error) = ingest::write_call(p.folder, date, call, &split.files, &fm) {
+        // The agent's output is the expensive part; keep it in the ledger
+        // even though the KB write failed.
+        let message = format!("the KB could not be written: {error}");
+        entry.disposition = ledger::Disposition::Failed {
+            stderr: message.clone(),
+        };
+        record_in_ledger(p.folder, &entry);
+        let _ = ingest::record_call(p.folder, date, call, record("failed"));
+        return Err(message);
+    }
     ingest::record_call(p.folder, date, call, record("accepted")).map_err(|e| e.to_string())?;
     record_in_ledger(p.folder, &entry);
     Ok(())

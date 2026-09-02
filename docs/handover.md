@@ -35,7 +35,7 @@ cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings &
 cd .. && npx tsc --noEmit && npx vitest run && npm run build
 ```
 
-At last full run: **394** unit tests in `cargo test` (lib), plus **5** integration
+At last full run: **399** unit tests in `cargo test` (lib), plus **5** integration
 tests (`docs_match_tools`, `mcp_stdio`), **73** Vitest tests.
 
 ### Built and merged
