@@ -430,6 +430,7 @@ fn ledger(
             inputs,
             output,
             reasoning,
+            took_ms: None,
             disposition,
         },
     )
@@ -465,6 +466,7 @@ pub fn apply(config_dir: &Path, folder: &Path, proposal: &Proposal) -> Result<()
             inputs: inputs_for(config_dir, proposal.target),
             output: Some(proposal.after.clone()),
             reasoning: Some(proposal.reasoning.clone()),
+            took_ms: None,
             disposition: crate::ledger::Disposition::Applied,
         },
     );
@@ -484,6 +486,7 @@ pub fn discard(folder: &Path, proposal: &Proposal) -> std::io::Result<()> {
             inputs: Vec::new(),
             output: Some(proposal.after.clone()),
             reasoning: Some(proposal.reasoning.clone()),
+            took_ms: None,
             disposition: crate::ledger::Disposition::Discarded,
         },
     )

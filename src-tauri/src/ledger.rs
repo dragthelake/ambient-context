@@ -52,6 +52,10 @@ pub struct Entry {
     pub output: Option<String>,
     /// The model's stated account of its own choices.
     pub reasoning: Option<String>,
+    /// How long the agent took, for the entries that ran one. A day that
+    /// took eleven minutes and a day that took twenty seconds are different
+    /// stories about the same summary, and only the ledger can tell them.
+    pub took_ms: Option<u64>,
     pub disposition: Disposition,
 }
 
@@ -97,6 +101,13 @@ fn disposition_label(disposition: &Disposition) -> String {
     }
 }
 
+/// Minutes and seconds, because a run is minutes long and milliseconds are
+/// noise at that scale.
+fn duration_label(took_ms: u64) -> String {
+    let seconds = took_ms / 1000;
+    format!("{}m {}s", seconds / 60, seconds % 60)
+}
+
 /// One markdown section per entry. Six backticks around the output because
 /// model output routinely contains triple-backtick fences of its own, and a
 /// ledger that swallows its own formatting is not readable without the app.
@@ -114,6 +125,9 @@ pub fn render(entry: &Entry) -> String {
     }
     if let Some(engine) = &entry.engine {
         out.push_str(&format!("- engine: {engine}\n"));
+    }
+    if let Some(took_ms) = entry.took_ms {
+        out.push_str(&format!("- took: {}\n", duration_label(took_ms)));
     }
     for input in &entry.inputs {
         out.push_str(&format!(
@@ -182,6 +196,7 @@ mod tests {
             }],
             output: Some("---\ndate: 2026-08-30\n---\n\n# A day".to_string()),
             reasoning: Some("Kept the long blocks.".to_string()),
+            took_ms: Some(252_000),
             disposition: Disposition::Accepted,
         }
     }
@@ -259,6 +274,18 @@ mod tests {
         assert_eq!(text.matches("\n## ").count(), 2);
         assert!(text.contains("summarise_day"));
         assert!(text.contains("regenerate_day"));
+    }
+
+    #[test]
+    fn a_run_renders_how_long_the_agent_took_in_minutes_and_seconds() {
+        assert!(render(&entry()).contains("- took: 4m 12s"));
+    }
+
+    #[test]
+    fn an_entry_without_a_duration_renders_no_took_line() {
+        let mut untimed = entry();
+        untimed.took_ms = None;
+        assert!(!render(&untimed).contains("- took:"));
     }
 
     #[test]

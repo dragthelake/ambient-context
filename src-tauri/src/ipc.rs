@@ -19,6 +19,9 @@ pub enum Request {
     },
     SummariseDay {
         date: String,
+        /// Re-run the ingest calls whose inputs have not changed.
+        #[serde(default)]
+        force: bool,
         client: String,
     },
     IngestDay {
@@ -275,12 +278,13 @@ mod tests {
     fn a_struct_request_carries_its_fields_beside_the_op() {
         let json = serde_json::to_string(&Request::SummariseDay {
             date: "2026-08-30".to_string(),
+            force: false,
             client: "Claude Code".to_string(),
         })
         .unwrap();
         assert_eq!(
             json,
-            r#"{"op":"summarise_day","date":"2026-08-30","client":"Claude Code"}"#
+            r#"{"op":"summarise_day","date":"2026-08-30","force":false,"client":"Claude Code"}"#
         );
     }
 

@@ -10,7 +10,11 @@ pub fn handle(app: &AppHandle, request: Request) -> Response {
         Request::CaptureStatus => capture_status(app),
         Request::StartCapture { client } => start_capture(app, &client),
         Request::StopCapture { client } => stop_capture(app, &client),
-        Request::SummariseDay { date, client } => summarise_day(app, &date, &client),
+        Request::SummariseDay {
+            date,
+            force,
+            client,
+        } => summarise_day(app, &date, force, &client),
         Request::IngestDay {
             date,
             force,
@@ -77,7 +81,7 @@ fn stop_capture(app: &AppHandle, client: &str) -> Response {
     capture_status(app)
 }
 
-fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
+fn summarise_day(app: &AppHandle, date: &str, force: bool, client: &str) -> Response {
     let Ok(date) = chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d") else {
         return Response::err(
             "invalid",
@@ -100,6 +104,7 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
     let queue = app.state::<jobs::JobQueue>();
     let id = queue.enqueue_summarise_with(
         date,
+        force,
         ledger::Trigger::Mcp {
             client: client.to_string(),
         },
@@ -293,6 +298,7 @@ pub mod writes {
             inputs,
             output: Some(output),
             reasoning: None,
+            took_ms: None,
             disposition,
         };
         if let Err(error) = ledger::append(&folder, &entry) {

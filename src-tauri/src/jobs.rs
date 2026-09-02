@@ -102,6 +102,24 @@ pub struct Pipeline<'a> {
     pub env: &'a std::collections::HashMap<String, String>,
 }
 
+/// Keeps a rejected output for inspection. The write can fail (a data
+/// directory that is not a directory, a full disk), and that failure has to
+/// reach the ledger: an entry that promises an inspectable file which is not
+/// there is worse than one that admits the output is gone.
+fn keep_rejected(dir: &Path, name: &str, output: &str) -> Result<(), String> {
+    std::fs::create_dir_all(dir).map_err(|error| error.to_string())?;
+    std::fs::write(dir.join(name), output).map_err(|error| error.to_string())
+}
+
+/// What became of a rejected output, in the words both the ledger entry and
+/// the returned error use.
+fn rejection_note(kept: Result<(), String>) -> String {
+    match kept {
+        Ok(()) => "the output was kept for inspection".to_string(),
+        Err(error) => format!("the output could not be kept: {error}"),
+    }
+}
+
 fn timeline_input(folder: &Path, date: NaiveDate) -> Result<(String, ledger::Input), String> {
     let timeline = crate::days::timeline(folder, date)
         .ok_or_else(|| format!("there is no capture for {date}"))?;
@@ -162,6 +180,7 @@ pub fn ingest_call(
         } else {
             None
         },
+        took_ms: None,
         disposition: ledger::Disposition::Accepted,
     };
     let record = |disposition: &str| ingest::CallRecord {
@@ -178,7 +197,10 @@ pub fn ingest_call(
         .replace("{{TIMELINE}}", &timeline)
         .replace("{{INPUT}}", &input);
 
-    let output = match agent::run_with_env(p.ingest_agent, &prompt, p.env) {
+    let started = std::time::Instant::now();
+    let result = agent::run_with_env(p.ingest_agent, &prompt, p.env);
+    entry.took_ms = Some(started.elapsed().as_millis() as u64);
+    let output = match result {
         Ok(output) => output,
         Err(error) => {
             let message = error.to_string();
@@ -200,18 +222,17 @@ pub fn ingest_call(
     }
     let spans = crate::days::spans(&timeline);
     if let Err(invalid) = ingest::validate(call, &split, &spans) {
-        let _ = std::fs::create_dir_all(p.reject_dir);
-        let _ = std::fs::write(
-            p.reject_dir
-                .join(format!("{}-{}.md", date.format("%Y-%m-%d"), call.label())),
+        let note = rejection_note(keep_rejected(
+            p.reject_dir,
+            &format!("{}-{}.md", date.format("%Y-%m-%d"), call.label()),
             &output,
-        );
+        ));
         entry.disposition = ledger::Disposition::Rejected {
-            reason: invalid.to_string(),
+            reason: format!("{invalid}; {note}"),
         };
         record_in_ledger(p.folder, &entry);
         let _ = ingest::record_call(p.folder, date, call, record("rejected"));
-        return Err(format!("{invalid}; the output was kept for inspection"));
+        return Err(format!("{invalid}; {note}"));
     }
     let fm = ingest::Frontmatter {
         date,
@@ -263,12 +284,16 @@ pub fn summarise_day(
         inputs,
         output: None,
         reasoning: None,
+        took_ms: None,
         disposition: ledger::Disposition::Accepted,
     };
 
     let prompt = summarise::build_prompt(template, date, &timeline, &kb);
 
-    let output = match agent::run_with_env(p.summary_agent, &prompt, p.env) {
+    let started = std::time::Instant::now();
+    let result = agent::run_with_env(p.summary_agent, &prompt, p.env);
+    entry.took_ms = Some(started.elapsed().as_millis() as u64);
+    let output = match result {
         Ok(output) => output,
         Err(error) => {
             let message = error.to_string();
@@ -292,13 +317,12 @@ pub fn summarise_day(
         &crate::days::spans(&timeline),
         &evidence,
     ) {
-        let _ = std::fs::create_dir_all(p.reject_dir);
-        let _ = std::fs::write(p.reject_dir.join(format!("{date}.md")), &output);
+        let note = rejection_note(keep_rejected(p.reject_dir, &format!("{date}.md"), &output));
         entry.disposition = ledger::Disposition::Rejected {
-            reason: invalid.to_string(),
+            reason: format!("{invalid}; {note}"),
         };
         record_in_ledger(p.folder, &entry);
-        return Err(format!("{invalid}; the output was kept for inspection"));
+        return Err(format!("{invalid}; {note}"));
     }
 
     summarise::write_summary(p.folder, date, &output)
@@ -330,12 +354,12 @@ pub fn run_day_pipeline(
             continue;
         }
         if hashes.input != "none" {
-            on_step(&format!("ingesting {} ({} of 3)", call.label(), index + 1));
+            on_step(&format!("Reading {} ({} of 3)", call.label(), index + 1));
         }
         ingest_call(p, *call, date, trigger.clone())?;
     }
     if summarise {
-        on_step("summarising");
+        on_step("Writing the summary");
         summarise_day(p, date, trigger)?;
     }
     Ok(())
@@ -344,8 +368,19 @@ pub fn run_day_pipeline(
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum JobKind {
-    Summarise,
+    Summarise { force: bool },
     Ingest { force: bool },
+}
+
+/// The two pipeline switches one job kind means: whether to re-run the
+/// ingest calls whose inputs have not changed, and whether to summarise.
+/// Split out from `run_one` because that needs a live `AppHandle` and
+/// cannot be called from a test.
+fn pipeline_args(kind: JobKind) -> (bool, bool) {
+    match kind {
+        JobKind::Summarise { force } => (force, true),
+        JobKind::Ingest { force } => (force, false),
+    }
 }
 
 pub fn run_one(
@@ -379,10 +414,8 @@ pub fn run_one(
         reject_dir: &reject_dir,
         env: &env,
     };
-    match kind {
-        JobKind::Summarise => run_day_pipeline(&p, date, trigger, false, true, on_step),
-        JobKind::Ingest { force } => run_day_pipeline(&p, date, trigger, force, false, on_step),
-    }
+    let (force_ingest, summarise) = pipeline_args(kind);
+    run_day_pipeline(&p, date, trigger, force_ingest, summarise, on_step)
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -391,6 +424,9 @@ pub struct Outcome {
     pub date: NaiveDate,
     pub ok: bool,
     pub message: String,
+    /// How long the whole pipeline for that day took, so the window can say
+    /// what a summary cost rather than only that it happened.
+    pub took_ms: Option<u64>,
 }
 
 #[derive(Clone, Default)]
@@ -532,11 +568,12 @@ fn tick(app: &AppHandle) {
 
     state.set_running(true);
     for date in pending {
+        let started = std::time::Instant::now();
         let result = run_one(
             app,
             date,
             ledger::Trigger::Schedule,
-            JobKind::Summarise,
+            JobKind::Summarise { force: false },
             |_| {},
         );
         let outcome = Outcome {
@@ -547,9 +584,15 @@ fn tick(app: &AppHandle) {
                 Ok(()) => format!("Summarised {date}"),
                 Err(message) => format!("{date} failed: {message}"),
             },
+            took_ms: Some(started.elapsed().as_millis() as u64),
         };
         state.record(outcome);
         persist_last_run(app);
+        if let Err(message) = &result {
+            // Nobody is looking at a scheduled run, so a failure that is
+            // only in the ledger is a failure the user finds days later.
+            notify_failure(app, date, message);
+        }
         if result.is_err() {
             // One failure is usually the agent, and every following day
             // would fail the same way. Stop and let the user see it.
@@ -571,9 +614,11 @@ fn tick(app: &AppHandle) {
         let kind = job.kind;
         app.state::<JobQueue>().record(&job.id, JobStatus::Running);
         let job_id = job.id.clone();
+        let started = std::time::Instant::now();
         let result = run_one(app, date, job.trigger, kind, |step| {
             app.state::<JobQueue>().record_step(&job_id, step);
         });
+        let took_ms = Some(started.elapsed().as_millis() as u64);
         let status = match &result {
             Ok(()) => JobStatus::Done,
             Err(stderr) => JobStatus::Failed {
@@ -586,10 +631,11 @@ fn tick(app: &AppHandle) {
             date,
             ok: result.is_ok(),
             message: match (&result, kind) {
-                (Ok(()), JobKind::Summarise) => format!("Summarised {date}"),
+                (Ok(()), JobKind::Summarise { .. }) => format!("Summarised {date}"),
                 (Ok(()), JobKind::Ingest { .. }) => format!("Ingested {date}"),
                 (Err(message), _) => format!("{date} failed: {message}"),
             },
+            took_ms,
         };
         state.record(outcome);
         persist_last_run(app);
@@ -599,6 +645,24 @@ fn tick(app: &AppHandle) {
         app,
         app.state::<crate::capture::CaptureState>().is_running(),
     );
+}
+
+/// Tells the user a scheduled summary failed. On-demand failures do not
+/// notify: the window is already showing the reason to someone watching it.
+/// The first line only, because a notification body is two lines wide and
+/// the ledger holds the rest.
+fn notify_failure(app: &AppHandle, date: NaiveDate, message: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let first_line = message.lines().next().unwrap_or(message);
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title("Ambient Context")
+        .body(format!("{date}'s summary failed: {first_line}"))
+        .show()
+    {
+        eprintln!("[jobs] could not show the failure notification: {error}");
+    }
 }
 
 /// Writes the moment of the run just finished, so a relaunch knows the
@@ -721,8 +785,13 @@ impl JobQueue {
 
     /// The trigger travels with the job because the runner writes the ledger
     /// entry, and an MCP-triggered summary must name the client that asked.
-    pub fn enqueue_summarise_with(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
-        self.push(date, JobKind::Summarise, trigger)
+    pub fn enqueue_summarise_with(
+        &self,
+        date: NaiveDate,
+        force: bool,
+        trigger: ledger::Trigger,
+    ) -> JobId {
+        self.push(date, JobKind::Summarise { force }, trigger)
     }
 
     /// Queues a full ingest run, optionally forcing all three calls to rerun.
@@ -737,7 +806,7 @@ impl JobQueue {
 
     #[cfg(test)]
     pub fn enqueue_summarise(&self, date: NaiveDate) -> JobId {
-        self.enqueue_summarise_with(date, ledger::Trigger::OnDemand)
+        self.enqueue_summarise_with(date, false, ledger::Trigger::OnDemand)
     }
 
     /// The eight most recent jobs, newest first. Eight because it is more than
@@ -1137,10 +1206,10 @@ mod tests {
         assert_eq!(
             steps,
             vec![
-                "ingesting messages (1 of 3)".to_string(),
-                "ingesting apps (2 of 3)".to_string(),
-                "ingesting websites (3 of 3)".to_string(),
-                "summarising".to_string(),
+                "Reading messages (1 of 3)".to_string(),
+                "Reading apps (2 of 3)".to_string(),
+                "Reading websites (3 of 3)".to_string(),
+                "Writing the summary".to_string(),
             ]
         );
         assert!(crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
@@ -1172,7 +1241,7 @@ mod tests {
             |s| steps.push(s.to_string()),
         )
         .unwrap();
-        assert_eq!(steps, vec!["summarising".to_string()]);
+        assert_eq!(steps, vec!["Writing the summary".to_string()]);
 
         steps.clear();
         run_day_pipeline(
@@ -1218,8 +1287,8 @@ mod tests {
         assert_eq!(
             steps,
             vec![
-                "ingesting apps (2 of 3)".to_string(),
-                "ingesting websites (3 of 3)".to_string(),
+                "Reading apps (2 of 3)".to_string(),
+                "Reading websites (3 of 3)".to_string(),
             ]
         );
         let manifest = ingest::read_manifest(folder.path(), day(2026, 8, 28));
@@ -1326,6 +1395,73 @@ mod tests {
         assert!(text.contains("Kept the long block."));
         assert!(text.contains("- trigger: on demand"));
         assert!(text.contains("sha256 "), "inputs are pinned by hash");
+    }
+
+    #[test]
+    fn an_agent_backed_entry_records_how_long_the_run_took() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        let agent = stub_reply(folder.path(), "reply.md", APPS_REPLY);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        ingest_call(
+            &p,
+            Call::Apps,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(crate::ledger::ledger_path(
+            folder.path(),
+            Local::now().date_naive(),
+        ))
+        .unwrap();
+        assert!(text.contains("- took: "), "{text}");
+    }
+
+    #[test]
+    fn a_rejected_output_that_cannot_be_kept_says_so_in_the_ledger() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        // A reject directory under a regular file: creating it must fail,
+        // which is the failure the ledger has to admit to.
+        let blocker = rejects.path().join("blocker");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let unwritable = blocker.join("rejected");
+
+        let agent = stub_agent("/bin/echo", &["not a summary"]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), &unwritable, &agent, &prompts, &env);
+        let error =
+            summarise_day(&p, day(2026, 8, 28), crate::ledger::Trigger::Schedule).unwrap_err();
+        assert!(error.contains("could not be kept"), "{error}");
+
+        let text = std::fs::read_to_string(crate::ledger::ledger_path(
+            folder.path(),
+            Local::now().date_naive(),
+        ))
+        .unwrap();
+        assert!(text.contains("could not be kept"), "{text}");
+    }
+
+    #[test]
+    fn a_forced_summarise_reruns_the_ingest_calls_and_a_plain_one_does_not() {
+        assert_eq!(
+            pipeline_args(JobKind::Summarise { force: true }),
+            (true, true)
+        );
+        assert_eq!(
+            pipeline_args(JobKind::Summarise { force: false }),
+            (false, true)
+        );
+        assert_eq!(
+            pipeline_args(JobKind::Ingest { force: true }),
+            (true, false)
+        );
     }
 
     #[test]

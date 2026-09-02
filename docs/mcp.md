@@ -237,7 +237,21 @@ Queues a summary for one day using the connected agent, replacing any
 existing summary. Runs the ingest calls first for anything out of date, then
 the summary. Returns a job id immediately; poll `capture_status` until the
 job reports done or failed. Needs the app running with an agent. Input:
-`date` only. Result:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "date": { "type": "string" },
+    "force": { "type": "boolean" }
+  },
+  "required": ["date"],
+  "additionalProperties": false
+}
+```
+
+`force` re-runs every ingest call, including the ones whose inputs have not
+changed; it defaults to false. Result:
 
 ```json
 { "job_id": "job-7", "status": "queued",

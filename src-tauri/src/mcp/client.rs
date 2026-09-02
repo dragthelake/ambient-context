@@ -54,6 +54,7 @@ fn build(
         "stop_capture" => Request::StopCapture { client },
         "summarise_day" => Request::SummariseDay {
             date: date()?,
+            force: arguments["force"].as_bool().unwrap_or(false),
             client,
         },
         "ingest_day" => Request::IngestDay {
@@ -119,8 +120,14 @@ mod tests {
                 Request::CaptureStatus => Response::Ok(serde_json::json!({
                     "running": true, "blocks_today": 12, "focused_app": "Xcode", "jobs": []
                 })),
-                Request::SummariseDay { date, client } => Response::Ok(serde_json::json!({
-                    "job_id": format!("job-{date}-{client}"), "status": "queued"
+                Request::SummariseDay {
+                    date,
+                    force,
+                    client,
+                } => Response::Ok(serde_json::json!({
+                    "job_id": format!("job-{date}-{client}"),
+                    "status": "queued",
+                    "force": force,
                 })),
                 Request::IngestDay {
                     date,

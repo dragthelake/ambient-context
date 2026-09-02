@@ -400,6 +400,7 @@ fn write_rules(
                 inputs: before,
                 output: serde_json::to_string_pretty(&loaded).ok(),
                 reasoning: None,
+                took_ms: None,
                 disposition: ledger::Disposition::Applied,
             },
         );
@@ -478,6 +479,7 @@ fn set_prompt(
                 inputs: before,
                 output: Some(text),
                 reasoning: None,
+                took_ms: None,
                 disposition: ledger::Disposition::Applied,
             },
         );
@@ -503,6 +505,7 @@ fn reset_prompt(app: tauri::AppHandle, id: Option<String>) -> Result<PromptPaylo
                 inputs: Vec::new(),
                 output: None,
                 reasoning: None,
+                took_ms: None,
                 disposition: ledger::Disposition::Applied,
             },
         );
@@ -661,8 +664,16 @@ impl From<jobs::JobSummary> for JobSummaryPayload {
 /// Queues the run rather than starting it. The queue is what keeps
 /// on-demand and scheduled runs serial: two agent processes writing the
 /// same summary is the failure this closes.
+///
+/// `force` re-runs the ingest calls whose inputs have not changed, which is
+/// what Regenerate means: without it a second run reuses notes the user is
+/// asking to have built again.
 #[tauri::command]
-fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayload, String> {
+fn summarise_now(
+    app: tauri::AppHandle,
+    date: String,
+    force: Option<bool>,
+) -> Result<SummariseNowPayload, String> {
     let parsed = parse_date(&date)?;
     let config = settings::load(&app);
     if config.folder.is_none() {
@@ -671,9 +682,11 @@ fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayl
     if config.agent.is_none() {
         return Err("no agent is connected".to_string());
     }
-    let id = app
-        .state::<jobs::JobQueue>()
-        .enqueue_summarise_with(parsed, ledger::Trigger::OnDemand);
+    let id = app.state::<jobs::JobQueue>().enqueue_summarise_with(
+        parsed,
+        force.unwrap_or(false),
+        ledger::Trigger::OnDemand,
+    );
     Ok(SummariseNowPayload {
         job_id: id.to_string(),
     })
@@ -742,7 +755,7 @@ fn summarise_days(app: tauri::AppHandle, dates: Vec<String>) -> Result<Vec<Strin
         .into_iter()
         .map(|date| {
             queue
-                .enqueue_summarise_with(date, ledger::Trigger::OnDemand)
+                .enqueue_summarise_with(date, false, ledger::Trigger::OnDemand)
                 .to_string()
         })
         .collect();
@@ -883,6 +896,7 @@ fn ledger_agent_test(
         inputs: Vec::new(),
         output,
         reasoning: None,
+        took_ms: None,
         disposition,
     };
     if let Err(error) = ledger::append(folder, &entry) {
@@ -951,6 +965,7 @@ pub(crate) fn save_settings_recorded(
         inputs,
         output: serde_json::to_string_pretty(next).ok(),
         reasoning: None,
+        took_ms: None,
         disposition: ledger::Disposition::Applied,
     };
     if let Err(error) = ledger::append(folder, &entry) {
@@ -1746,6 +1761,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_autostart::Builder::new().build())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             sound_diag,

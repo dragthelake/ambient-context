@@ -151,8 +151,14 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "summarise_day",
             title: "Summarise a day",
-            description: "Queues a summary for one day using the agent the user connected, and replaces the existing summary if there is one. Runs the ingest calls first for anything out of date, then the summary. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an agent connected.",
-            input_schema: args(json!({ "date": date_property() }), &["date"]),
+            description: "Queues a summary for one day using the agent the user connected, and replaces the existing summary if there is one. Runs the ingest calls first for anything out of date, then the summary. Set force to rebuild the notes as well, even where nothing has changed. Returns a job id immediately because a run can take minutes; poll capture_status for the outcome. Needs Ambient Context to be running with an agent connected.",
+            input_schema: args(
+                json!({
+                    "date": date_property(),
+                    "force": { "type": "boolean", "description": "Re-run the ingest calls even when nothing changed. Defaults to false." }
+                }),
+                &["date"],
+            ),
             read_only: false, destructive: true, idempotent: false,
         },
         Def {
