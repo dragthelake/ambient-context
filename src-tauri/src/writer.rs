@@ -312,18 +312,16 @@ pub fn append_block(
         block.title.as_deref(),
         block.url.as_deref(),
     );
-    let novel = if block.headings_only {
-        Vec::new()
-    } else if matches!(kind, Kind::App | Kind::Message) {
-        dedup.novel_lines(folder, block)
-    } else {
-        Vec::new()
-    };
-    fs::create_dir_all(day_dir(folder, date))?;
     let apps = DayFile::Apps.path(folder, date);
 
     match kind {
         Kind::App => {
+            let novel = if block.headings_only {
+                Vec::new()
+            } else {
+                dedup.novel_lines(folder, block)
+            };
+            fs::create_dir_all(day_dir(folder, date))?;
             append_to(
                 &apps,
                 date,
@@ -332,6 +330,7 @@ pub fn append_block(
             )?;
         }
         Kind::Website => {
+            fs::create_dir_all(day_dir(folder, date))?;
             append_to(&apps, date, DayFile::Apps, &render_routed(block, kind))?;
             append_to(
                 &DayFile::Websites.path(folder, date),
@@ -341,12 +340,22 @@ pub fn append_block(
             )?;
         }
         Kind::Message => {
+            let cleaned = Block {
+                lines: crate::prune::for_kind(kind, block.lines.clone()),
+                ..block.clone()
+            };
+            let novel = if cleaned.headings_only {
+                Vec::new()
+            } else {
+                dedup.novel_lines(folder, &cleaned)
+            };
+            fs::create_dir_all(day_dir(folder, date))?;
             append_to(&apps, date, DayFile::Apps, &render_routed(block, kind))?;
             append_to(
                 &DayFile::Messages.path(folder, date),
                 date,
                 DayFile::Messages,
-                &render_block(block, &novel, shape),
+                &render_block(&cleaned, &novel, shape),
             )?;
         }
     }
@@ -489,6 +498,36 @@ mod tests {
             lines: vec!["read the issue".to_string()],
             headings_only: false,
         }
+    }
+
+    #[test]
+    fn message_bodies_are_pruned_of_mail_chrome_before_writing() {
+        let dir = tempdir().unwrap();
+        let mail = block(
+            "Mail",
+            "All Inboxes",
+            None,
+            None,
+            10,
+            12,
+            &[
+                "7:09 am",
+                "Reply-To: \u{fffc}",
+                "Patient letter regarding Mr Smith",
+            ],
+        );
+        append_block(
+            dir.path(),
+            &mail,
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let messages = read(dir.path(), DayFile::Messages);
+        assert!(messages.contains("Patient letter regarding Mr Smith"));
+        assert!(!messages.contains("7:09 am"));
+        assert!(!messages.contains("Reply-To"));
     }
 
     #[test]
