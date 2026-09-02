@@ -18,7 +18,7 @@ pub struct DayEntry {
 }
 
 fn entry(folder: &Path, date: NaiveDate) -> DayEntry {
-    let day_path = writer::file_path(folder, date);
+    let day_path = writer::DayFile::Apps.path(folder, date);
     let summary = std::fs::read_to_string(summarise::summary_path(folder, date)).ok();
     DayEntry {
         date,
@@ -56,7 +56,7 @@ pub fn days_in_month(folder: &Path, year: i32, month: u32) -> Vec<DayEntry> {
 }
 
 pub fn read_day(folder: &Path, date: NaiveDate) -> Option<String> {
-    std::fs::read_to_string(writer::file_path(folder, date)).ok()
+    std::fs::read_to_string(writer::DayFile::Apps.path(folder, date)).ok()
 }
 
 pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
@@ -146,8 +146,14 @@ mod tests {
     /// days at all.
     fn folder() -> tempfile::TempDir {
         let dir = tempdir().unwrap();
-        std::fs::write(dir.path().join("2026-08-27.md"), "twelve bytes").unwrap();
-        std::fs::write(dir.path().join("2026-08-28.md"), "x").unwrap();
+        for (date, body) in [("2026-08-27", "twelve bytes"), ("2026-08-28", "x")] {
+            let path = writer::DayFile::Apps.path(
+                dir.path(),
+                NaiveDate::parse_from_str(date, "%Y-%m-%d").unwrap(),
+            );
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, body).unwrap();
+        }
         std::fs::write(dir.path().join("AGENTS.md"), "x").unwrap();
         std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
         std::fs::create_dir_all(dir.path().join("Ledger")).unwrap();

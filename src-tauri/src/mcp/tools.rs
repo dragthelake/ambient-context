@@ -368,6 +368,7 @@ fn hits_len_reached(hits: &[files::Hit], limit: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::NaiveDate;
 
     const EXPECTED: [&str; 18] = [
         "add_rule",
@@ -512,8 +513,18 @@ mod tests {
     fn set_up() -> (tempfile::TempDir, tempfile::TempDir) {
         let config = tempfile::tempdir().unwrap();
         let folder = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(
+            crate::writer::DayFile::Apps
+                .path(folder.path(), NaiveDate::from_ymd_opt(2026, 8, 30).unwrap())
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
         std::fs::write(
-            folder.path().join("2026-08-30.md"),
+            crate::writer::DayFile::Apps.path(
+                folder.path(),
+                NaiveDate::from_ymd_opt(2026, 8, 30).unwrap(),
+            ),
             "## 09:00\u{2013}09:20 \u{b7} Safari \u{b7} Postgres docs\n\nIndex-only scans.\n",
         )
         .unwrap();

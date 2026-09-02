@@ -171,7 +171,7 @@ pub fn summarise_day(
     reject_dir: &Path,
     env: &std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
-    let day_path = writer::file_path(folder, date);
+    let day_path = writer::DayFile::Apps.path(folder, date);
     let day_markdown = std::fs::read_to_string(&day_path)
         .map_err(|_| format!("there is no capture for {date}"))?;
 
@@ -688,9 +688,11 @@ mod tests {
     }
 
     fn write_day(folder: &std::path::Path, date: NaiveDate) {
+        let path = crate::writer::DayFile::Apps.path(folder, date);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
-            crate::writer::file_path(folder, date),
-            "---\ndate: 2026-08-28\n---\n\n## 09:00\u{2013}11:00 \u{00b7} Linear\n\nread the issue\n",
+            path,
+            "---\ndate: 2026-08-28\nkind: apps\n---\n\n## 09:00\u{2013}11:00 \u{00b7} Linear\n\nread the issue\n",
         )
         .unwrap();
     }

@@ -165,8 +165,8 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             match event.id().as_ref() {
                 "open_today" => {
                     if let Some(folder) = &config.folder {
-                        let path =
-                            crate::writer::file_path(folder, chrono::Local::now().date_naive());
+                        let path = crate::writer::DayFile::Apps
+                            .path(folder, chrono::Local::now().date_naive());
                         let _ = std::process::Command::new("open").arg(path).spawn();
                     }
                 }

@@ -167,7 +167,22 @@ fn dates_in(dir: &Path) -> Vec<NaiveDate> {
 }
 
 pub fn list_captured(folder: &Path) -> Vec<NaiveDate> {
-    dates_in(folder)
+    let days_dir = crate::writer::days_dir(folder);
+    let entries = match std::fs::read_dir(&days_dir) {
+        Ok(entries) => entries,
+        Err(_) => return Vec::new(),
+    };
+    let mut dates: Vec<NaiveDate> = entries
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            if !entry.file_type().ok()?.is_dir() {
+                return None;
+            }
+            NaiveDate::parse_from_str(&entry.file_name().to_string_lossy(), "%Y-%m-%d").ok()
+        })
+        .collect();
+    dates.sort();
+    dates
 }
 
 pub fn list_summarised(folder: &Path) -> Vec<NaiveDate> {
@@ -418,6 +433,11 @@ mod tests {
     #[test]
     fn listing_finds_day_files_and_ignores_everything_else() {
         let dir = tempdir().unwrap();
+        for date in [date(2026, 8, 27), date(2026, 8, 28)] {
+            let path = crate::writer::DayFile::Apps.path(dir.path(), date);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "x").unwrap();
+        }
         std::fs::write(dir.path().join("2026-08-27.md"), "x").unwrap();
         std::fs::write(dir.path().join("2026-08-28.md"), "x").unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "x").unwrap();

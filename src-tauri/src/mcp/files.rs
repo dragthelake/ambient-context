@@ -139,7 +139,7 @@ pub fn search_record(folder: &Path, query: &str, limit: usize) -> Vec<Hit> {
     for day in crate::days::list_days(folder) {
         let date = day.date.to_string();
         let sources = [
-            ("day", folder.join(format!("{date}.md"))),
+            ("day", crate::writer::DayFile::Apps.path(folder, day.date)),
             (
                 "summary",
                 folder.join("Summaries").join(format!("{date}.md")),
@@ -226,9 +226,11 @@ mod tests {
 
     fn folder_with_a_day() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
+        let path = crate::writer::DayFile::Apps.path(dir.path(), date(2026, 8, 30));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
-            dir.path().join("2026-08-30.md"),
-            "---\ndate: 2026-08-30\n---\n\n\
+            path,
+            "---\ndate: 2026-08-30\nkind: apps\n---\n\n\
              ## 09:00\u{2013}09:20 \u{b7} Safari \u{b7} Postgres docs\n\n\
              url: https://www.example.org/docs\n\n\
              Index-only scans need a visibility map.\n\n\
@@ -283,7 +285,18 @@ mod tests {
             "Standup moved to nine.",
         ]
         .join("\n");
-        std::fs::write(dir.path().join("2026-08-30.md"), day).unwrap();
+        std::fs::create_dir_all(
+            crate::writer::DayFile::Apps
+                .path(dir.path(), date(2026, 8, 30))
+                .parent()
+                .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            crate::writer::DayFile::Apps.path(dir.path(), date(2026, 8, 30)),
+            day,
+        )
+        .unwrap();
         let text = read_day(dir.path(), date(2026, 8, 30), Some("08:00"), Some("10:00")).unwrap();
         assert!(text.contains("Pages"));
         // The heading that is not a time belongs to the block above it.

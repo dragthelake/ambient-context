@@ -190,7 +190,7 @@ fn target_path(
     which: &str,
 ) -> Option<std::path::PathBuf> {
     match which {
-        "day" => Some(writer::file_path(folder, date)),
+        "day" => Some(writer::DayFile::Apps.path(folder, date)),
         "summary" => Some(summarise::summary_path(folder, date)),
         _ => None,
     }
@@ -263,10 +263,10 @@ fn reveal_day(app: tauri::AppHandle, date: String) -> Result<(), String> {
         .folder
         .ok_or("no capture folder is set")?;
     let parsed = parse_date(&date)?;
-    let path = writer::file_path(&folder, parsed);
+    let path = writer::day_dir(&folder, parsed);
     // -R selects the file in Finder. A day with no file yet still has a
     // folder worth opening.
-    let target = if path.is_file() { path } else { folder };
+    let target = if path.is_dir() { path } else { folder };
     std::process::Command::new("open")
         .arg("-R")
         .arg(target)
@@ -929,7 +929,7 @@ mod tests {
         let folder = Path::new("/tmp/ac");
         assert_eq!(
             target_path(folder, date(), "day"),
-            Some(PathBuf::from("/tmp/ac/2026-08-28.md"))
+            Some(PathBuf::from("/tmp/ac/Days/2026-08-28/apps.md"))
         );
         assert_eq!(
             target_path(folder, date(), "summary"),

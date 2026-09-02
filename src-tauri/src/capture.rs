@@ -6,10 +6,11 @@ use crate::{
     settings::{self, Settings},
     writer,
 };
-use chrono::{Local, NaiveDate};
+use chrono::Local;
+use regex::Regex;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
@@ -46,11 +47,11 @@ fn rules_mtime(config_dir: &Path) -> Option<std::time::SystemTime> {
         .ok()
 }
 
-/// The capture target must never include the capture output: reading
-/// today's file re-captures the previous blocks, and the dwell segmenter
-/// then emits a session whose content is the earlier sessions. Matched at
-/// emit time against the configured folder and today's filename.
-fn is_own_output(snapshot: &Snapshot, folder: &Path, today: NaiveDate) -> bool {
+/// The app must not record itself reading its own record. Matched by the
+/// document or URL path first (editors expose AXDocument), then by a
+/// window title carrying a date together with the folder name or one of
+/// the record's file names.
+fn is_own_output(snapshot: &Snapshot, folder: &Path) -> bool {
     let folder_str = folder.to_string_lossy();
     if snapshot
         .document
@@ -66,19 +67,21 @@ fn is_own_output(snapshot: &Snapshot, folder: &Path, today: NaiveDate) -> bool {
     {
         return true;
     }
-    if let Some(title) = &snapshot.window_title {
-        let stem = today.format("%Y-%m-%d").to_string();
-        if title.contains(&format!("{stem}.md")) {
-            return true;
-        }
-        if let Some(name) = folder.file_name() {
-            let name = name.to_string_lossy();
-            if title.contains(&stem) && title.contains(name.as_ref()) {
-                return true;
-            }
-        }
+    let Some(title) = &snapshot.window_title else {
+        return false;
+    };
+    static DATE: OnceLock<Regex> = OnceLock::new();
+    let date = DATE.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap());
+    if !date.is_match(title) {
+        return false;
     }
-    false
+    let folder_name = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    const OWN_FILES: &[&str] = &["apps.md", "websites.md", "messages.md", "manifest.md"];
+    (!folder_name.is_empty() && title.contains(folder_name.as_str()))
+        || OWN_FILES.iter().any(|f| title.contains(f))
 }
 
 /// How long `stop` will wait for the poll thread to leave. The thread
@@ -176,7 +179,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             if let Some(new_folder) = settings::load(&app).folder {
                 if new_folder != folder {
                     if let Some(block) = segmenter.flush(Local::now()) {
-                        let _ = writer::append_block(&folder, &block, &mut dedup, shape);
+                        let _ = writer::append_block(&folder, &block, &mut dedup, shape, &rules);
                     }
                     folder = new_folder;
                     dedup.reset();
@@ -209,7 +212,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 Some(raw) => {
                     failed_reads = 0;
                     if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
-                        if is_own_output(&clean, &folder, today) {
+                        if is_own_output(&clean, &folder) {
                             // Looking at the capture file is not work worth
                             // recording, and recording it recurses.
                         } else {
@@ -222,7 +225,9 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                                 ..clean
                             };
                             if let Some(block) = segmenter.push(clean, Local::now()) {
-                                match writer::append_block(&folder, &block, &mut dedup, shape) {
+                                match writer::append_block(
+                                    &folder, &block, &mut dedup, shape, &rules,
+                                ) {
                                     Ok(()) => {
                                         counter.fetch_add(1, Ordering::SeqCst);
                                     }
@@ -239,7 +244,9 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                     failed_reads += 1;
                     if failed_reads == 3 {
                         if let Some(block) = segmenter.flush(Local::now()) {
-                            if writer::append_block(&folder, &block, &mut dedup, shape).is_ok() {
+                            if writer::append_block(&folder, &block, &mut dedup, shape, &rules)
+                                .is_ok()
+                            {
                                 counter.fetch_add(1, Ordering::SeqCst);
                             }
                         }
@@ -262,7 +269,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         // Closing the open block on stop means the last stretch of work is
         // not silently lost when capture is switched off.
         if let Some(block) = segmenter.flush(Local::now()) {
-            if writer::append_block(&folder, &block, &mut dedup, shape).is_ok() {
+            if writer::append_block(&folder, &block, &mut dedup, shape, &rules).is_ok() {
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         }
@@ -483,36 +490,53 @@ mod tests {
         assert!(clone.is_running());
     }
 
-    fn day() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 8, 25).unwrap()
+    #[test]
+    fn a_kb_file_under_the_capture_folder_is_own_output() {
+        let snap = Snapshot {
+            app: "Zed".into(),
+            document: Some("/Users/x/Ambient Context/KB/2026-09-02/threads.md".into()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context")));
+    }
+
+    #[test]
+    fn a_title_with_a_date_and_a_record_file_name_is_own_output() {
+        let snap = Snapshot {
+            app: "Obsidian".into(),
+            window_title: Some("2026-09-02/messages.md".into()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context")));
+        let other = Snapshot {
+            app: "Obsidian".into(),
+            window_title: Some("messages.md".into()),
+            ..Default::default()
+        };
+        assert!(
+            !is_own_output(&other, Path::new("/Users/x/Ambient Context")),
+            "no date, not ours"
+        );
     }
 
     #[test]
     fn own_output_is_recognised_by_document_path() {
         let snap = Snapshot {
             app: "Obsidian".to_string(),
-            document: Some("/Users/x/Ambient Context/2026-08-25.md".to_string()),
+            document: Some("/Users/x/Ambient Context/Days/2026-08-25/apps.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
     fn own_output_is_recognised_by_todays_filename_in_the_title() {
         let snap = Snapshot {
             app: "TextEdit".to_string(),
-            window_title: Some("2026-08-25.md".to_string()),
+            window_title: Some("2026-08-25/apps.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -522,11 +546,7 @@ mod tests {
             window_title: Some("2026-08-25 - Ambient Context - Obsidian".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -536,11 +556,7 @@ mod tests {
             window_title: Some("2026-08-23 - Audio Capture Spike Findings".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -551,11 +567,7 @@ mod tests {
             url: Some("https://v2.tauri.app/".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -565,11 +577,7 @@ mod tests {
             document: Some("/Users/x/Ambient Context/Summaries/2026-08-25.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -579,10 +587,6 @@ mod tests {
             document: Some("/Users/x/Ambient Context/Ledger/2026-08-25.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 }
