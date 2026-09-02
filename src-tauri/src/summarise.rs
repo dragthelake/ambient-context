@@ -103,6 +103,9 @@ fn unsupported_figure(body: &str, evidence: &str) -> Option<String> {
     figure()
         .find_iter(&masked)
         .map(|m| m.as_str())
+        // A run of hex letters with no digit is a word ("defaced",
+        // "acceded"), not a hash.
+        .filter(|token| token.chars().any(|c| c.is_ascii_digit()))
         .find(|token| !appears_in(evidence, token))
         .map(|token| token.to_string())
 }
@@ -391,6 +394,15 @@ mod tests {
     }
 
     #[test]
+    fn a_word_spelt_in_hex_letters_is_not_a_hash() {
+        let text = good().replace(
+            "the thing.",
+            "the thing; the page was defaced and they acceded.",
+        );
+        assert!(check(&text).is_ok());
+    }
+
+    #[test]
     fn a_figure_the_evidence_carries_is_accepted() {
         let text = good().replace("the thing.", "the thing, 303 tests green.");
         assert_eq!(check(&text), Ok(()));
@@ -398,10 +410,10 @@ mod tests {
 
     #[test]
     fn a_commit_hash_the_evidence_does_not_carry_is_rejected() {
-        let text = good().replace("building the thing.", "landed deadbee on main.");
+        let text = good().replace("building the thing.", "landed dead6ee on main.");
         assert_eq!(
             check(&text),
-            Err(Invalid::UnsupportedFigure("deadbee".to_string()))
+            Err(Invalid::UnsupportedFigure("dead6ee".to_string()))
         );
     }
 
