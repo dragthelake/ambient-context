@@ -2,6 +2,7 @@ mod agent;
 mod capture;
 mod control;
 mod days;
+mod ingest;
 mod ipc;
 mod jobs;
 mod ledger;

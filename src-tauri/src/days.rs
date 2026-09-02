@@ -28,7 +28,7 @@ fn entry(folder: &Path, date: NaiveDate) -> DayEntry {
         date,
         has_capture: DayFile::Apps.path(folder, date).is_file(),
         has_summary: summary.is_some(),
-        has_kb: false, // Task 9: crate::ingest::has_kb(folder, date)
+        has_kb: crate::ingest::has_kb(folder, date),
         bytes,
         title: summary.as_deref().and_then(crate::summarise::title_of),
     }
