@@ -283,7 +283,15 @@ pub fn summarise_day(
     entry.output = Some(output.clone());
     entry.reasoning = summarise::reasoning_of(&output);
 
-    if let Err(invalid) = summarise::validate(&output, summarise::MAX_SUMMARY_LINES) {
+    // The evidence is exactly what the model was given: anything the
+    // summary states has to be traceable back to one of these two.
+    let evidence = format!("{timeline}\n{kb}");
+    if let Err(invalid) = summarise::validate(
+        &output,
+        summarise::MAX_SUMMARY_LINES,
+        &crate::days::spans(&timeline),
+        &evidence,
+    ) {
         let _ = std::fs::create_dir_all(p.reject_dir);
         let _ = std::fs::write(p.reject_dir.join(format!("{date}.md")), &output);
         entry.disposition = ledger::Disposition::Rejected {

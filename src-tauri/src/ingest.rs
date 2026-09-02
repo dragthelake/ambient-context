@@ -1,3 +1,4 @@
+use crate::cite::inside;
 use crate::prompt::PromptId;
 use crate::writer::DayFile;
 use chrono::NaiveDate;
@@ -180,13 +181,6 @@ impl std::fmt::Display for Invalid {
 fn citation() -> &'static Regex {
     static CITATION: OnceLock<Regex> = OnceLock::new();
     CITATION.get_or_init(|| Regex::new(r"\b(\d{2}):(\d{2})[-\x{2013}](\d{2}):(\d{2})\b").unwrap())
-}
-
-fn inside(minute: u32, spans: &[(u32, u32)]) -> bool {
-    spans.iter().any(|(s, e)| minute >= *s && minute <= *e)
-        || spans
-            .iter()
-            .any(|(s, e)| minute + 24 * 60 >= *s && minute + 24 * 60 <= *e)
 }
 
 pub fn validate(call: Call, split: &Split, spans: &[(u32, u32)]) -> Result<(), Invalid> {

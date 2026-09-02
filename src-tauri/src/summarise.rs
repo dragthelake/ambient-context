@@ -16,6 +16,12 @@ pub enum Invalid {
     /// day file. A summary that cannot be checked against the record is an
     /// opinion, and the record is the only thing this product sells.
     NoCitations,
+    /// A time range the day file cannot account for. Worse than no
+    /// citation: it reads as evidence and is not.
+    CitationOutsideTimeline(String),
+    /// A number or hash the summary states that appears nowhere in the
+    /// timeline or the knowledge base the model was given.
+    UnsupportedFigure(String),
     TooLong {
         lines: usize,
         max: usize,
@@ -31,6 +37,15 @@ impl std::fmt::Display for Invalid {
             Invalid::NoSections => write!(f, "the summary has no sections"),
             Invalid::NoCitations => {
                 write!(f, "the summary cites no time ranges from the day file")
+            }
+            Invalid::CitationOutsideTimeline(citation) => {
+                write!(f, "{citation} is outside every captured block")
+            }
+            Invalid::UnsupportedFigure(figure) => {
+                write!(
+                    f,
+                    "the summary states {figure}, which is nowhere in the day's evidence"
+                )
             }
             Invalid::TooLong { lines, max } => {
                 write!(
@@ -59,14 +74,45 @@ pub fn unfence(text: &str) -> &str {
     }
 }
 
-/// `09:14-09:41` or `09:14–09:41`. Both dashes appear in practice: the day
-/// file's own headings use an en dash and models copy either.
-fn citation() -> &'static Regex {
-    static CITATION: OnceLock<Regex> = OnceLock::new();
-    CITATION.get_or_init(|| Regex::new(r"\b\d{1,2}:\d{2}\s*[-\x{2013}]\s*\d{1,2}:\d{2}\b").unwrap())
+/// Times, ranges and dates. Blanked out of the body before the figure
+/// scan so `2026` and `1100` are never read as claims about quantities.
+fn clock() -> &'static Regex {
+    static CLOCK: OnceLock<Regex> = OnceLock::new();
+    CLOCK.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}").unwrap())
 }
 
-pub fn validate(text: &str, max_lines: usize) -> Result<(), Invalid> {
+/// A quantity (three digits or more) or a hash. These are the claims a
+/// model is most likely to invent, and the easiest to check.
+fn figure() -> &'static Regex {
+    static FIGURE: OnceLock<Regex> = OnceLock::new();
+    FIGURE.get_or_init(|| Regex::new(r"\b\d{3,}\b|\b[0-9a-f]{7,40}\b").unwrap())
+}
+
+/// Whole-word containment, so `303` is not satisfied by `3030`.
+fn appears_in(evidence: &str, token: &str) -> bool {
+    evidence.match_indices(token).any(|(at, _)| {
+        let before = evidence[..at].chars().next_back();
+        let after = evidence[at + token.len()..].chars().next();
+        !before.is_some_and(|c| c.is_alphanumeric()) && !after.is_some_and(|c| c.is_alphanumeric())
+    })
+}
+
+/// The first figure in `body` that `evidence` cannot account for.
+fn unsupported_figure(body: &str, evidence: &str) -> Option<String> {
+    let masked = clock().replace_all(body, " ");
+    figure()
+        .find_iter(&masked)
+        .map(|m| m.as_str())
+        .find(|token| !appears_in(evidence, token))
+        .map(|token| token.to_string())
+}
+
+pub fn validate(
+    text: &str,
+    max_lines: usize,
+    spans: &[(u32, u32)],
+    evidence: &str,
+) -> Result<(), Invalid> {
     let body = unfence(text);
     if body.trim().is_empty() {
         return Err(Invalid::Empty);
@@ -109,8 +155,13 @@ pub fn validate(text: &str, max_lines: usize) -> Result<(), Invalid> {
 
     // The body only: the frontmatter's `date:` line must not count as a
     // citation, and neither must anything above the closing fence.
-    if !citation().is_match(&lines[close..].join("\n")) {
+    let body = lines[close..].join("\n");
+    if !crate::cite::has_citation(&body) {
         return Err(Invalid::NoCitations);
+    }
+    crate::cite::citation_in_spans(&body, spans).map_err(Invalid::CitationOutsideTimeline)?;
+    if let Some(figure) = unsupported_figure(&body, evidence) {
+        return Err(Invalid::UnsupportedFigure(figure));
     }
 
     Ok(())
@@ -215,6 +266,17 @@ pub fn reasoning_of(summary: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The fixture day: one block from 09:00 to 11:00.
+    fn spans() -> Vec<(u32, u32)> {
+        vec![(540, 660)]
+    }
+
+    const EVIDENCE: &str = "## 09:00\u{2013}11:00 \u{b7} Zed \u{b7} jobs.rs\n\nran 303 tests\n";
+
+    fn check(text: &str) -> Result<(), Invalid> {
+        validate(text, MAX_SUMMARY_LINES, &spans(), EVIDENCE)
+    }
+
     fn good() -> String {
         [
             "---",
@@ -238,58 +300,43 @@ mod tests {
 
     #[test]
     fn accepts_a_well_formed_summary() {
-        assert!(validate(&good(), MAX_SUMMARY_LINES).is_ok());
+        assert!(check(&good()).is_ok());
     }
 
     #[test]
     fn rejects_empty_output() {
-        assert!(matches!(
-            validate("   \n  ", MAX_SUMMARY_LINES),
-            Err(Invalid::Empty)
-        ));
+        assert!(matches!(check("   \n  "), Err(Invalid::Empty)));
     }
 
     #[test]
     fn rejects_output_with_no_frontmatter() {
         let text = "# A day\n\nSome prose.\n\n## Sessions\n09:00-11:00 things";
-        assert!(matches!(
-            validate(text, MAX_SUMMARY_LINES),
-            Err(Invalid::NoFrontmatter)
-        ));
+        assert!(matches!(check(text), Err(Invalid::NoFrontmatter)));
     }
 
     #[test]
     fn rejects_frontmatter_missing_the_type_field() {
         let text = good().replace("type: day-context\n", "");
-        assert!(matches!(
-            validate(&text, MAX_SUMMARY_LINES),
-            Err(Invalid::MissingField("type"))
-        ));
+        assert!(matches!(check(&text), Err(Invalid::MissingField("type"))));
     }
 
     #[test]
     fn rejects_frontmatter_missing_the_date_field() {
         let text = good().replace("date: 2026-08-28\n", "");
-        assert!(matches!(
-            validate(&text, MAX_SUMMARY_LINES),
-            Err(Invalid::MissingField("date"))
-        ));
+        assert!(matches!(check(&text), Err(Invalid::MissingField("date"))));
     }
 
     #[test]
     fn rejects_output_with_no_sections() {
         let text = "---\ndate: 2026-08-28\ntype: day-context\n---\n\nJust prose, no headings.";
-        assert!(matches!(
-            validate(text, MAX_SUMMARY_LINES),
-            Err(Invalid::NoSections)
-        ));
+        assert!(matches!(check(text), Err(Invalid::NoSections)));
     }
 
     #[test]
     fn rejects_a_summary_that_never_states_its_reasoning() {
         let text = good().replace("## Reasoning", "## Notes");
         assert!(matches!(
-            validate(&text, MAX_SUMMARY_LINES),
+            check(&text),
             Err(Invalid::MissingField("Reasoning"))
         ));
     }
@@ -314,21 +361,56 @@ mod tests {
             "Wrote it from the headings.",
         ]
         .join("\n");
-        assert!(matches!(
-            validate(&text, MAX_SUMMARY_LINES),
-            Err(Invalid::NoCitations)
-        ));
+        assert!(matches!(check(&text), Err(Invalid::NoCitations)));
     }
 
     #[test]
     fn accepts_ranges_written_with_either_dash() {
         for sep in ["-", "\u{2013}"] {
             let text = good().replace("09:00-11:00", &format!("09:00{sep}11:00"));
-            assert!(
-                validate(&text, MAX_SUMMARY_LINES).is_ok(),
-                "failed on {sep:?}"
-            );
+            assert!(check(&text).is_ok(), "failed on {sep:?}");
         }
+    }
+
+    #[test]
+    fn a_citation_the_day_never_recorded_is_rejected_and_named() {
+        let text = good().replace("09:00-11:00", "14:00-14:30");
+        assert_eq!(
+            check(&text),
+            Err(Invalid::CitationOutsideTimeline("14:00-14:30".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_figure_the_evidence_does_not_carry_is_rejected_and_named() {
+        let text = good().replace("the thing.", "the thing, 512 tests green.");
+        assert_eq!(
+            check(&text),
+            Err(Invalid::UnsupportedFigure("512".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_figure_the_evidence_carries_is_accepted() {
+        let text = good().replace("the thing.", "the thing, 303 tests green.");
+        assert_eq!(check(&text), Ok(()));
+    }
+
+    #[test]
+    fn a_commit_hash_the_evidence_does_not_carry_is_rejected() {
+        let text = good().replace("building the thing.", "landed deadbee on main.");
+        assert_eq!(
+            check(&text),
+            Err(Invalid::UnsupportedFigure("deadbee".to_string()))
+        );
+    }
+
+    #[test]
+    fn times_and_dates_are_not_figures() {
+        // `09:00`, the `1100` inside a range and the summary's own date
+        // would all be unsupported figures without the mask.
+        let text = good().replace("the thing.", "the thing, carried over from 2026-08-27.");
+        assert_eq!(check(&text), Ok(()));
     }
 
     #[test]
@@ -350,10 +432,7 @@ mod tests {
             "Nothing to add.",
         ]
         .join("\n");
-        assert!(matches!(
-            validate(&text, MAX_SUMMARY_LINES),
-            Err(Invalid::NoCitations)
-        ));
+        assert!(matches!(check(&text), Err(Invalid::NoCitations)));
     }
 
     #[test]
@@ -363,7 +442,7 @@ mod tests {
             text.push_str(&format!("\nline {i}"));
         }
         assert!(matches!(
-            validate(&text, 20),
+            validate(&text, 20, &spans(), EVIDENCE),
             Err(Invalid::TooLong { max: 20, .. })
         ));
     }
@@ -373,7 +452,7 @@ mod tests {
         // Every CLI does this at least sometimes. Rejecting it would fail
         // for a formatting habit rather than a content problem.
         let text = format!("```markdown\n{}\n```", good());
-        assert!(validate(&text, MAX_SUMMARY_LINES).is_ok());
+        assert!(check(&text).is_ok());
     }
 
     use chrono::NaiveDate;
