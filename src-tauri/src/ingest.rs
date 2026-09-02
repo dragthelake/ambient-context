@@ -135,9 +135,19 @@ pub enum Invalid {
     MissingFile(String),
     DuplicateFile(String),
     UnexpectedFile(String),
-    NoCitation { file: String, line: String },
-    CitationOutsideTimeline { file: String, citation: String },
-    TooLong { file: String, lines: usize, max: usize },
+    NoCitation {
+        file: String,
+        line: String,
+    },
+    CitationOutsideTimeline {
+        file: String,
+        citation: String,
+    },
+    TooLong {
+        file: String,
+        lines: usize,
+        max: usize,
+    },
 }
 
 impl std::fmt::Display for Invalid {
@@ -169,15 +179,11 @@ impl std::fmt::Display for Invalid {
 
 fn citation() -> &'static Regex {
     static CITATION: OnceLock<Regex> = OnceLock::new();
-    CITATION.get_or_init(|| {
-        Regex::new(r"\b(\d{2}):(\d{2})[-\x{2013}](\d{2}):(\d{2})\b").unwrap()
-    })
+    CITATION.get_or_init(|| Regex::new(r"\b(\d{2}):(\d{2})[-\x{2013}](\d{2}):(\d{2})\b").unwrap())
 }
 
 fn inside(minute: u32, spans: &[(u32, u32)]) -> bool {
-    spans
-        .iter()
-        .any(|(s, e)| minute >= *s && minute <= *e)
+    spans.iter().any(|(s, e)| minute >= *s && minute <= *e)
         || spans
             .iter()
             .any(|(s, e)| minute + 24 * 60 >= *s && minute + 24 * 60 <= *e)
@@ -271,7 +277,10 @@ pub fn trim_input(text: &str, max_chars: usize) -> (String, usize) {
     }
     let mut trimmed = 0usize;
     let total = |blocks: &[(Vec<String>, Vec<String>)]| -> usize {
-        preamble.iter().map(|l| l.chars().count() + 1).sum::<usize>()
+        preamble
+            .iter()
+            .map(|l| l.chars().count() + 1)
+            .sum::<usize>()
             + blocks
                 .iter()
                 .map(|(h, b)| {
@@ -286,9 +295,7 @@ pub fn trim_input(text: &str, max_chars: usize) -> (String, usize) {
         let Some((index, _)) = blocks
             .iter()
             .enumerate()
-            .filter(|(_, (_, b))| {
-                b.len() > 1 || (b.len() == 1 && !b[0].starts_with("[trimmed"))
-            })
+            .filter(|(_, (_, b))| b.len() > 1 || (b.len() == 1 && !b[0].starts_with("[trimmed")))
             .max_by_key(|(_, (_, b))| b.iter().map(|l| l.chars().count()).sum::<usize>())
         else {
             break;
@@ -338,11 +345,7 @@ pub fn write_call(
     files: &[(String, String)],
     fm: &Frontmatter,
 ) -> std::io::Result<()> {
-    let tmp = kb_root(folder).join(format!(
-        ".tmp-{}-{}",
-        date.format("%Y-%m-%d"),
-        call.label()
-    ));
+    let tmp = kb_root(folder).join(format!(".tmp-{}-{}", date.format("%Y-%m-%d"), call.label()));
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp)?;
     for (name, body) in files {
@@ -500,6 +503,9 @@ fn strip_frontmatter(text: &str) -> &str {
     }
 }
 
+/// One KB file, the manifest, or the concatenated prompt view when `file`
+/// is None. The Day view command lands in Task 11.
+#[allow(dead_code)]
 pub fn read_kb(folder: &Path, date: NaiveDate, file: Option<&str>) -> Option<String> {
     let dir = kb_dir(folder, date);
     match file {
@@ -618,9 +624,7 @@ mod tests {
         let text = "## 09:00\u{2013}09:10 \u{00b7} A\n\nshort\n\n## 09:10\u{2013}09:20 \u{00b7} B\n\nfile: /x\n\nthis body is much longer than the other one by a wide margin\nsecond line\n";
         let (out, trimmed) = trim_input(text, 90);
         assert_eq!(trimmed, 1);
-        assert!(out.contains(
-            "## 09:10\u{2013}09:20 \u{00b7} B\n\nfile: /x\n\n[trimmed 2 lines]\n"
-        ));
+        assert!(out.contains("## 09:10\u{2013}09:20 \u{00b7} B\n\nfile: /x\n\n[trimmed 2 lines]\n"));
         assert!(out.contains("short"));
         let (same, none) = trim_input(text, 10_000);
         assert_eq!((same.as_str(), none), (text, 0));
@@ -637,22 +641,16 @@ mod tests {
         };
         let files = split_output(GOOD_MESSAGES).files;
         write_call(dir.path(), date(), Call::Messages, &files, &fm).unwrap();
-        let people =
-            std::fs::read_to_string(kb_dir(dir.path(), date()).join("people.md")).unwrap();
+        let people = std::fs::read_to_string(kb_dir(dir.path(), date()).join("people.md")).unwrap();
         assert!(people.starts_with(
             "---\ndate: 2026-09-02\nkind: kb\nsource: messages.md\ngenerated_by: stub\nprompt_sha256: abc\n---\n\n## Dan"
         ));
-        assert!(
-            !dir
-                .path()
-                .join("KB")
-                .join(".tmp-2026-09-02-messages")
-                .exists()
-        );
-        assert!(
-            !has_kb(dir.path(), date()),
-            "no accepted call recorded yet"
-        );
+        assert!(!dir
+            .path()
+            .join("KB")
+            .join(".tmp-2026-09-02-messages")
+            .exists());
+        assert!(!has_kb(dir.path(), date()), "no accepted call recorded yet");
     }
 
     #[test]
@@ -701,8 +699,7 @@ mod tests {
         assert!(has_kb(dir.path(), date()));
         let manifest = read_manifest(dir.path(), date());
         assert_eq!(manifest.calls["ingest_apps"].engine, "stub");
-        let text =
-            std::fs::read_to_string(kb_dir(dir.path(), date()).join("manifest.md")).unwrap();
+        let text = std::fs::read_to_string(kb_dir(dir.path(), date()).join("manifest.md")).unwrap();
         assert!(text.contains("ingest_apps.disposition: accepted\n"));
     }
 

@@ -58,11 +58,316 @@ pub fn due(
     pending
 }
 
+use crate::ingest::{self, Call};
+use crate::prompt::PromptId;
 use crate::{agent, ledger, settings, summarise, writer};
 use serde::Serialize;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
+
+pub struct Prompts {
+    pub day_context: String,
+    pub ingest_messages: String,
+    pub ingest_apps: String,
+    pub ingest_websites: String,
+}
+
+impl Prompts {
+    pub fn load(config_dir: &Path) -> Prompts {
+        Prompts {
+            day_context: crate::prompt::current(config_dir, PromptId::DayContext),
+            ingest_messages: crate::prompt::current(config_dir, PromptId::IngestMessages),
+            ingest_apps: crate::prompt::current(config_dir, PromptId::IngestApps),
+            ingest_websites: crate::prompt::current(config_dir, PromptId::IngestWebsites),
+        }
+    }
+
+    pub fn for_call(&self, call: Call) -> &str {
+        match call {
+            Call::Messages => &self.ingest_messages,
+            Call::Apps => &self.ingest_apps,
+            Call::Websites => &self.ingest_websites,
+        }
+    }
+}
+
+pub struct Pipeline<'a> {
+    pub folder: &'a Path,
+    pub summary_agent: &'a settings::Agent,
+    pub ingest_agent: &'a settings::Agent,
+    pub prompts: &'a Prompts,
+    pub ingest_max_chars: usize,
+    pub reject_dir: &'a Path,
+    pub env: &'a std::collections::HashMap<String, String>,
+}
+
+fn timeline_input(folder: &Path, date: NaiveDate) -> Result<(String, ledger::Input), String> {
+    let timeline = crate::days::timeline(folder, date)
+        .ok_or_else(|| format!("there is no capture for {date}"))?;
+    let input = ledger::Input {
+        path: PathBuf::from(format!("Days/{}/timeline", date.format("%Y-%m-%d"))),
+        sha256: ledger::sha256_of(timeline.as_bytes()),
+    };
+    Ok((timeline, input))
+}
+
+fn call_input(folder: &Path, date: NaiveDate, call: Call) -> Option<String> {
+    match call {
+        Call::Websites => {
+            crate::days::read_day(folder, date, crate::writer::DayFile::Websites)?;
+            Some(crate::days::render_totals(&crate::days::website_totals(
+                folder, date,
+            )))
+        }
+        other => crate::days::read_day(folder, date, other.source()),
+    }
+}
+
+pub fn ingest_call(
+    p: &Pipeline,
+    call: Call,
+    date: NaiveDate,
+    trigger: ledger::Trigger,
+) -> Result<(), String> {
+    let (timeline, timeline_input) = timeline_input(p.folder, date)?;
+    let template = p.prompts.for_call(call);
+    let prompt_sha = ledger::sha256_of(template.as_bytes());
+
+    let Some(raw) = call_input(p.folder, date, call) else {
+        ingest::write_skipped(p.folder, date, call).map_err(|e| e.to_string())?;
+        return Ok(());
+    };
+    let input_sha = ledger::sha256_of(raw.as_bytes());
+    let timeline_sha = timeline_input.sha256.clone();
+    let (input, trimmed) = ingest::trim_input(&raw, p.ingest_max_chars);
+
+    let mut entry = ledger::Entry {
+        at: Local::now(),
+        trigger,
+        action: call.action().to_string(),
+        prompt_id: Some(call.prompt().as_str().to_string()),
+        prompt_sha256: Some(prompt_sha.clone()),
+        engine: Some(p.ingest_agent.label.clone()),
+        inputs: vec![
+            ledger::Input {
+                path: call.source().path(p.folder, date),
+                sha256: input_sha.clone(),
+            },
+            timeline_input,
+        ],
+        output: None,
+        reasoning: if trimmed > 0 {
+            Some(format!("input trimmed: {trimmed} blocks"))
+        } else {
+            None
+        },
+        disposition: ledger::Disposition::Accepted,
+    };
+    let record = |disposition: &str| ingest::CallRecord {
+        disposition: disposition.to_string(),
+        input_sha256: input_sha.clone(),
+        timeline_sha256: timeline_sha.clone(),
+        prompt_sha256: prompt_sha.clone(),
+        engine: p.ingest_agent.label.clone(),
+        at: Local::now().to_rfc3339(),
+    };
+
+    let prompt = template
+        .replace("{{DATE}}", &date.format("%Y-%m-%d").to_string())
+        .replace("{{TIMELINE}}", &timeline)
+        .replace("{{INPUT}}", &input);
+
+    let output = match agent::run_with_env(p.ingest_agent, &prompt, p.env) {
+        Ok(output) => output,
+        Err(error) => {
+            let message = error.to_string();
+            entry.disposition = ledger::Disposition::Failed {
+                stderr: message.clone(),
+            };
+            record_in_ledger(p.folder, &entry);
+            let _ = ingest::record_call(p.folder, date, call, record("failed"));
+            return Err(message);
+        }
+    };
+    entry.output = Some(output.clone());
+    let split = ingest::split_output(&output);
+    if let Some(reasoning) = &split.reasoning {
+        entry.reasoning = Some(match entry.reasoning.take() {
+            Some(prefix) => format!("{prefix}\n\n{reasoning}"),
+            None => reasoning.clone(),
+        });
+    }
+    let spans = crate::days::spans(&timeline);
+    if let Err(invalid) = ingest::validate(call, &split, &spans) {
+        let _ = std::fs::create_dir_all(p.reject_dir);
+        let _ = std::fs::write(
+            p.reject_dir
+                .join(format!("{}-{}.md", date.format("%Y-%m-%d"), call.label())),
+            &output,
+        );
+        entry.disposition = ledger::Disposition::Rejected {
+            reason: invalid.to_string(),
+        };
+        record_in_ledger(p.folder, &entry);
+        let _ = ingest::record_call(p.folder, date, call, record("rejected"));
+        return Err(format!("{invalid}; the output was kept for inspection"));
+    }
+    let fm = ingest::Frontmatter {
+        date,
+        source: call.source().file_name().to_string(),
+        generated_by: p.ingest_agent.label.clone(),
+        prompt_sha256: prompt_sha.clone(),
+    };
+    ingest::write_call(p.folder, date, call, &split.files, &fm)
+        .map_err(|e| format!("the KB could not be written: {e}"))?;
+    ingest::record_call(p.folder, date, call, record("accepted")).map_err(|e| e.to_string())?;
+    record_in_ledger(p.folder, &entry);
+    Ok(())
+}
+
+pub fn summarise_day(
+    p: &Pipeline,
+    date: NaiveDate,
+    trigger: ledger::Trigger,
+) -> Result<(), String> {
+    let (timeline, timeline_input) = timeline_input(p.folder, date)?;
+    let kb = ingest::kb_for_prompt(p.folder, date);
+    let mut inputs = vec![
+        ledger::hash_file(&writer::DayFile::Apps.path(p.folder, date))
+            .map_err(|e| e.to_string())?,
+        timeline_input,
+    ];
+    for name in ingest::KB_FILES {
+        if let Ok(input) = ledger::hash_file(&ingest::kb_dir(p.folder, date).join(name)) {
+            inputs.push(input);
+        }
+    }
+    let template = &p.prompts.day_context;
+    let mut entry = ledger::Entry {
+        at: Local::now(),
+        trigger,
+        action: "summarise_day".to_string(),
+        prompt_id: Some("day-context".to_string()),
+        prompt_sha256: Some(ledger::sha256_of(template.as_bytes())),
+        engine: Some(p.summary_agent.label.clone()),
+        inputs,
+        output: None,
+        reasoning: None,
+        disposition: ledger::Disposition::Accepted,
+    };
+
+    let prompt = summarise::build_prompt(template, date, &timeline, &kb);
+
+    let output = match agent::run_with_env(p.summary_agent, &prompt, p.env) {
+        Ok(output) => output,
+        Err(error) => {
+            let message = error.to_string();
+            entry.disposition = ledger::Disposition::Failed {
+                stderr: message.clone(),
+            };
+            record_in_ledger(p.folder, &entry);
+            return Err(message);
+        }
+    };
+
+    entry.output = Some(output.clone());
+    entry.reasoning = summarise::reasoning_of(&output);
+
+    if let Err(invalid) = summarise::validate(&output, summarise::MAX_SUMMARY_LINES) {
+        let _ = std::fs::create_dir_all(p.reject_dir);
+        let _ = std::fs::write(p.reject_dir.join(format!("{date}.md")), &output);
+        entry.disposition = ledger::Disposition::Rejected {
+            reason: invalid.to_string(),
+        };
+        record_in_ledger(p.folder, &entry);
+        return Err(format!("{invalid}; the output was kept for inspection"));
+    }
+
+    summarise::write_summary(p.folder, date, &output)
+        .map_err(|e| format!("the summary could not be written: {e}"))?;
+    entry.disposition = ledger::Disposition::Accepted;
+    record_in_ledger(p.folder, &entry);
+    Ok(())
+}
+
+pub fn run_day_pipeline(
+    p: &Pipeline,
+    date: NaiveDate,
+    trigger: ledger::Trigger,
+    force_ingest: bool,
+    summarise: bool,
+    mut on_step: impl FnMut(&str),
+) -> Result<(), String> {
+    let (timeline, _) = timeline_input(p.folder, date)?;
+    let timeline_sha = ledger::sha256_of(timeline.as_bytes());
+    for (index, call) in Call::ALL.iter().enumerate() {
+        let hashes = ingest::Hashes {
+            input: call_input(p.folder, date, *call)
+                .map(|t| ledger::sha256_of(t.as_bytes()))
+                .unwrap_or_else(|| "none".into()),
+            timeline: timeline_sha.clone(),
+            prompt: ledger::sha256_of(p.prompts.for_call(*call).as_bytes()),
+        };
+        if !force_ingest && !ingest::needs_ingest(p.folder, date, *call, &hashes) {
+            continue;
+        }
+        if hashes.input != "none" {
+            on_step(&format!("ingesting {} ({} of 3)", call.label(), index + 1));
+        }
+        ingest_call(p, *call, date, trigger.clone())?;
+    }
+    if summarise {
+        on_step("summarising");
+        summarise_day(p, date, trigger)?;
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(dead_code)] // Ingest is queued from ingest_now in Task 11
+pub enum JobKind {
+    Summarise,
+    Ingest { force: bool },
+}
+
+pub fn run_one(
+    app: &AppHandle,
+    date: NaiveDate,
+    trigger: ledger::Trigger,
+    kind: JobKind,
+    on_step: impl FnMut(&str),
+) -> Result<(), String> {
+    let config = settings::load(app);
+    let folder = config.folder.clone().ok_or("no capture folder is set")?;
+    let summary_agent = config.agent.clone().ok_or("no agent is connected")?;
+    let ingest_agent = config
+        .ingest_agent
+        .clone()
+        .unwrap_or_else(|| summary_agent.clone());
+    let config_dir = settings::config_dir(app);
+    let prompts = Prompts::load(&config_dir);
+    let reject_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("rejected");
+    let env = crate::agent_env(app);
+    let p = Pipeline {
+        folder: &folder,
+        summary_agent: &summary_agent,
+        ingest_agent: &ingest_agent,
+        prompts: &prompts,
+        ingest_max_chars: config.ingest_max_chars,
+        reject_dir: &reject_dir,
+        env: &env,
+    };
+    match kind {
+        JobKind::Summarise => run_day_pipeline(&p, date, trigger, false, true, on_step),
+        JobKind::Ingest { force } => run_day_pipeline(&p, date, trigger, force, false, on_step),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Outcome {
@@ -157,103 +462,6 @@ fn record_in_ledger(folder: &Path, entry: &ledger::Entry) {
     }
 }
 
-/// Summarises one day: read the day file, build the prompt, run the agent,
-/// validate, write, ledger. Every path through this function writes exactly
-/// one ledger entry, and every failure returns a sentence a person can act
-/// on.
-#[allow(clippy::too_many_arguments)]
-pub fn summarise_day(
-    folder: &Path,
-    agent_config: &settings::Agent,
-    template: &str,
-    date: NaiveDate,
-    trigger: ledger::Trigger,
-    reject_dir: &Path,
-    env: &std::collections::HashMap<String, String>,
-) -> Result<(), String> {
-    let day_path = writer::DayFile::Apps.path(folder, date);
-    std::fs::read_to_string(&day_path)
-        .map_err(|_| format!("there is no capture for {date}"))?;
-
-    let timeline = crate::days::timeline(folder, date).unwrap_or_default();
-    let kb = String::new();
-
-    let mut entry = ledger::Entry {
-        // The moment the run started, so a reader can line an entry up
-        // against the day file's own headings.
-        at: Local::now(),
-        trigger,
-        action: "summarise_day".to_string(),
-        prompt_id: Some("day-context".to_string()),
-        prompt_sha256: Some(ledger::sha256_of(template.as_bytes())),
-        engine: Some(agent_config.label.clone()),
-        inputs: ledger::hash_file(&day_path)
-            .map(|i| vec![i])
-            .unwrap_or_default(),
-        output: None,
-        reasoning: None,
-        disposition: ledger::Disposition::Accepted,
-    };
-
-    let prompt = summarise::build_prompt(template, date, &timeline, &kb);
-
-    let output = match agent::run_with_env(agent_config, &prompt, env) {
-        Ok(output) => output,
-        Err(error) => {
-            let message = error.to_string();
-            entry.disposition = ledger::Disposition::Failed {
-                stderr: message.clone(),
-            };
-            record_in_ledger(folder, &entry);
-            return Err(message);
-        }
-    };
-
-    entry.output = Some(output.clone());
-    entry.reasoning = summarise::reasoning_of(&output);
-
-    if let Err(invalid) = summarise::validate(&output, summarise::MAX_SUMMARY_LINES) {
-        // Keep the rejected output where it can be inspected, but never
-        // beside the record.
-        let _ = std::fs::create_dir_all(reject_dir);
-        let _ = std::fs::write(reject_dir.join(format!("{date}.md")), &output);
-        entry.disposition = ledger::Disposition::Rejected {
-            reason: invalid.to_string(),
-        };
-        record_in_ledger(folder, &entry);
-        return Err(format!("{invalid}; the output was kept for inspection"));
-    }
-
-    summarise::write_summary(folder, date, &output)
-        .map_err(|e| format!("the summary could not be written: {e}"))?;
-    entry.disposition = ledger::Disposition::Accepted;
-    record_in_ledger(folder, &entry);
-    Ok(())
-}
-
-pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Result<(), String> {
-    let config = settings::load(app);
-    let folder = config.folder.clone().ok_or("no capture folder is set")?;
-    let agent_config = config.agent.clone().ok_or("no agent is connected")?;
-    let config_dir = settings::config_dir(app);
-    // The customised prompt when there is one, the bundled copy otherwise.
-    let template = crate::prompt::current(&config_dir, crate::prompt::PromptId::DayContext);
-    let reject_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("rejected");
-    summarise_day(
-        &folder,
-        &agent_config,
-        &template,
-        date,
-        trigger,
-        &reject_dir,
-        &crate::agent_env(app),
-    )
-}
-
 /// Ticks once a minute. A minute is fine granularity for a daily job and
 /// costs nothing; it also means a machine waking at 09:14 catches up within
 /// a minute rather than waiting for a precise instant it already missed.
@@ -308,7 +516,13 @@ fn tick(app: &AppHandle) {
 
     state.set_running(true);
     for date in pending {
-        let result = run_one(app, date, ledger::Trigger::Schedule);
+        let result = run_one(
+            app,
+            date,
+            ledger::Trigger::Schedule,
+            JobKind::Summarise,
+            |_| {},
+        );
         let outcome = Outcome {
             when: Local::now(),
             date,
@@ -338,8 +552,12 @@ fn tick(app: &AppHandle) {
             continue;
         }
         let date = job.date;
+        let kind = job.kind;
         app.state::<JobQueue>().record(&job.id, JobStatus::Running);
-        let result = run_one(app, date, job.trigger);
+        let job_id = job.id.clone();
+        let result = run_one(app, date, job.trigger, kind, |step| {
+            app.state::<JobQueue>().record_step(&job_id, step);
+        });
         let status = match &result {
             Ok(()) => JobStatus::Done,
             Err(stderr) => JobStatus::Failed {
@@ -351,9 +569,10 @@ fn tick(app: &AppHandle) {
             when: Local::now(),
             date,
             ok: result.is_ok(),
-            message: match &result {
-                Ok(()) => format!("Summarised {date}"),
-                Err(message) => format!("{date} failed: {message}"),
+            message: match (&result, kind) {
+                (Ok(()), JobKind::Summarise) => format!("Summarised {date}"),
+                (Ok(()), JobKind::Ingest { .. }) => format!("Ingested {date}"),
+                (Err(message), _) => format!("{date} failed: {message}"),
             },
         };
         state.record(outcome);
@@ -414,13 +633,16 @@ impl std::fmt::Display for JobId {
 pub struct JobSummary {
     pub id: String,
     pub date: NaiveDate,
+    pub kind: JobKind,
     pub status: JobStatus,
+    pub step: Option<String>,
 }
 
 #[derive(Debug)]
 struct QueuedJob {
     id: String,
     date: NaiveDate,
+    kind: JobKind,
     trigger: ledger::Trigger,
 }
 
@@ -449,19 +671,22 @@ impl JobQueue {
         Self::default()
     }
 
-    fn push(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
+    fn push(&self, date: NaiveDate, kind: JobKind, trigger: ledger::Trigger) -> JobId {
         use std::sync::atomic::Ordering;
         let n = self.counter.fetch_add(1, Ordering::SeqCst);
         let id = format!("job-{n}");
         self.queue.lock().expect("job queue").push_back(QueuedJob {
             id: id.clone(),
             date,
+            kind,
             trigger,
         });
         self.history.lock().expect("job history").push(JobSummary {
             id: id.clone(),
             date,
+            kind,
             status: JobStatus::Queued,
+            step: None,
         });
         self.work.notify_all();
         JobId(id)
@@ -481,7 +706,18 @@ impl JobQueue {
     /// The trigger travels with the job because the runner writes the ledger
     /// entry, and an MCP-triggered summary must name the client that asked.
     pub fn enqueue_summarise_with(&self, date: NaiveDate, trigger: ledger::Trigger) -> JobId {
-        self.push(date, trigger)
+        self.push(date, JobKind::Summarise, trigger)
+    }
+
+    /// Queues a full ingest run, optionally forcing all three calls to rerun.
+    #[allow(dead_code)] // ingest_now in Task 11
+    pub fn enqueue_ingest_with(
+        &self,
+        date: NaiveDate,
+        force: bool,
+        trigger: ledger::Trigger,
+    ) -> JobId {
+        self.push(date, JobKind::Ingest { force }, trigger)
     }
 
     #[cfg(test)]
@@ -533,6 +769,19 @@ impl JobQueue {
         let mut history = self.history.lock().expect("job history");
         if let Some(job) = history.iter_mut().find(|job| job.id == id) {
             job.status = status;
+            if matches!(
+                job.status,
+                JobStatus::Done | JobStatus::Failed { .. } | JobStatus::Cancelled
+            ) {
+                job.step = None;
+            }
+        }
+    }
+
+    pub fn record_step(&self, id: &str, step: &str) {
+        let mut history = self.history.lock().expect("job history");
+        if let Some(job) = history.iter_mut().find(|job| job.id == id) {
+            job.step = Some(step.to_string());
         }
     }
 
@@ -690,14 +939,73 @@ mod tests {
         }
     }
 
-    fn write_day(folder: &std::path::Path, date: NaiveDate) {
-        let path = crate::writer::DayFile::Apps.path(folder, date);
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(
-            path,
-            "---\ndate: 2026-08-28\nkind: apps\n---\n\n## 09:00\u{2013}11:00 \u{00b7} Linear\n\nread the issue\n",
+    fn stub_reply(dir: &std::path::Path, name: &str, reply: &str) -> crate::settings::Agent {
+        let path = dir.join(name);
+        std::fs::write(&path, reply).unwrap();
+        stub_agent(
+            "/bin/sh",
+            &["-c", &format!("cat > /dev/null; cat '{}'", path.display())],
         )
-        .unwrap();
+    }
+
+    fn write_days(folder: &std::path::Path) {
+        use crate::writer::DayFile;
+        let d = day(2026, 8, 28);
+        for (file, text) in [
+            (
+                DayFile::Apps,
+                "---\ndate: 2026-08-28\nkind: apps\n---\n\n## 09:00\u{2013}11:00 \u{00b7} Zed \u{b7} jobs.rs\n\nfile: /x/jobs.rs\n\nfn tick\n\n## 11:00\u{2013}11:20 \u{00b7} Slack \u{b7} #x\n\nrouted: messages\n",
+            ),
+            (
+                DayFile::Messages,
+                "---\ndate: 2026-08-28\nkind: messages\n---\n\n## 11:00\u{2013}11:20 \u{00b7} Slack \u{b7} #x\n\ndan: can you ship it thursday\n",
+            ),
+            (
+                DayFile::Websites,
+                "---\ndate: 2026-08-28\nkind: websites\n---\n\n| start | end | app | domain | title | url |\n| --- | --- | --- | --- | --- | --- |\n| 09:30 | 09:41 | Arc | v2.tauri.app | Tauri | https://v2.tauri.app/ |\n",
+            ),
+        ] {
+            let path = file.path(folder, d);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        }
+    }
+
+    const APPS_REPLY: &str = "<<<file: threads.md>>>\n## jobs.rs\nEdited tick 09:00-11:00 file: /x/jobs.rs\n<<<file: products.md>>>\nNothing evident.\n<<<file: issues.md>>>\nNothing evident.\n<<<reasoning>>>\nOne thread.\n";
+    const MESSAGES_REPLY: &str = "<<<file: people.md>>>\n## Dan\nAsked to ship it Thursday 11:00-11:20\n<<<file: commitments.md>>>\n## I agreed to\n- [ ] ship it · with Dan · 11:00-11:20 · none\n\n## Owed to me\nNothing evident.\n";
+    const WEBSITES_REPLY: &str = "<<<file: reading.md>>>\nNothing evident.\n";
+
+    fn prompts() -> Prompts {
+        Prompts {
+            day_context: "{{DATE}}\n{{TIMELINE}}\n{{KB}}".into(),
+            ingest_messages: "{{DATE}} {{TIMELINE}} {{INPUT}}".into(),
+            ingest_apps: "{{DATE}} {{TIMELINE}} {{INPUT}}".into(),
+            ingest_websites: "{{DATE}} {{TIMELINE}} {{INPUT}}".into(),
+        }
+    }
+
+    fn pipeline<'a>(
+        folder: &'a std::path::Path,
+        rejects: &'a std::path::Path,
+        agent: &'a crate::settings::Agent,
+        prompts: &'a Prompts,
+        env: &'a std::collections::HashMap<String, String>,
+    ) -> Pipeline<'a> {
+        Pipeline {
+            folder,
+            summary_agent: agent,
+            ingest_agent: agent,
+            prompts,
+            ingest_max_chars: 400_000,
+            reject_dir: rejects,
+            env,
+        }
+    }
+
+    fn write_fixture(dir: &std::path::Path, name: &str, text: &str) -> std::path::PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, text).unwrap();
+        path
     }
 
     fn valid_summary() -> String {
@@ -720,23 +1028,228 @@ mod tests {
     }
 
     #[test]
+    fn an_accepted_ingest_call_writes_its_files_manifest_and_ledger() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        let agent = stub_reply(folder.path(), "reply.md", APPS_REPLY);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        ingest_call(
+            &p,
+            Call::Apps,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+        )
+        .unwrap();
+        let kb = ingest::kb_dir(folder.path(), day(2026, 8, 28));
+        assert!(kb.join("threads.md").exists());
+        assert!(std::fs::read_to_string(kb.join("products.md"))
+            .unwrap()
+            .contains("generated_by: stub"));
+        assert_eq!(
+            ingest::read_manifest(folder.path(), day(2026, 8, 28)).calls["ingest_apps"].disposition,
+            "accepted"
+        );
+        let ledger = std::fs::read_to_string(crate::ledger::ledger_path(
+            folder.path(),
+            Local::now().date_naive(),
+        ))
+        .unwrap();
+        assert!(ledger.contains("ingest_apps"));
+        assert!(ledger.contains("Days/2026-08-28/timeline"));
+        assert!(ledger.contains("One thread."));
+    }
+
+    #[test]
+    fn a_rejected_ingest_call_keeps_the_output_and_writes_no_kb_file() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        let agent = stub_reply(
+            folder.path(),
+            "reply.md",
+            "<<<file: threads.md>>>\n## jobs.rs\nno citation here\n<<<file: products.md>>>\nNothing evident.\n<<<file: issues.md>>>\nNothing evident.\n",
+        );
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let error = ingest_call(
+            &p,
+            Call::Apps,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+        )
+        .unwrap_err();
+        assert!(error.contains("no time range"), "{error}");
+        assert!(rejects.path().join("2026-08-28-apps.md").exists());
+        assert!(!ingest::kb_dir(folder.path(), day(2026, 8, 28))
+            .join("threads.md")
+            .exists());
+        assert_eq!(
+            ingest::read_manifest(folder.path(), day(2026, 8, 28)).calls["ingest_apps"].disposition,
+            "rejected"
+        );
+    }
+
+    #[test]
+    fn the_pipeline_runs_three_calls_then_the_summary_and_skips_what_is_current() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        let script = format!(
+            "input=$(cat); case \"$input\" in *'dan: can you'*) cat '{m}';; *'fn tick'*) cat '{a}';; *'| domain |'*) cat '{w}';; *) cat '{s}';; esac",
+            m = write_fixture(folder.path(), "m.md", MESSAGES_REPLY).display(),
+            a = write_fixture(folder.path(), "a.md", APPS_REPLY).display(),
+            w = write_fixture(folder.path(), "w.md", WEBSITES_REPLY).display(),
+            s = write_fixture(folder.path(), "s.md", &valid_summary()).display(),
+        );
+        let agent = stub_agent("/bin/sh", &["-c", &script]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let mut steps: Vec<String> = Vec::new();
+        run_day_pipeline(
+            &p,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+            false,
+            true,
+            |s| steps.push(s.to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            steps,
+            vec![
+                "ingesting messages (1 of 3)".to_string(),
+                "ingesting apps (2 of 3)".to_string(),
+                "ingesting websites (3 of 3)".to_string(),
+                "summarising".to_string(),
+            ]
+        );
+        assert!(crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
+        let ledger = std::fs::read_to_string(crate::ledger::ledger_path(
+            folder.path(),
+            Local::now().date_naive(),
+        ))
+        .unwrap();
+        for action in [
+            "ingest_messages",
+            "ingest_apps",
+            "ingest_websites",
+            "summarise_day",
+        ] {
+            assert!(ledger.contains(action), "{action}");
+        }
+        assert!(
+            ledger.contains("KB/2026-08-28/people.md"),
+            "summary inputs list KB files"
+        );
+
+        steps.clear();
+        run_day_pipeline(
+            &p,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+            false,
+            true,
+            |s| steps.push(s.to_string()),
+        )
+        .unwrap();
+        assert_eq!(steps, vec!["summarising".to_string()]);
+
+        steps.clear();
+        run_day_pipeline(
+            &p,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+            true,
+            false,
+            |s| steps.push(s.to_string()),
+        )
+        .unwrap();
+        assert_eq!(steps.len(), 3);
+    }
+
+    #[test]
+    fn a_day_without_messages_skips_that_call_and_writes_nothing_evident() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        std::fs::remove_file(
+            crate::writer::DayFile::Messages.path(folder.path(), day(2026, 8, 28)),
+        )
+        .unwrap();
+        let script = format!(
+            "input=$(cat); case \"$input\" in *'fn tick'*) cat '{a}';; *) cat '{w}';; esac",
+            a = write_fixture(folder.path(), "a.md", APPS_REPLY).display(),
+            w = write_fixture(folder.path(), "w.md", WEBSITES_REPLY).display(),
+        );
+        let agent = stub_agent("/bin/sh", &["-c", &script]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let mut steps: Vec<String> = Vec::new();
+        run_day_pipeline(
+            &p,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::OnDemand,
+            false,
+            false,
+            |s| steps.push(s.to_string()),
+        )
+        .unwrap();
+        assert_eq!(
+            steps,
+            vec![
+                "ingesting apps (2 of 3)".to_string(),
+                "ingesting websites (3 of 3)".to_string(),
+            ]
+        );
+        let manifest = ingest::read_manifest(folder.path(), day(2026, 8, 28));
+        assert_eq!(manifest.calls["ingest_messages"].disposition, "skipped");
+        assert!(std::fs::read_to_string(
+            ingest::kb_dir(folder.path(), day(2026, 8, 28)).join("people.md")
+        )
+        .unwrap()
+        .contains("Nothing evident."));
+    }
+
+    #[test]
+    fn a_failed_ingest_stops_the_pipeline_before_the_summary() {
+        let folder = tempdir().unwrap();
+        let rejects = tempdir().unwrap();
+        write_days(folder.path());
+        let agent = stub_agent("/bin/sh", &["-c", "echo not logged in >&2; exit 1"]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let error = run_day_pipeline(
+            &p,
+            day(2026, 8, 28),
+            crate::ledger::Trigger::Schedule,
+            false,
+            true,
+            |_| {},
+        )
+        .unwrap_err();
+        assert!(error.contains("not logged in"), "{error}");
+        assert!(!crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
+    }
+
+    #[test]
     fn a_malformed_run_writes_one_ledger_entry_and_no_summary() {
         let folder = tempdir().unwrap();
         let rejects = tempdir().unwrap();
-        write_day(folder.path(), day(2026, 8, 28));
+        write_days(folder.path());
 
-        // /bin/echo ignores stdin and prints its argument: an agent that
-        // answers, badly.
-        let error = summarise_day(
-            folder.path(),
-            &stub_agent("/bin/echo", &["not a summary"]),
-            "{{DATE}}\n{{DAY_FILE}}",
-            day(2026, 8, 28),
-            crate::ledger::Trigger::Schedule,
-            rejects.path(),
-            &test_env(),
-        )
-        .unwrap_err();
+        let agent = stub_agent("/bin/echo", &["not a summary"]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let error =
+            summarise_day(&p, day(2026, 8, 28), crate::ledger::Trigger::Schedule).unwrap_err();
 
         assert!(error.contains("frontmatter"), "error was {error:?}");
         assert!(!crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
@@ -752,18 +1265,14 @@ mod tests {
     fn an_agent_that_never_returns_an_answer_is_still_ledgered() {
         let folder = tempdir().unwrap();
         let rejects = tempdir().unwrap();
-        write_day(folder.path(), day(2026, 8, 28));
+        write_days(folder.path());
 
-        let error = summarise_day(
-            folder.path(),
-            &stub_agent("/bin/sh", &["-c", "echo not logged in >&2; exit 1"]),
-            "{{DAY_FILE}}",
-            day(2026, 8, 28),
-            crate::ledger::Trigger::Schedule,
-            rejects.path(),
-            &test_env(),
-        )
-        .unwrap_err();
+        let agent = stub_agent("/bin/sh", &["-c", "echo not logged in >&2; exit 1"]);
+        let prompts = prompts();
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        let error =
+            summarise_day(&p, day(2026, 8, 28), crate::ledger::Trigger::Schedule).unwrap_err();
 
         assert!(error.contains("not logged in"), "error was {error:?}");
         let ledger_file = crate::ledger::ledger_path(folder.path(), Local::now().date_naive());
@@ -776,20 +1285,18 @@ mod tests {
     fn a_valid_run_writes_the_summary_and_an_accepted_entry_with_its_reasoning() {
         let folder = tempdir().unwrap();
         let rejects = tempdir().unwrap();
-        write_day(folder.path(), day(2026, 8, 28));
+        write_days(folder.path());
 
-        // /bin/cat returns whatever the prompt was, so a template with no
-        // placeholders is a stub agent that answers correctly.
-        summarise_day(
-            folder.path(),
-            &stub_agent("/bin/cat", &[]),
-            &valid_summary(),
-            day(2026, 8, 28),
-            crate::ledger::Trigger::OnDemand,
-            rejects.path(),
-            &test_env(),
-        )
-        .unwrap();
+        let agent = stub_agent("/bin/cat", &[]);
+        let prompts = Prompts {
+            day_context: valid_summary(),
+            ingest_messages: String::new(),
+            ingest_apps: String::new(),
+            ingest_websites: String::new(),
+        };
+        let env = test_env();
+        let p = pipeline(folder.path(), rejects.path(), &agent, &prompts, &env);
+        summarise_day(&p, day(2026, 8, 28), crate::ledger::Trigger::OnDemand).unwrap();
 
         let summary = std::fs::read_to_string(crate::summarise::summary_path(
             folder.path(),
@@ -804,6 +1311,14 @@ mod tests {
         assert!(text.contains("Kept the long block."));
         assert!(text.contains("- trigger: on demand"));
         assert!(text.contains("sha256 "), "inputs are pinned by hash");
+    }
+
+    #[test]
+    fn ingest_jobs_can_be_enqueued() {
+        let queue = JobQueue::for_test();
+        let id = queue.enqueue_ingest_with(day(2026, 8, 30), false, ledger::Trigger::OnDemand);
+        let job = queue.find(&id.0).expect("the queued job");
+        assert!(matches!(job.kind, JobKind::Ingest { force: false }));
     }
 
     #[test]

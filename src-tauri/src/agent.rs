@@ -356,6 +356,7 @@ pub fn claude_code_args_for(model: &str) -> Vec<String> {
     args
 }
 
+#[allow(dead_code)] // normalised onto connected agents; kept for preset migration tests
 pub fn claude_code_args() -> Vec<String> {
     claude_code_args_for(CLAUDE_DEFAULT_MODEL)
 }
@@ -569,11 +570,7 @@ mod tests {
 
     #[test]
     fn a_nonzero_exit_falls_back_to_stdout_when_stderr_is_empty() {
-        let agent = agent_for(
-            "/bin/sh",
-            &["-c", "echo out of tokens; exit 1"],
-            10,
-        );
+        let agent = agent_for("/bin/sh", &["-c", "echo out of tokens; exit 1"], 10);
         let out = run(&agent, "x");
         assert_eq!(out.status, 1);
         assert_eq!(out.stderr, "out of tokens");
@@ -713,7 +710,11 @@ mod tests {
             label: "Claude Code".to_string(),
             command: "/usr/local/bin/claude".to_string(),
             // Stale argv from an older preset, but with a model the user chose.
-            args: vec!["-p".to_string(), "--model".to_string(), "claude-sonnet-5".to_string()],
+            args: vec![
+                "-p".to_string(),
+                "--model".to_string(),
+                "claude-sonnet-5".to_string(),
+            ],
             timeout_secs: 600,
         };
         normalize_claude_agent(&mut agent);

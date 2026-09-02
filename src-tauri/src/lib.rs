@@ -186,9 +186,8 @@ fn parse_date(date: &str) -> Result<chrono::NaiveDate, String> {
 fn parse_day_file(file: Option<String>) -> Result<writer::DayFile, String> {
     match file.as_deref() {
         None => Ok(writer::DayFile::Apps),
-        Some(name) => writer::DayFile::from_name(name).ok_or_else(|| {
-            format!("{name} is not one of apps, websites or messages")
-        }),
+        Some(name) => writer::DayFile::from_name(name)
+            .ok_or_else(|| format!("{name} is not one of apps, websites or messages")),
     }
 }
 
@@ -281,8 +280,9 @@ fn open_prompt_in_editor(app: tauri::AppHandle, id: Option<String>) -> Result<()
 fn prompt_id(id: Option<String>) -> Result<prompt::PromptId, String> {
     match id {
         None => Ok(prompt::PromptId::DayContext),
-        Some(name) => prompt::PromptId::parse(&name)
-            .ok_or_else(|| format!("{name} is not a prompt id")),
+        Some(name) => {
+            prompt::PromptId::parse(&name).ok_or_else(|| format!("{name} is not a prompt id"))
+        }
     }
 }
 
@@ -616,6 +616,7 @@ struct JobSummaryPayload {
     date: String,
     status: String,
     stderr: Option<String>,
+    step: Option<String>,
 }
 
 impl From<jobs::JobSummary> for JobSummaryPayload {
@@ -632,6 +633,7 @@ impl From<jobs::JobSummary> for JobSummaryPayload {
             date: job.date.to_string(),
             status: status.to_string(),
             stderr,
+            step: job.step,
         }
     }
 }
@@ -1023,12 +1025,8 @@ mod tests {
             prompt::PromptId::DayContext.bundled(),
         )
         .unwrap();
-        let target = prompt_editor_target(
-            config.path(),
-            temp.path(),
-            prompt::PromptId::DayContext,
-        )
-        .unwrap();
+        let target =
+            prompt_editor_target(config.path(), temp.path(), prompt::PromptId::DayContext).unwrap();
         assert_eq!(
             target,
             prompt::prompt_path(config.path(), prompt::PromptId::DayContext)
@@ -1039,12 +1037,8 @@ mod tests {
     fn the_bundled_prompt_opens_as_a_read_only_copy_and_stays_uncustomised() {
         let config = tempfile::tempdir().unwrap();
         let temp = tempfile::tempdir().unwrap();
-        let target = prompt_editor_target(
-            config.path(),
-            temp.path(),
-            prompt::PromptId::DayContext,
-        )
-        .unwrap();
+        let target =
+            prompt_editor_target(config.path(), temp.path(), prompt::PromptId::DayContext).unwrap();
 
         assert!(target.starts_with(temp.path()));
         assert_eq!(
@@ -1059,12 +1053,9 @@ mod tests {
         );
 
         // Opening it twice must not fail on the read-only copy it left.
-        assert!(prompt_editor_target(
-            config.path(),
-            temp.path(),
-            prompt::PromptId::DayContext,
-        )
-        .is_ok());
+        assert!(
+            prompt_editor_target(config.path(), temp.path(), prompt::PromptId::DayContext,).is_ok()
+        );
     }
 
     #[test]
