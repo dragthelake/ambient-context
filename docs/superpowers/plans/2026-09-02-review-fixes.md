@@ -116,17 +116,45 @@
 - Modify: `src-tauri/src/ledger.rs` (`Entry.took_ms: Option<u64>`, rendered as `- took: 4m 12s`)
 - Modify: `src-tauri/src/jobs.rs` (`ingest_call`, `summarise_day`, `tick`)
 - Modify: `src-tauri/Cargo.toml` (`tauri-plugin-notification = "2"`), `package.json` (`@tauri-apps/plugin-notification` not needed; notifications are sent from Rust), `src-tauri/capabilities/default.json` (`notification:default`), `src-tauri/src/lib.rs` (plugin init)
-- Modify: `src/components/DayHeader.tsx`, `src/components/DayView.tsx` (`Outcome.took_ms`), `src/test/DayView.test.tsx`
+- Modify: `src-tauri/src/lib.rs` (`summarise_now` gains `force: Option<bool>`; plugin init)
+- Does not touch `src/`: Task 6 owns every Day view file and renders `took_ms` and the step text.
 
 **Behaviour:**
 - Every agent-backed ledger entry records `took_ms` measured around `agent::run_with_env`. `ledger::render` writes `- took: {m}m {s}s` when present.
-- `jobs::Outcome` gains `took_ms: Option<u64>` (the whole pipeline for that day). `DayHeader` state line appends `in 4m 12s` for a generated summary whose outcome carries it.
+- `jobs::Outcome` gains `took_ms: Option<u64>` (the whole pipeline for that day), serialised so the window can show it.
+- `JobKind::Summarise` becomes `Summarise { force: bool }`. `run_one` maps it to `run_day_pipeline(p, date, trigger, force, true, ...)`. `summarise_now(date, force: Option<bool>)` enqueues with `force.unwrap_or(false)`; `summarise_days` and the scheduled path enqueue `force: false`. MCP `summarise_day` gains an optional `force` argument documented in `docs/mcp.md`.
+- Step text emitted by `run_day_pipeline` becomes user-facing copy: `Reading messages (1 of 3)`, `Reading apps (2 of 3)`, `Reading websites (3 of 3)`, `Writing the summary`. Update the jobs tests that assert the old strings.
 - In `ingest_call` and `summarise_day`, a failure to create the reject directory or write the rejected output is appended to the ledger entry's `disposition` reason: `...; the output could not be kept: {error}`. No more `let _ =` on those two lines.
 - Scheduled failures notify: in `tick`, on the scheduled path only, when `run_one` returns `Err`, send a macOS notification titled "Ambient Context" with body `{date}'s summary failed: {first line of the message}` via `tauri_plugin_notification::NotificationExt`. On-demand failures do not notify (the user is looking). Register the plugin in the builder, add the capability. If the notification send fails, `eprintln!` only.
 
-**Tests:** `ledger::tests` renders `took`; `jobs` tests assert `took_ms` is `Some` on a stub-agent run and that a reject-dir failure (point `reject_dir` at a path under a file) produces a disposition containing "could not be kept"; `DayView.test.tsx` shows "in 0m 3s" when `job_status` returns `took_ms: 3000`. The notification itself is not unit-testable; the manual check is a scheduled run with the agent logged out.
+**Tests:** `ledger::tests` renders `took`; `jobs` tests assert `took_ms` is `Some` on a stub-agent run, that a reject-dir failure (point `reject_dir` at a path under a file) produces a disposition containing "could not be kept", and that `Summarise { force: true }` re-runs an accepted call. The notification itself is not unit-testable; the manual check is a scheduled run with the agent logged out.
 
 **Commit:** `Record run durations, ledger lost rejected output, notify on a failed scheduled summary`
+
+### Task 6: One action and one status line in the Day view
+
+Runs after Tasks 2, 4 and 5. Held by one agent: the view is judged as a whole.
+
+**Files:**
+- Modify: `src/components/DayView.tsx`, `src/components/DayHeader.tsx`, `src/components/KbPane.tsx` (rename to `NotesPane.tsx`), `src/components/SummaryPane.tsx` (empty-state copy), `src/main-window.css`
+- Modify: `src/test/DayView.test.tsx`, `src/test/KbPane.test.tsx` (rename to `NotesPane.test.tsx`)
+- Modify: `src-tauri/src/lib.rs` only for `read_kb` to also return the manifest's build time if that is simpler than parsing it in TypeScript (optional; parsing `manifest.md` lines `ingest_*.at:` in TS is fine)
+
+**Behaviour:**
+- **One action.** Header buttons: `Summarise` when the day has no summary, `Regenerate` when it has one; `Open in editor`; `Reveal in Finder`. Remove Ingest and Re-ingest and `onIngest`. `Regenerate` calls `summarise_now` with `force: true`; `Summarise` with `force: false`. The `ingest_now` command stays in the backend (MCP uses the same path) but nothing in the window calls it.
+- **One status line** replaces the stats span and the summary-state span: `{hours} h recorded · {blocks} blocks · Summary {HH:MM}, took {m} min` when a summary exists (`took` from `Outcome.took_ms` when present), `{hours} h recorded · {blocks} blocks · No summary yet` otherwise. During a run the line is the current step from `job_state.step` (already user-facing after Task 5) with an ellipsis, or `Queued…`. On failure: `Last run failed: {reason}` in the existing error style, still one line plus the `<pre>` for the reason.
+- **Modes renamed:** `Record`, `Notes`, `Summary`. Record keeps its Apps / Websites / Messages tabs. No "KB", "ingest" or "raw" appears in any visible string.
+- **Notes is one page.** `NotesPane` reads the six files with one `read_kb` call each (or a single call with no `file`, then splits on the `# name.md` headers the backend writes; use the single call) and renders them as sections in the order people, commitments, threads, products, issues, reading, each with an `h2` label (People, Commitments, Threads, Products, Issues, Reading) and the file's body through the existing line renderer, or `Nothing evident` in the muted style when the body is that sentinel. Top line: `Built {HH:MM} from messages, apps and websites` from the manifest's latest `at:` value, listing only the calls whose disposition is `accepted`; `Not built yet. Summarise to build it.` with a Summarise button when there is no manifest. No tabs, no manifest view.
+- **Empty states name the action.** Summary pane with no summary: one sentence and a `Summarise` button (already there; align the copy with the status line). Notes with nothing: as above.
+- **Default mode** unchanged: today opens on Record; a past day opens on Summary if one exists, else Record.
+- **Polling:** the job poll copies `step` into state on every tick; on `done` it reloads the day, the summary and the notes (bump `refreshKey`). Keep the existing guard against unbounded `read_day` loops; the existing test for it must still pass.
+- CSS: `.notes-pane` takes `.kb-pane`'s rules; section headings use the existing heading style in the summary pane; the status line uses the `day-stats` style.
+
+**Tests:** `DayView.test.tsx`: `Summarise` calls `summarise_now` with `force: false`; after a `job_status` with a summary, the button reads `Regenerate` and calls with `force: true`; the status line shows the step text while running; the three mode tabs are labelled Record, Notes, Summary; no element contains the text "Ingest". `NotesPane.test.tsx`: six sections render from one `read_kb` response, `Nothing evident` shows for an empty section, the built line names the accepted calls, the not-built state shows the button.
+
+**Commit:** `Make Summarise the one action and lay out the notes as one page`
+
+**Manual check (the user, in the running app):** open today; the status line reads correctly; press Summarise and watch the four steps; Notes renders as one page; Regenerate re-runs; nothing in the window says KB or ingest.
 
 ---
 
