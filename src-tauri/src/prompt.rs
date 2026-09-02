@@ -42,9 +42,7 @@ impl PromptId {
     }
 
     pub fn parse(name: &str) -> Option<PromptId> {
-        PromptId::all()
-            .into_iter()
-            .find(|id| id.as_str() == name)
+        PromptId::all().into_iter().find(|id| id.as_str() == name)
     }
 
     pub fn bundled(self) -> &'static str {
@@ -68,16 +66,12 @@ impl PromptId {
     pub fn markers(self) -> &'static [&'static str] {
         match self {
             PromptId::DayContext => &[],
-            PromptId::IngestMessages => {
-                &["<<<file: people.md>>>", "<<<file: commitments.md>>>"]
-            }
-            PromptId::IngestApps => {
-                &[
-                    "<<<file: threads.md>>>",
-                    "<<<file: products.md>>>",
-                    "<<<file: issues.md>>>",
-                ]
-            }
+            PromptId::IngestMessages => &["<<<file: people.md>>>", "<<<file: commitments.md>>>"],
+            PromptId::IngestApps => &[
+                "<<<file: threads.md>>>",
+                "<<<file: products.md>>>",
+                "<<<file: issues.md>>>",
+            ],
             PromptId::IngestWebsites => &["<<<file: reading.md>>>"],
         }
     }
@@ -187,8 +181,7 @@ mod tests {
     #[test]
     fn every_bundled_prompt_passes_its_own_validation() {
         for id in PromptId::all() {
-            validate(id, id.bundled())
-                .unwrap_or_else(|e| panic!("{}: {e}", id.as_str()));
+            validate(id, id.bundled()).unwrap_or_else(|e| panic!("{}: {e}", id.as_str()));
         }
     }
 
@@ -242,7 +235,10 @@ mod tests {
 
     #[test]
     fn an_empty_prompt_is_rejected() {
-        assert_eq!(validate(PromptId::DayContext, "   \n  ").unwrap_err(), PromptError::Empty);
+        assert_eq!(
+            validate(PromptId::DayContext, "   \n  ").unwrap_err(),
+            PromptError::Empty
+        );
     }
 
     #[test]
@@ -294,7 +290,12 @@ mod tests {
     #[test]
     fn set_refuses_an_invalid_prompt_and_leaves_the_file_alone() {
         let dir = tempdir().unwrap();
-        set(dir.path(), PromptId::DayContext, PromptId::DayContext.bundled()).unwrap();
+        set(
+            dir.path(),
+            PromptId::DayContext,
+            PromptId::DayContext.bundled(),
+        )
+        .unwrap();
         assert!(set(dir.path(), PromptId::DayContext, "just some words").is_err());
         assert_eq!(
             current(dir.path(), PromptId::DayContext),

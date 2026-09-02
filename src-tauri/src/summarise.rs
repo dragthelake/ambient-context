@@ -408,12 +408,7 @@ mod tests {
 
     #[test]
     fn day_file_is_no_longer_a_placeholder() {
-        let out = build_prompt(
-            "Body: {{DAY_FILE}}",
-            date(2026, 8, 28),
-            "timeline",
-            "kb",
-        );
+        let out = build_prompt("Body: {{DAY_FILE}}", date(2026, 8, 28), "timeline", "kb");
         assert_eq!(out, "Body: {{DAY_FILE}}");
     }
 

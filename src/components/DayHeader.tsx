@@ -16,6 +16,9 @@ export type DayHeaderProps = {
   onNext: () => void;
   onToday: () => void;
   onSummarise: () => void;
+  onIngest: (force: boolean) => void;
+  hasKb: boolean;
+  step: string | null;
 };
 
 function longDate(date: string): string {
@@ -41,6 +44,9 @@ export function DayHeader({
   onNext,
   onToday,
   onSummarise,
+  onIngest,
+  hasKb,
+  step,
 }: DayHeaderProps) {
   const [actionError, setActionError] = useState<string | null>(null);
   const hasSummary = summary.kind === "generated";
@@ -74,7 +80,7 @@ export function DayHeader({
       case "queued":
         return "Queued";
       case "running":
-        return "Summarising…";
+        return step ?? "Summarising…";
       case "generated":
         return summary.at ? `Generated at ${summary.at.slice(11, 16)}` : "Generated";
       case "failed":
@@ -173,6 +179,14 @@ export function DayHeader({
           </div>
         ) : null}
         <div className="day-action-buttons">
+          <button type="button" onClick={() => void onIngest(false)}>
+            Ingest
+          </button>
+          {hasKb ? (
+            <button type="button" onClick={() => void onIngest(true)}>
+              Re-ingest
+            </button>
+          ) : null}
           <button type="button" onClick={onSummarise}>
             {hasSummary ? "Regenerate" : "Summarise"}
           </button>

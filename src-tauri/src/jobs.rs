@@ -326,7 +326,6 @@ pub fn run_day_pipeline(
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-#[allow(dead_code)] // Ingest is queued from ingest_now in Task 11
 pub enum JobKind {
     Summarise,
     Ingest { force: bool },
@@ -710,7 +709,6 @@ impl JobQueue {
     }
 
     /// Queues a full ingest run, optionally forcing all three calls to rerun.
-    #[allow(dead_code)] // ingest_now in Task 11
     pub fn enqueue_ingest_with(
         &self,
         date: NaiveDate,

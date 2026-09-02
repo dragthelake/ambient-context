@@ -269,7 +269,9 @@ fn read_target(config_dir: &Path, target: ProposeTarget) -> String {
     match target {
         ProposeTarget::Rules => serde_json::to_string_pretty(&crate::rules::load(config_dir))
             .unwrap_or_else(|_| "{\n  \"rules\": []\n}".to_string()),
-        ProposeTarget::Prompt => crate::prompt::current(config_dir, crate::prompt::PromptId::DayContext),
+        ProposeTarget::Prompt => {
+            crate::prompt::current(config_dir, crate::prompt::PromptId::DayContext)
+        }
     }
 }
 
@@ -295,7 +297,9 @@ fn action_name(target: ProposeTarget) -> &'static str {
 fn target_path(config_dir: &Path, target: ProposeTarget) -> PathBuf {
     match target {
         ProposeTarget::Rules => crate::rules::rules_path(config_dir),
-        ProposeTarget::Prompt => crate::prompt::prompt_path(config_dir, crate::prompt::PromptId::DayContext),
+        ProposeTarget::Prompt => {
+            crate::prompt::prompt_path(config_dir, crate::prompt::PromptId::DayContext)
+        }
     }
 }
 
@@ -441,8 +445,12 @@ pub fn apply(config_dir: &Path, folder: &Path, proposal: &Proposal) -> Result<()
             crate::rules::save(config_dir, &parsed).map_err(|e| e.to_string())?;
         }
         ProposeTarget::Prompt => {
-            crate::prompt::set(config_dir, crate::prompt::PromptId::DayContext, &proposal.after)
-                .map_err(|e| e.to_string())?;
+            crate::prompt::set(
+                config_dir,
+                crate::prompt::PromptId::DayContext,
+                &proposal.after,
+            )
+            .map_err(|e| e.to_string())?;
         }
     }
     let _ = crate::ledger::append(

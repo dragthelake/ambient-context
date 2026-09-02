@@ -320,9 +320,7 @@ fn read_call(
                     .as_str()
                     .map(crate::writer::DayFile::from_name)
                     .unwrap_or(Some(crate::writer::DayFile::Apps))
-                    .ok_or_else(|| {
-                        tool_error("file must be one of apps, websites or messages")
-                    })?;
+                    .ok_or_else(|| tool_error("file must be one of apps, websites or messages"))?;
                 let from = arguments["from"].as_str();
                 let to = arguments["to"].as_str();
                 files::read_day(&dir, date, file, from, to)

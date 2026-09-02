@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { DayHeader } from "./DayHeader";
+import { KbPane } from "./KbPane";
 import { RawPane } from "./RawPane";
 import { SummaryPane } from "./SummaryPane";
 import { WebsitesPane } from "./WebsitesPane";
@@ -38,6 +39,7 @@ export type JobState = {
   date: string;
   status: JobStatus;
   stderr: string | null;
+  step: string | null;
 };
 
 export type SummaryState =
@@ -108,6 +110,7 @@ export function DayView({ date }: { date?: string } = {}) {
     selected === todayIso() ? "raw" : "summary",
   );
   const [rawFile, setRawFile] = useState<DayFile>("apps");
+  const [kbRefresh, setKbRefresh] = useState(0);
 
   // A plain setter since the calendar rail went: nothing else has to be
   // kept in step with the selected day. Wrapped anyway so the call sites
@@ -247,7 +250,13 @@ export function DayView({ date }: { date?: string } = {}) {
       const started = await invoke<{ job_id: string }>("summarise_now", {
         date: selected,
       });
-      setJob({ id: started.job_id, date: selected, status: "queued", stderr: null });
+      setJob({
+        id: started.job_id,
+        date: selected,
+        status: "queued",
+        stderr: null,
+        step: null,
+      });
       setManualFailure((current) =>
         current && current.date === selected ? null : current,
       );
@@ -257,6 +266,7 @@ export function DayView({ date }: { date?: string } = {}) {
         date: selected,
         status: "failed",
         stderr: String(error),
+        step: null,
       });
       setManualFailure({
         date: selected,
@@ -265,6 +275,42 @@ export function DayView({ date }: { date?: string } = {}) {
       });
     }
   }, [selected]);
+
+  const onIngest = useCallback(
+    async (force: boolean) => {
+      setMode("kb");
+      try {
+        const started = await invoke<{ job_id: string }>("ingest_now", {
+          date: selected,
+          force,
+        });
+        setJob({
+          id: started.job_id,
+          date: selected,
+          status: "queued",
+          stderr: null,
+          step: null,
+        });
+        setManualFailure((current) =>
+          current && current.date === selected ? null : current,
+        );
+      } catch (error) {
+        setJob({
+          id: "",
+          date: selected,
+          status: "failed",
+          stderr: String(error),
+          step: null,
+        });
+        setManualFailure({
+          date: selected,
+          message: String(error),
+          when: new Date().toISOString(),
+        });
+      }
+    },
+    [selected],
+  );
 
   const jobId = job && job.date === selected ? job.id : null;
   const jobStatus = job && job.date === selected ? job.status : null;
@@ -278,9 +324,18 @@ export function DayView({ date }: { date?: string } = {}) {
         const state = await invoke<JobState | null>("job_state", { jobId });
         if (cancelled || !state) return;
         setJob((current) =>
-          current && current.id === state.id && current.status === state.status
+          current &&
+          current.id === state.id &&
+          current.status === state.status &&
+          current.step === (state.step ?? null)
             ? current
-            : { id: state.id, date: state.date, status: state.status, stderr: state.stderr },
+            : {
+                id: state.id,
+                date: state.date,
+                status: state.status,
+                stderr: state.stderr,
+                step: state.step ?? null,
+              },
         );
         if (state.status === "failed") {
           setManualFailure({
@@ -293,6 +348,7 @@ export function DayView({ date }: { date?: string } = {}) {
           setManualFailure((current) =>
             current && current.date === state.date ? null : current,
           );
+          setKbRefresh((n) => n + 1);
           await reloadDay();
         }
       })();
@@ -346,6 +402,9 @@ export function DayView({ date }: { date?: string } = {}) {
           onNext={onNext}
           onToday={onToday}
           onSummarise={onSummarise}
+          onIngest={onIngest}
+          hasKb={entry?.has_kb ?? false}
+          step={job && job.date === selected ? job.step : null}
         />
         {mode === "summary" ? (
           <SummaryPane
@@ -356,7 +415,9 @@ export function DayView({ date }: { date?: string } = {}) {
             onSummarise={onSummarise}
             date={selected}
           />
-        ) : mode === "kb" ? null : rawFile === "websites" ? (
+        ) : mode === "kb" ? (
+          <KbPane date={selected} refreshKey={kbRefresh} />
+        ) : rawFile === "websites" ? (
           <WebsitesPane date={selected} />
         ) : (
           <RawPane date={selected} mode={mode} file={rawFile} />

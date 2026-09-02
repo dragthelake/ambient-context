@@ -203,6 +203,7 @@ fn target_path(
             writer::DayFile::from_name(which).map(|f| f.path(folder, date))
         }
         "summary" => Some(summarise::summary_path(folder, date)),
+        "kb" => Some(crate::ingest::kb_dir(folder, date).join("threads.md")),
         _ => None,
     }
 }
@@ -659,6 +660,40 @@ fn summarise_now(app: tauri::AppHandle, date: String) -> Result<SummariseNowPayl
     })
 }
 
+#[tauri::command]
+fn read_kb(app: tauri::AppHandle, date: String, file: Option<String>) -> Option<String> {
+    let folder = settings::load(&app).folder?;
+    let parsed = parse_date(&date).ok()?;
+    crate::ingest::read_kb(&folder, parsed, file.as_deref())
+}
+
+#[derive(Serialize)]
+struct IngestNowPayload {
+    job_id: String,
+}
+
+#[tauri::command]
+fn ingest_now(
+    app: tauri::AppHandle,
+    date: String,
+    force: bool,
+) -> Result<IngestNowPayload, String> {
+    let parsed = parse_date(&date)?;
+    let config = settings::load(&app);
+    if config.folder.is_none() {
+        return Err("no capture folder is set".to_string());
+    }
+    if config.agent.is_none() {
+        return Err("no agent is connected".to_string());
+    }
+    let id =
+        app.state::<jobs::JobQueue>()
+            .enqueue_ingest_with(parsed, force, ledger::Trigger::OnDemand);
+    Ok(IngestNowPayload {
+        job_id: id.to_string(),
+    })
+}
+
 /// Parse all dates before enqueueing any of them. Enqueuing schedules real
 /// work, so failing part way through would leave earlier days running with
 /// their ids discarded and no way for the caller to poll them.
@@ -988,6 +1023,10 @@ mod tests {
         assert_eq!(
             target_path(f, d, "summary").unwrap(),
             std::path::PathBuf::from("/f/Summaries/2026-09-02.md")
+        );
+        assert_eq!(
+            target_path(f, d, "kb").unwrap(),
+            std::path::PathBuf::from("/f/KB/2026-09-02/threads.md")
         );
         assert!(target_path(f, d, "day").is_none());
     }
@@ -1652,6 +1691,7 @@ pub fn run() {
             census_snapshot,
             open_link,
             summarise_now,
+            ingest_now,
             summarise_days,
             cancel_queued_summaries,
             running_batch,
@@ -1669,6 +1709,7 @@ pub fn run() {
             list_days,
             days_in_month,
             read_day,
+            read_kb,
             read_summary,
             open_in_editor,
             open_prompt_in_editor,

@@ -504,8 +504,7 @@ fn strip_frontmatter(text: &str) -> &str {
 }
 
 /// One KB file, the manifest, or the concatenated prompt view when `file`
-/// is None. The Day view command lands in Task 11.
-#[allow(dead_code)]
+/// is None.
 pub fn read_kb(folder: &Path, date: NaiveDate, file: Option<&str>) -> Option<String> {
     let dir = kb_dir(folder, date);
     match file {

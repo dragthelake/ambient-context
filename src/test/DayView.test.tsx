@@ -41,6 +41,18 @@ function handler(pendingDay: string | null) {
         return [];
       case "get_rules":
         return { rules: [], built_ins: [], next_id: "r1", error: null };
+      case "read_kb":
+        return null;
+      case "ingest_now":
+        return { job_id: "job-9" };
+      case "job_state":
+        return {
+          id: "job-9",
+          date: todayIso(),
+          status: "running",
+          stderr: null,
+          step: "ingesting apps (2 of 3)",
+        };
       default:
         throw new Error(`unexpected command ${command}`);
     }
@@ -78,6 +90,18 @@ describe("DayView", () => {
     );
     expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
   });
+
+  it("queues an ingest and shows the step text", async () => {
+    mockInvoke(handler(null));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Ingest" }));
+    await waitFor(() => expect(callsOf("ingest_now")[0]?.args?.force).toBe(false));
+    await waitFor(
+      () => expect(screen.getByText("ingesting apps (2 of 3)")).toBeTruthy(),
+      { timeout: 3000 },
+    );
+  }, 10000);
 
   it("switches the raw pane between apps, websites and messages", async () => {
     mockInvoke(handler(null));
