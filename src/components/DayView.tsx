@@ -4,7 +4,8 @@ import { listen } from "@tauri-apps/api/event";
 import { DayHeader } from "./DayHeader";
 import { RawPane } from "./RawPane";
 import { SummaryPane } from "./SummaryPane";
-import type { DayEntry } from "../lib/days";
+import { WebsitesPane } from "./WebsitesPane";
+import type { DayEntry, DayFile } from "../lib/days";
 
 export type { DayEntry };
 
@@ -103,9 +104,10 @@ export function DayView({ date }: { date?: string } = {}) {
     when: string;
   } | null>(null);
   // Raw is the default for today: today is what you are still recording.
-  const [mode, setMode] = useState<"raw" | "summary">(() =>
+  const [mode, setMode] = useState<"raw" | "kb" | "summary">(() =>
     selected === todayIso() ? "raw" : "summary",
   );
+  const [rawFile, setRawFile] = useState<DayFile>("apps");
 
   // A plain setter since the calendar rail went: nothing else has to be
   // kept in step with the selected day. Wrapped anyway so the call sites
@@ -176,7 +178,7 @@ export function DayView({ date }: { date?: string } = {}) {
     let cancelled = false;
     void (async () => {
       const [day, summary, settings] = await Promise.all([
-        invoke<string | null>("read_day", { date: selected }),
+        invoke<string | null>("read_day", { date: selected, file: "apps" }),
         invoke<string | null>("read_summary", { date: selected }),
         invoke<{ agent: unknown }>("get_settings"),
       ]);
@@ -198,7 +200,7 @@ export function DayView({ date }: { date?: string } = {}) {
   useEffect(() => {
     if (selected !== todayIso()) return;
     const id = setInterval(async () => {
-      const day = await invoke<string | null>("read_day", { date: selected });
+      const day = await invoke<string | null>("read_day", { date: selected, file: "apps" });
       setDayMarkdown(day);
       void refreshOutcome();
     }, 5000);
@@ -228,7 +230,7 @@ export function DayView({ date }: { date?: string } = {}) {
 
   const reloadDay = useCallback(async () => {
     const [day, summary] = await Promise.all([
-      invoke<string | null>("read_day", { date: selected }),
+      invoke<string | null>("read_day", { date: selected, file: "apps" }),
       invoke<string | null>("read_summary", { date: selected }),
     ]);
     setDayMarkdown(day);
@@ -338,6 +340,8 @@ export function DayView({ date }: { date?: string } = {}) {
           summary={summary}
           mode={mode}
           onMode={setMode}
+          rawFile={rawFile}
+          onRawFile={setRawFile}
           onPrev={onPrev}
           onNext={onNext}
           onToday={onToday}
@@ -352,8 +356,10 @@ export function DayView({ date }: { date?: string } = {}) {
             onSummarise={onSummarise}
             date={selected}
           />
+        ) : mode === "kb" ? null : rawFile === "websites" ? (
+          <WebsitesPane date={selected} />
         ) : (
-          <RawPane date={selected} mode={mode} />
+          <RawPane date={selected} mode={mode} file={rawFile} />
         )}
       </div>
     </div>

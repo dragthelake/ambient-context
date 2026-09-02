@@ -7,6 +7,7 @@ function entry(date: string, over: Partial<DayEntry> = {}): DayEntry {
     date,
     has_capture: true,
     has_summary: false,
+    has_kb: false,
     bytes: 100,
     title: null,
     ...over,

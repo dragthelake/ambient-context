@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DayEntry } from "../lib/days";
+import type { DayEntry, DayFile } from "../lib/days";
 import type { DayStats, SummaryState } from "./DayView";
 
 export type DayHeaderProps = {
@@ -8,8 +8,10 @@ export type DayHeaderProps = {
   entry: DayEntry | null;
   stats: DayStats;
   summary: SummaryState;
-  mode: "raw" | "summary";
-  onMode: (mode: "raw" | "summary") => void;
+  mode: "raw" | "kb" | "summary";
+  onMode: (mode: "raw" | "kb" | "summary") => void;
+  rawFile: DayFile;
+  onRawFile: (file: DayFile) => void;
   onPrev: () => void;
   onNext: () => void;
   onToday: () => void;
@@ -33,6 +35,8 @@ export function DayHeader({
   summary,
   mode,
   onMode,
+  rawFile,
+  onRawFile,
   onPrev,
   onNext,
   onToday,
@@ -46,7 +50,7 @@ export function DayHeader({
       // The raw view is the day file; "raw" is not a file the backend knows.
       await invoke("open_in_editor", {
         date,
-        which: mode === "raw" ? "day" : "summary",
+        which: mode === "summary" ? "summary" : mode === "kb" ? "kb" : rawFile,
       });
       setActionError(null);
     } catch (error) {
@@ -130,6 +134,15 @@ export function DayHeader({
           <button
             type="button"
             role="tab"
+            aria-selected={mode === "kb"}
+            className={mode === "kb" ? "segment is-current" : "segment"}
+            onClick={() => onMode("kb")}
+          >
+            KB
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={mode === "summary"}
             className={mode === "summary" ? "segment is-current" : "segment"}
             onClick={() => onMode("summary")}
@@ -137,6 +150,28 @@ export function DayHeader({
             Summary
           </button>
         </div>
+        {mode === "raw" ? (
+          <div className="segmented" role="tablist">
+            {(
+              [
+                ["apps", "Apps"],
+                ["websites", "Websites"],
+                ["messages", "Messages"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={rawFile === key}
+                className={rawFile === key ? "segment is-current" : "segment"}
+                onClick={() => onRawFile(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="day-action-buttons">
           <button type="button" onClick={onSummarise}>
             {hasSummary ? "Regenerate" : "Summarise"}

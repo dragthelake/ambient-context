@@ -134,7 +134,6 @@ impl DayFile {
             DayFile::Messages => "messages",
         }
     }
-    #[allow(dead_code)]
     pub fn from_name(name: &str) -> Option<DayFile> {
         match name {
             "apps" | "apps.md" => Some(DayFile::Apps),

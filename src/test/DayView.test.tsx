@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { callsOf, countOf, mockInvoke } from "./tauri-mock";
 import { DayView } from "../components/DayView";
 
@@ -36,6 +36,8 @@ function handler(pendingDay: string | null) {
         // A fresh object every call, as the real command returns.
         return { when: "2026-08-30T06:00:00+10:00", date: todayIso(), ok: true, message: "done" };
       case "read_day_blocks":
+        return [];
+      case "website_totals":
         return [];
       case "get_rules":
         return { rules: [], built_ins: [], next_id: "r1", error: null };
@@ -75,5 +77,19 @@ describe("DayView", () => {
       expect(callsOf("read_day").some((call) => call.args?.date === "2026-07-04")).toBe(true),
     );
     expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
+  });
+
+  it("switches the raw pane between apps, websites and messages", async () => {
+    mockInvoke(handler(null));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("read_day_blocks")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("tab", { name: "Websites" }));
+    await waitFor(() => expect(countOf("website_totals")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("tab", { name: "Messages" }));
+    await waitFor(() =>
+      expect(callsOf("read_day_blocks").some((call) => call.args?.file === "messages")).toBe(
+        true,
+      ),
+    );
   });
 });

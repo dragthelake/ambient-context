@@ -7,7 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { mockInvoke } from "./tauri-mock";
+import { mockInvoke, callsOf } from "./tauri-mock";
 import { RawPane } from "../components/RawPane";
 
 vi.mock("@tauri-apps/api/core", async () => {
@@ -22,6 +22,7 @@ const BLOCK = {
   title: "Documents",
   file: null,
   url: null,
+  routed: null,
   lines: ["a line"],
 };
 
@@ -45,7 +46,8 @@ describe("RawPane", () => {
       }
     });
 
-    render(<RawPane date="2026-07-04" mode="raw" />);
+    render(<RawPane date="2026-07-04" mode="raw" file="apps" />);
+    expect(callsOf("read_day_blocks")[0]?.args?.file).toBe("apps");
     const button = await screen.findByRole("button", { name: "Redact text like this" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
 
@@ -96,7 +98,7 @@ describe("RawPane", () => {
       }
     });
 
-    render(<RawPane date="2026-07-04" mode="raw" />);
+    render(<RawPane date="2026-07-04" mode="raw" file="apps" />);
     const buttons = await screen.findAllByRole("button", {
       name: "Never record this app",
     });

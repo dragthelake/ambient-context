@@ -497,6 +497,37 @@ body:has(.main-window) {
   padding: 8px 10px;
 }
 
+.websites-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.websites-pane-scroll {
+  overflow: auto;
+}
+
+.websites-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.websites-table th,
+.websites-table td {
+  text-align: left;
+  padding: 4px 8px;
+}
+
+.websites-table .num {
+  text-align: right;
+}
+
+.pane-empty {
+  padding: 16px;
+  opacity: 0.7;
+}
+
 .raw-block {
   margin-bottom: 10px;
   background: var(--chrome-lighter);

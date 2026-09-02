@@ -7,7 +7,7 @@ import type { DayEntry } from "../lib/days";
 afterEach(cleanup);
 
 function entry(date: string, over: Partial<DayEntry> = {}): DayEntry {
-  return { date, has_capture: true, has_summary: false, bytes: 2048, title: null, ...over };
+  return { date, has_capture: true, has_summary: false, has_kb: false, bytes: 2048, title: null, ...over };
 }
 
 describe("DefragMap", () => {

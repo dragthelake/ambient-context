@@ -182,6 +182,15 @@ fn parse_date(date: &str) -> Result<chrono::NaiveDate, String> {
     chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").map_err(|_| format!("{date} is not a date"))
 }
 
+fn parse_day_file(file: Option<String>) -> Result<writer::DayFile, String> {
+    match file.as_deref() {
+        None => Ok(writer::DayFile::Apps),
+        Some(name) => writer::DayFile::from_name(name).ok_or_else(|| {
+            format!("{name} is not one of apps, websites or messages")
+        }),
+    }
+}
+
 /// Which file a Day view action means. Unknown values return None rather
 /// than defaulting, so a typo opens nothing instead of the wrong file.
 fn target_path(
@@ -190,7 +199,9 @@ fn target_path(
     which: &str,
 ) -> Option<std::path::PathBuf> {
     match which {
-        "day" => Some(writer::DayFile::Apps.path(folder, date)),
+        "apps" | "websites" | "messages" => {
+            writer::DayFile::from_name(which).map(|f| f.path(folder, date))
+        }
         "summary" => Some(summarise::summary_path(folder, date)),
         _ => None,
     }
@@ -268,7 +279,6 @@ fn reveal_day(app: tauri::AppHandle, date: String) -> Result<(), String> {
     // folder worth opening.
     let target = if path.is_dir() { path } else { folder };
     std::process::Command::new("open")
-        .arg("-R")
         .arg(target)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -461,16 +471,31 @@ fn reset_prompt(app: tauri::AppHandle) -> Result<PromptPayload, String> {
 struct ProposalStore(std::sync::Mutex<std::collections::HashMap<String, propose::Proposal>>);
 
 #[tauri::command]
-fn read_day_blocks(app: tauri::AppHandle, date: String) -> Vec<days::RawBlock> {
+fn read_day_blocks(
+    app: tauri::AppHandle,
+    date: String,
+    file: Option<String>,
+) -> Vec<days::RawBlock> {
     let Some(folder) = settings::load(&app).folder else {
         return Vec::new();
     };
-    let Ok(date) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
+    let (Ok(date), Ok(file)) = (parse_date(&date), parse_day_file(file)) else {
         return Vec::new();
     };
-    days::read_day(&folder, date, writer::DayFile::Apps)
+    days::read_day(&folder, date, file)
         .map(|text| days::parse_blocks(&text))
         .unwrap_or_default()
+}
+
+#[tauri::command]
+fn website_totals(app: tauri::AppHandle, date: String) -> Vec<days::UrlTotal> {
+    let Some(folder) = settings::load(&app).folder else {
+        return Vec::new();
+    };
+    let Ok(date) = parse_date(&date) else {
+        return Vec::new();
+    };
+    days::website_totals(&folder, date)
 }
 
 /// Runs on the blocking pool: the agent can take minutes and must not
@@ -925,10 +950,25 @@ mod tests {
     }
 
     #[test]
+    fn target_path_names_the_three_day_files_and_the_summary() {
+        let f = std::path::Path::new("/f");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        assert_eq!(
+            target_path(f, d, "messages").unwrap(),
+            std::path::PathBuf::from("/f/Days/2026-09-02/messages.md")
+        );
+        assert_eq!(
+            target_path(f, d, "summary").unwrap(),
+            std::path::PathBuf::from("/f/Summaries/2026-09-02.md")
+        );
+        assert!(target_path(f, d, "day").is_none());
+    }
+
+    #[test]
     fn which_selects_the_day_file_or_its_summary() {
         let folder = Path::new("/tmp/ac");
         assert_eq!(
-            target_path(folder, date(), "day"),
+            target_path(folder, date(), "apps"),
             Some(PathBuf::from("/tmp/ac/Days/2026-08-28/apps.md"))
         );
         assert_eq!(
@@ -1217,9 +1257,10 @@ fn days_in_month(app: tauri::AppHandle, year: i32, month: u32) -> Vec<days::DayE
 }
 
 #[tauri::command]
-fn read_day(app: tauri::AppHandle, date: String) -> Option<String> {
+fn read_day(app: tauri::AppHandle, date: String, file: Option<String>) -> Option<String> {
     let folder = settings::load(&app).folder?;
-    days::read_day(&folder, parse_date(&date).ok()?, writer::DayFile::Apps)
+    let file = parse_day_file(file).ok()?;
+    days::read_day(&folder, parse_date(&date).ok()?, file)
 }
 
 #[tauri::command]
@@ -1597,6 +1638,7 @@ pub fn run() {
             set_prompt,
             reset_prompt,
             read_day_blocks,
+            website_totals,
             propose,
             apply_proposal,
             discard_proposal,

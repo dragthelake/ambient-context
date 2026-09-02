@@ -31,6 +31,7 @@ export type RawBlock = {
   title: string | null;
   file: string | null;
   url: string | null;
+  routed?: string | null;
   lines: string[];
 };
 

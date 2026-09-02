@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { domainOf, literalPattern, type RawBlock, type RulesPayload, type Selection } from "../lib/rules";
+import type { DayFile, Settings } from "../lib/days";
 import { HighlightPill } from "./HighlightPill";
-import type { Settings } from "../lib/days";
 
 type RawPaneProps = {
   date: string;
-  mode: "raw" | "summary";
+  mode: "raw" | "kb" | "summary";
+  file: DayFile;
 };
 
 function todayIso(): string {
@@ -16,7 +17,7 @@ function todayIso(): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-export function RawPane({ date, mode }: RawPaneProps) {
+export function RawPane({ date, mode, file }: RawPaneProps) {
   const [blocks, setBlocks] = useState<RawBlock[]>([]);
   const [rules, setRules] = useState<RulesPayload | null>(null);
   const [ruleError, setRuleError] = useState<string | null>(null);
@@ -57,9 +58,9 @@ export function RawPane({ date, mode }: RawPaneProps) {
   }, [date]);
 
   const read = useCallback(async () => {
-    const next = await invoke<RawBlock[]>("read_day_blocks", { date });
+    const next = await invoke<RawBlock[]>("read_day_blocks", { date, file });
     setBlocks(next);
-  }, [date]);
+  }, [date, file]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,7 +79,7 @@ export function RawPane({ date, mode }: RawPaneProps) {
       cancelled = true;
       clearInterval(id);
     };
-  }, [date, read, readRules]);
+  }, [date, file, read, readRules]);
 
   useEffect(() => {
     void invoke<Settings>("get_settings").then((settings) =>
