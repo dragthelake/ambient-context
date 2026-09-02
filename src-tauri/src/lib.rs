@@ -71,6 +71,23 @@ async fn choose_folder(app: tauri::AppHandle) -> Option<String> {
     Some(path.to_string_lossy().to_string())
 }
 
+// Async for the same reason as choose_folder. The file picker, not the
+// folder picker: an .app is a directory, but the panel treats a package
+// whose extension is in the filter as a file, so this returns the bundle
+// itself rather than descending into it.
+#[tauri::command]
+async fn choose_editor(app: tauri::AppHandle) -> Option<String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Choose an application")
+        .set_directory("/Applications")
+        .add_filter("Application", &["app"])
+        .blocking_pick_file()?;
+    let path = picked.into_path().ok()?;
+    Some(path.to_string_lossy().to_string())
+}
+
 /// The default is ~/Documents/Ambient Context, where people expect their
 /// own files to live. On a Mac with iCloud's Desktop & Documents sync on,
 /// that means the record is uploaded; the settings and setup screens carry
@@ -942,6 +959,33 @@ pub(crate) fn save_settings_recorded(
     Ok(())
 }
 
+/// The last failure to register or remove the login item. The setting is
+/// saved whatever the OS does with it, so without this the checkbox claims
+/// something about the machine that is not true and nothing says otherwise.
+#[derive(Default)]
+struct AutostartState(std::sync::Mutex<Option<String>>);
+
+#[tauri::command]
+fn autostart_error(app: tauri::AppHandle) -> Option<String> {
+    app.state::<AutostartState>().0.lock().ok()?.clone()
+}
+
+/// Everything a save must satisfy before it reaches settings.json. Pure so
+/// the rule can be tested without a running app. A pattern that is not a
+/// regex is dropped silently at capture time, so a user who typed one would
+/// otherwise be told nothing and believe it was redacting.
+pub(crate) fn check_settings(next: &settings::Settings) -> Result<(), String> {
+    if let Some((index, error)) = redact::validate_extra(&next.extra_redaction_patterns).first() {
+        // Counted from one: the number is the line the user is looking at,
+        // not an index into a vector.
+        return Err(format!(
+            "pattern {} is not a valid regular expression: {error}",
+            index + 1
+        ));
+    }
+    Ok(())
+}
+
 /// Saves and then applies, exactly as the MCP `set_config` handler does:
 /// a recording knob changed on the Settings page has to reach the running
 /// poll thread, not wait for the next launch. Async so the restart's wait
@@ -949,6 +993,7 @@ pub(crate) fn save_settings_recorded(
 #[tauri::command]
 async fn set_settings(app: tauri::AppHandle, next: settings::Settings) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
+        check_settings(&next)?;
         let previous = settings::load(&app);
         let folder = next.folder.clone().or_else(|| previous.folder.clone());
         save_settings_recorded(
@@ -1012,6 +1057,28 @@ mod tests {
 
     fn date() -> chrono::NaiveDate {
         chrono::NaiveDate::from_ymd_opt(2026, 8, 28).unwrap()
+    }
+
+    #[test]
+    fn check_settings_rejects_a_pattern_that_is_not_a_regex() {
+        let next = settings::Settings {
+            extra_redaction_patterns: vec!["Kestrel".to_string(), "([unclosed".to_string()],
+            ..Default::default()
+        };
+        let error = check_settings(&next).expect_err("an invalid pattern is refused");
+        assert!(
+            error.starts_with("pattern 2 is not a valid regular expression: "),
+            "names the pattern by its position: {error}"
+        );
+    }
+
+    #[test]
+    fn check_settings_accepts_valid_patterns() {
+        let next = settings::Settings {
+            extra_redaction_patterns: vec!["Kestrel".to_string(), "".to_string()],
+            ..Default::default()
+        };
+        assert!(check_settings(&next).is_ok());
     }
 
     #[test]
@@ -1686,6 +1753,7 @@ pub fn run() {
             request_permission,
             current_folder,
             choose_folder,
+            choose_editor,
             use_default_folder,
             capture_status,
             start_if_enabled,
@@ -1706,6 +1774,7 @@ pub fn run() {
             get_settings,
             set_settings,
             set_launch_at_login,
+            autostart_error,
             open_setup,
             app_version,
             list_days,
@@ -1738,6 +1807,7 @@ pub fn run() {
 
             app.manage(capture::CaptureState::new());
             app.manage(AgentEnv::default());
+            app.manage(AutostartState::default());
             {
                 // Warm the login-shell environment off the launch path: it
                 // costs about half a second and nothing needs it yet.
@@ -1783,10 +1853,18 @@ pub fn run() {
                 // toggle claiming otherwise: reconcile once at startup.
                 let manager = app.autolaunch();
                 let registered = manager.is_enabled().unwrap_or(false);
-                if config.launch_at_login && !registered {
-                    let _ = manager.enable();
+                let synced = if config.launch_at_login && !registered {
+                    manager.enable()
                 } else if !config.launch_at_login && registered {
-                    let _ = manager.disable();
+                    manager.disable()
+                } else {
+                    Ok(())
+                };
+                if let Err(error) = synced {
+                    eprintln!("[autostart] could not update the login item: {error}");
+                    if let Ok(mut slot) = app.state::<AutostartState>().0.lock() {
+                        *slot = Some(error.to_string());
+                    }
                 }
             }
             if reader::macos::permission_status() == reader::Permission::NotGranted

@@ -150,6 +150,8 @@ function handler(command: string) {
       return [];
     case "get_rules":
       return { rules: [], built_ins: [], next_id: "r1", error: null };
+    case "autostart_error":
+      return null;
     default:
       throw new Error(`unexpected command ${command}`);
   }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
-import { mockInvoke } from "./tauri-mock";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { callsOf, mockInvoke } from "./tauri-mock";
 import { AppSettings } from "../components/AppSettings";
 
 vi.mock("@tauri-apps/api/core", async () => {
@@ -8,25 +8,36 @@ vi.mock("@tauri-apps/api/core", async () => {
   return { invoke: mock.invoke };
 });
 
+const settings = {
+  folder: "/tmp/capture",
+  enabled: true,
+  interval_secs: 5,
+  min_dwell_secs: 10,
+  similarity_threshold: 0.5,
+  agent: null,
+  ingest_agent: null,
+  ingest_max_chars: 400_000,
+  schedule_hhmm: null,
+  editor: "/Applications/iA Writer.app",
+  launch_at_login: true,
+  idle_secs: 120,
+  max_block_chars: 4000,
+  sound_enabled: true,
+  sound_volume: 0.6,
+  write_references: true,
+  extra_redaction_patterns: [],
+};
+
 function handler(command: string) {
   switch (command) {
     case "get_settings":
-      return {
-        folder: "/tmp/capture",
-        enabled: true,
-        interval_secs: 5,
-        min_dwell_secs: 10,
-        similarity_threshold: 0.5,
-        agent: null,
-        ingest_agent: null,
-        ingest_max_chars: 400_000,
-        schedule_hhmm: null,
-        editor: null,
-        launch_at_login: true,
-        max_block_chars: 0,
-        write_references: true,
-        extra_redaction_patterns: [],
-      };
+      return settings;
+    case "autostart_error":
+      return null;
+    case "set_settings":
+      return null;
+    case "choose_editor":
+      return "/Applications/Obsidian.app";
     default:
       throw new Error(`unexpected command ${command}`);
   }
@@ -41,6 +52,52 @@ describe("AppSettings", () => {
     expect(await screen.findByText("Application")).toBeTruthy();
     expect(
       screen.getByLabelText("Ambient Context opens when you log in"),
+    ).toBeTruthy();
+  });
+
+  it("shows the editor the settings name", async () => {
+    mockInvoke(handler);
+    render(<AppSettings />);
+    const field = (await screen.findByLabelText(
+      "Open files with",
+    )) as HTMLInputElement;
+    expect(field.value).toBe("/Applications/iA Writer.app");
+  });
+
+  it("saves a typed editor path on blur", async () => {
+    mockInvoke(handler);
+    render(<AppSettings />);
+    const field = await screen.findByLabelText("Open files with");
+    fireEvent.change(field, { target: { value: "/Applications/Zed.app" } });
+    fireEvent.blur(field);
+    const saves = callsOf("set_settings");
+    expect(saves).toHaveLength(1);
+    expect((saves[0].args?.next as { editor: string }).editor).toBe(
+      "/Applications/Zed.app",
+    );
+  });
+
+  it("saves the application the picker returns", async () => {
+    mockInvoke(handler);
+    render(<AppSettings />);
+    fireEvent.click(await screen.findByText("Choose…"));
+    await screen.findByDisplayValue("/Applications/Obsidian.app");
+    expect(
+      (callsOf("set_settings")[0].args?.next as { editor: string }).editor,
+    ).toBe("/Applications/Obsidian.app");
+  });
+
+  it("reports a login item the system refused", async () => {
+    mockInvoke((command) =>
+      command === "autostart_error"
+        ? "operation not permitted"
+        : handler(command),
+    );
+    render(<AppSettings />);
+    expect(
+      await screen.findByText(
+        "Login item could not be updated: operation not permitted",
+      ),
     ).toBeTruthy();
   });
 });

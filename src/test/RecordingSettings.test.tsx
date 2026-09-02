@@ -8,7 +8,7 @@ vi.mock("@tauri-apps/api/core", async () => {
   return { invoke: mock.invoke };
 });
 
-function handler(command: string) {
+function handler(command: string, args?: Record<string, unknown>) {
   switch (command) {
     case "get_settings":
       return {
@@ -30,8 +30,17 @@ function handler(command: string) {
         write_references: true,
         extra_redaction_patterns: [],
       };
-    case "set_settings":
+    case "set_settings": {
+      const next = args?.next as { extra_redaction_patterns: string[] };
+      const bad = next.extra_redaction_patterns.findIndex((p) => p === "([bad");
+      // Tauri rejects with the command's Err(String), not with an Error.
+      if (bad >= 0) {
+        return Promise.reject(
+          `pattern ${bad + 1} is not a valid regular expression: unclosed group`,
+        );
+      }
       return null;
+    }
     default:
       throw new Error(`unexpected command ${command}`);
   }
@@ -60,5 +69,19 @@ describe("RecordingSettings", () => {
     expect(
       (saves[0].args?.next as { idle_secs: number }).idle_secs,
     ).toBe(300);
+  });
+
+  it("names the pattern the backend refused and keeps the draft", async () => {
+    mockInvoke(handler);
+    render(<RecordingSettings />);
+    const field = await screen.findByLabelText(
+      "Extra patterns, one regular expression per line",
+    );
+    fireEvent.change(field, { target: { value: "Kestrel\n([bad" } });
+    fireEvent.blur(field);
+    expect(
+      await screen.findByText(/pattern 2 is not a valid regular expression/),
+    ).toBeTruthy();
+    expect((field as HTMLTextAreaElement).value).toBe("Kestrel\n([bad");
   });
 });

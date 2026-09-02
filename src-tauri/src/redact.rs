@@ -82,6 +82,19 @@ pub fn redact_line_with(line: &str, extra: &[Regex]) -> String {
     out
 }
 
+/// The same patterns, checked rather than compiled: the index of each
+/// entry that is not a regex, with the error it produced. Capture stays
+/// lenient (a typo must never stop recording), so the save is where the
+/// user is told, while they are still looking at what they typed.
+pub fn validate_extra(patterns: &[String]) -> Vec<(usize, String)> {
+    patterns
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| !p.trim().is_empty())
+        .filter_map(|(index, p)| Regex::new(p).err().map(|e| (index, e.to_string())))
+        .collect()
+}
+
 pub fn compile_extra(patterns: &[String]) -> Vec<Regex> {
     patterns
         .iter()
@@ -322,6 +335,19 @@ mod tests {
         let extra = compile_extra(&["Project Kestrel".to_string()]);
         let out = redact_line_with("we shipped Project Kestrel today", &extra);
         assert_eq!(out, "we shipped [redacted] today");
+    }
+
+    #[test]
+    fn validate_extra_names_the_bad_pattern() {
+        let bad = validate_extra(&["Kestrel".to_string(), "([unclosed".to_string()]);
+        assert_eq!(bad.len(), 1, "only the second pattern is invalid");
+        assert_eq!(bad[0].0, 1, "reports the index of the bad pattern");
+        assert!(!bad[0].1.is_empty(), "carries the regex error");
+    }
+
+    #[test]
+    fn validate_extra_ignores_blank_lines() {
+        assert!(validate_extra(&["".to_string(), "   ".to_string()]).is_empty());
     }
 
     #[test]

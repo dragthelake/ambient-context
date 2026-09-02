@@ -5,6 +5,7 @@ import type { Settings } from "../lib/days";
 export function RecordingSettings() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [patterns, setPatterns] = useState("");
+  const [patternError, setPatternError] = useState<string | null>(null);
   const writeRefsId = useId();
   const patternsId = useId();
 
@@ -18,11 +19,19 @@ export function RecordingSettings() {
     void read();
   }, [read]);
 
+  /// Returns the backend's refusal, or null when the save went through. A
+  /// refused save leaves the component's state alone, so the draft the user
+  /// is looking at is still the draft they typed.
   const save = useCallback(async (change: (next: Settings) => Settings) => {
-    if (!settings) return;
+    if (!settings) return null;
     const next = change({ ...settings });
-    await invoke("set_settings", { next });
+    try {
+      await invoke("set_settings", { next });
+    } catch (error) {
+      return String(error);
+    }
     setSettings(next);
+    return null;
   }, [settings]);
 
   if (!settings) return null;
@@ -111,10 +120,15 @@ export function RecordingSettings() {
                 .split("\n")
                 .map((line) => line.trim())
                 .filter((line) => line !== ""),
-            }))
+            })).then(setPatternError)
           }
           placeholder="Each match is replaced with [redacted]"
         />
+        {patternError ? (
+          <p className="warn" role="alert">
+            {patternError}
+          </p>
+        ) : null}
         <p className="settings-note">
           Changed patterns take effect on the next poll. No restart needed.
         </p>
