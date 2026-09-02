@@ -317,8 +317,9 @@ Ledgered. Needs the app running. Input:
 }
 ```
 
-Example: `{ "patch": { "schedule_hhmm": "07:30" } }`. Result: the full
-patched settings. Errors: `unknown_key` (names the key; explains that nothing
+Example: `{ "patch": { "schedule_hhmm": "07:30" } }` or
+`{ "patch": { "ingest_max_chars": 250000 } }`. The ingest agent is chosen in
+the app, not over MCP (like `agent`). Result: the full patched settings. Errors: `unknown_key` (names the key; explains that nothing
 deletes captured content when the key looks like a retention setting),
 `invalid`, `not_running`, `io`.
 

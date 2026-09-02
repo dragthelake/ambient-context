@@ -18,6 +18,8 @@ export type Settings = {
   min_dwell_secs: number;
   similarity_threshold: number;
   agent: Agent | null;
+  ingest_agent: Agent | null;
+  ingest_max_chars: number;
   schedule_hhmm: string | null;
   editor: string | null;
   launch_at_login: boolean;

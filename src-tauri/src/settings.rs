@@ -36,6 +36,11 @@ pub struct Settings {
     /// normalises on the next save.
     #[serde(alias = "engine")]
     pub agent: Option<Agent>,
+    /// Runs the three ingest calls. None means the summary agent runs them.
+    pub ingest_agent: Option<Agent>,
+    /// Cap on the input of one ingest call, in characters. Over it, the
+    /// longest block bodies are trimmed first.
+    pub ingest_max_chars: usize,
     /// Local time of day as "HH:MM". None means manual runs only.
     pub schedule_hhmm: Option<String>,
     /// Absolute path to an application to open markdown with. None uses
@@ -70,6 +75,8 @@ impl Default for Settings {
             min_dwell_secs: 10,
             similarity_threshold: 0.5,
             agent: None,
+            ingest_agent: None,
+            ingest_max_chars: 400_000,
             schedule_hhmm: None,
             editor: None,
             launch_at_login: true,
@@ -111,6 +118,9 @@ pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
     if let Some(agent) = &mut settings.agent {
         crate::agent::normalize_claude_agent(agent);
     }
+    if let Some(agent) = &mut settings.ingest_agent {
+        crate::agent::normalize_claude_agent(agent);
+    }
     settings
 }
 
@@ -122,6 +132,16 @@ pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> std::io::Res
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn ingest_fields_default_when_missing_from_the_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.ingest_agent, None);
+        assert_eq!(settings.ingest_max_chars, 400_000);
+    }
 
     #[test]
     fn defaults_are_five_seconds_and_no_folder() {

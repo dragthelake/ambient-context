@@ -189,7 +189,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "get_config",
             title: "Read the settings",
-            description: "Returns every setting the Settings page exposes: capture folder, poll interval, minimum dwell, similarity threshold, agent, the daily summary time as schedule_hhmm, launch at login, editor, block size cap, whether references are written, and extra redaction patterns, plus the app version and the list of keys set_config accepts.",
+            description: "Returns every setting the Settings page exposes: capture folder, poll interval, minimum dwell, similarity threshold, agent, ingest input cap as ingest_max_chars, the daily summary time as schedule_hhmm, launch at login, editor, block size cap, whether references are written, and extra redaction patterns, plus the app version and the list of keys set_config accepts.",
             input_schema: none(),
             read_only: true, destructive: false, idempotent: true,
         },

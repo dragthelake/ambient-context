@@ -18,6 +18,8 @@ function handler(command: string) {
         min_dwell_secs: 10,
         similarity_threshold: 0.5,
         agent: null,
+        ingest_agent: null,
+        ingest_max_chars: 400_000,
         schedule_hhmm: null,
         editor: null,
         launch_at_login: true,
