@@ -172,8 +172,11 @@ pub fn summarise_day(
     env: &std::collections::HashMap<String, String>,
 ) -> Result<(), String> {
     let day_path = writer::DayFile::Apps.path(folder, date);
-    let day_markdown = std::fs::read_to_string(&day_path)
+    std::fs::read_to_string(&day_path)
         .map_err(|_| format!("there is no capture for {date}"))?;
+
+    let timeline = crate::days::timeline(folder, date).unwrap_or_default();
+    let kb = String::new();
 
     let mut entry = ledger::Entry {
         // The moment the run started, so a reader can line an entry up
@@ -192,7 +195,7 @@ pub fn summarise_day(
         disposition: ledger::Disposition::Accepted,
     };
 
-    let prompt = summarise::build_prompt(template, date, &day_markdown);
+    let prompt = summarise::build_prompt(template, date, &timeline, &kb);
 
     let output = match agent::run_with_env(agent_config, &prompt, env) {
         Ok(output) => output,
@@ -234,7 +237,7 @@ pub fn run_one(app: &AppHandle, date: NaiveDate, trigger: ledger::Trigger) -> Re
     let agent_config = config.agent.clone().ok_or("no agent is connected")?;
     let config_dir = settings::config_dir(app);
     // The customised prompt when there is one, the bundled copy otherwise.
-    let template = crate::prompt::current(&config_dir);
+    let template = crate::prompt::current(&config_dir, crate::prompt::PromptId::DayContext);
     let reject_dir = app
         .path()
         .app_data_dir()

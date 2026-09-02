@@ -107,7 +107,12 @@ function handler(command: string) {
     case "agent_detect":
       return [];
     case "get_prompt":
-      return { text: "", customised: false, path: "/tmp/prompt.md" };
+      return {
+        id: "day-context",
+        text: "",
+        customised: false,
+        path: "/tmp/prompt.md",
+      };
     case "list_days":
       return [
         {

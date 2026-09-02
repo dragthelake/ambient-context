@@ -3,10 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 export type PromptPayload = {
+  id: string;
   text: string;
   customised: boolean;
   path: string;
 };
+
+const DAY_CONTEXT = "day-context";
 
 export function PromptSettings() {
   const [payload, setPayload] = useState<PromptPayload | null>(null);
@@ -17,7 +20,7 @@ export function PromptSettings() {
   const [copied, setCopied] = useState(false);
 
   const read = useCallback(async () => {
-    const next = await invoke<PromptPayload>("get_prompt");
+    const next = await invoke<PromptPayload>("get_prompt", { id: DAY_CONTEXT });
     setPayload(next);
     setDraft(next.text);
   }, []);
@@ -28,7 +31,10 @@ export function PromptSettings() {
 
   const save = async () => {
     try {
-      const next = await invoke<PromptPayload>("set_prompt", { text: draft });
+      const next = await invoke<PromptPayload>("set_prompt", {
+        id: DAY_CONTEXT,
+        text: draft,
+      });
       setPayload(next);
       setDraft(next.text);
       setError(null);
@@ -43,7 +49,7 @@ export function PromptSettings() {
 
   const reset = async () => {
     try {
-      const next = await invoke<PromptPayload>("reset_prompt");
+      const next = await invoke<PromptPayload>("reset_prompt", { id: DAY_CONTEXT });
       setPayload(next);
       setDraft(next.text);
       setError(null);
@@ -64,7 +70,7 @@ export function PromptSettings() {
   // bundled one when nothing has been customised yet.
   const openInEditor = async () => {
     try {
-      await invoke("open_prompt_in_editor");
+      await invoke("open_prompt_in_editor", { id: DAY_CONTEXT });
       setError(null);
     } catch (e) {
       setError(String(e));

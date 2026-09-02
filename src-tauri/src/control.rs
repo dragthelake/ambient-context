@@ -452,9 +452,9 @@ pub mod writes {
 
     pub fn set_prompt(app: &AppHandle, text: String, client: &str) -> Response {
         let dir = settings::config_dir(app);
-        let target = dir.join("prompts").join("day-context.md");
+        let target = prompt::prompt_path(&dir, prompt::PromptId::DayContext);
         let before = hash_before(&target);
-        match prompt::set(&dir, &text) {
+        match prompt::set(&dir, prompt::PromptId::DayContext, &text) {
             Ok(()) => {
                 ledger_write(
                     app,
@@ -487,6 +487,20 @@ pub mod writes {
                     "The prompt must still ask for the {heading} heading, or summary validation \
                      will reject every summary it produces."
                 );
+                ledger_write(
+                    app,
+                    client,
+                    "set_prompt",
+                    before,
+                    text,
+                    ledger::Disposition::Rejected {
+                        reason: reason.clone(),
+                    },
+                );
+                Response::err("invalid", reason)
+            }
+            Err(error) => {
+                let reason = error.to_string();
                 ledger_write(
                     app,
                     client,

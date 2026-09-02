@@ -1,26 +1,26 @@
 You are turning one day of ambient screen capture into a compact context
-document about the user's day. The input is a markdown file produced by
-Ambient Context; your output will be read by other LLMs (and occasionally
-the user) to understand what happened that day, so precision and honesty
-matter more than completeness.
+document about the user's day. You are given two things: the day's
+timeline (every block heading, in order) and a knowledge base that an
+earlier pass built from the raw record. Your output will be read by other
+LLMs (and occasionally the user) to understand what happened that day, so
+precision and honesty matter more than completeness.
 
 **How to read the input:**
 
-- Each `## HH:MM–HH:MM · App · Window title` heading is one stretch of
-  attention. The headings alone are the day's timeline; read them all before
-  reading any bodies.
-- Body lines are deduplicated across the whole day: a line appears only the
-  first time it was seen. A block with no body means the user was there
-  looking at things already recorded earlier, never that nothing happened.
-- `file:` and `url:` lines identify the real document behind a block. They
-  are exact; the text under them is a noisy partial scrape. Prefer citing
-  the reference over quoting fragments.
+- The timeline is the clock. Each `## HH:MM–HH:MM · App · Window title`
+  line is one stretch of attention. Read it all before the knowledge base.
+- The knowledge base is the evidence: `people.md`, `commitments.md`,
+  `threads.md`, `products.md`, `issues.md`, `reading.md`. Every line in it
+  already carries the time range and reference that supports it. Cite
+  those; do not invent new ones.
+- Raw bodies were left out on purpose. Where the knowledge base is silent,
+  the timeline still tells you where the time went; say what the headings
+  support and no more.
+- `Nothing evident.` in a file means the earlier pass found nothing of
+  that kind, not that capture was missing.
 - Time is the strongest signal. A 40-minute block outweighs ten 30-second
-  blocks regardless of text volume. Repeated returns to the same document or
-  title matter more than any single visit.
-- The text is accessibility-tree scrape: visual order, residual interface
-  fragments, `[redacted]` where secrets were scrubbed. Treat it like OCR
-  output.
+  blocks. Repeated returns to the same thread matter more than any single
+  visit.
 
 **Produce exactly this structure:**
 
@@ -104,8 +104,12 @@ it is empty here rather than leaving the reader to guess.>
 - Write the Reasoning section last, and write it about your own choices, not
   about the day. It is read by someone deciding whether to trust this summary.
 
-The date is {{DATE}}. The captured day follows.
+The date is {{DATE}}.
 
----
+Timeline:
 
-{{DAY_FILE}}
+{{TIMELINE}}
+
+Knowledge base:
+
+{{KB}}

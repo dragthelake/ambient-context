@@ -244,28 +244,45 @@ fn open_in_editor(app: tauri::AppHandle, date: String, which: String) -> Result<
 fn prompt_editor_target(
     config_dir: &std::path::Path,
     temp_dir: &std::path::Path,
+    id: prompt::PromptId,
 ) -> std::io::Result<std::path::PathBuf> {
-    if prompt::is_customised(config_dir) {
-        return Ok(prompt::prompt_path(config_dir));
+    if prompt::is_customised(config_dir, id) {
+        return Ok(prompt::prompt_path(config_dir, id));
     }
-    let copy = temp_dir.join("Ambient Context day-context (bundled, read only).md");
+    let copy = temp_dir.join(format!(
+        "Ambient Context {} (bundled, read only).md",
+        id.as_str()
+    ));
     if copy.exists() {
         // A copy from a previous open is read-only, so make it writable
         // before replacing it.
         let _ = std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o600));
     }
-    std::fs::write(&copy, prompt::BUNDLED)?;
+    std::fs::write(&copy, id.bundled())?;
     std::fs::set_permissions(&copy, std::fs::Permissions::from_mode(0o444))?;
     Ok(copy)
 }
 
-/// Opens the day-context prompt in the user's editor. Writes nothing the
-/// user did not already have, so there is no ledger entry.
+/// Opens a prompt in the user's editor. Writes nothing the user did not
+/// already have, so there is no ledger entry.
 #[tauri::command]
-fn open_prompt_in_editor(app: tauri::AppHandle) -> Result<(), String> {
-    let path = prompt_editor_target(&settings::config_dir(&app), &std::env::temp_dir())
-        .map_err(|e| e.to_string())?;
+fn open_prompt_in_editor(app: tauri::AppHandle, id: Option<String>) -> Result<(), String> {
+    let prompt_id = prompt_id(id)?;
+    let path = prompt_editor_target(
+        &settings::config_dir(&app),
+        &std::env::temp_dir(),
+        prompt_id,
+    )
+    .map_err(|e| e.to_string())?;
     open_path_in_editor(&app, &path)
+}
+
+fn prompt_id(id: Option<String>) -> Result<prompt::PromptId, String> {
+    match id {
+        None => Ok(prompt::PromptId::DayContext),
+        Some(name) => prompt::PromptId::parse(&name)
+            .ok_or_else(|| format!("{name} is not a prompt id")),
+    }
 }
 
 #[tauri::command]
@@ -392,34 +409,41 @@ fn remove_rule(app: tauri::AppHandle, id: String) -> Result<RulesPayload, String
 
 #[derive(serde::Serialize)]
 struct PromptPayload {
+    id: String,
     text: String,
     customised: bool,
     path: String,
 }
 
-fn prompt_payload(app: &tauri::AppHandle) -> PromptPayload {
+fn prompt_payload(app: &tauri::AppHandle, id: prompt::PromptId) -> PromptPayload {
     let config_dir = settings::config_dir(app);
     PromptPayload {
-        text: prompt::current(&config_dir),
-        customised: prompt::is_customised(&config_dir),
-        path: prompt::prompt_path(&config_dir)
+        id: id.as_str().to_string(),
+        text: prompt::current(&config_dir, id),
+        customised: prompt::is_customised(&config_dir, id),
+        path: prompt::prompt_path(&config_dir, id)
             .to_string_lossy()
             .to_string(),
     }
 }
 
 #[tauri::command]
-fn get_prompt(app: tauri::AppHandle) -> PromptPayload {
-    prompt_payload(&app)
+fn get_prompt(app: tauri::AppHandle, id: Option<String>) -> Result<PromptPayload, String> {
+    Ok(prompt_payload(&app, prompt_id(id)?))
 }
 
 #[tauri::command]
-fn set_prompt(app: tauri::AppHandle, text: String) -> Result<PromptPayload, String> {
+fn set_prompt(
+    app: tauri::AppHandle,
+    id: Option<String>,
+    text: String,
+) -> Result<PromptPayload, String> {
+    let prompt_id = prompt_id(id)?;
     let config_dir = settings::config_dir(&app);
-    let before = ledger::hash_file(&prompt::prompt_path(&config_dir))
+    let before = ledger::hash_file(&prompt::prompt_path(&config_dir, prompt_id))
         .map(|input| vec![input])
         .unwrap_or_default();
-    prompt::set(&config_dir, &text).map_err(|e| e.to_string())?;
+    prompt::set(&config_dir, prompt_id, &text).map_err(|e| e.to_string())?;
     if let Some(folder) = settings::load(&app).folder {
         let _ = ledger::append(
             &folder,
@@ -427,7 +451,7 @@ fn set_prompt(app: tauri::AppHandle, text: String) -> Result<PromptPayload, Stri
                 at: chrono::Local::now(),
                 trigger: ledger::Trigger::Settings,
                 action: "set_prompt".to_string(),
-                prompt_id: None,
+                prompt_id: Some(prompt_id.as_str().to_string()),
                 prompt_sha256: Some(ledger::sha256_of(text.as_bytes())),
                 engine: None,
                 inputs: before,
@@ -437,13 +461,14 @@ fn set_prompt(app: tauri::AppHandle, text: String) -> Result<PromptPayload, Stri
             },
         );
     }
-    Ok(prompt_payload(&app))
+    Ok(prompt_payload(&app, prompt_id))
 }
 
 #[tauri::command]
-fn reset_prompt(app: tauri::AppHandle) -> Result<PromptPayload, String> {
+fn reset_prompt(app: tauri::AppHandle, id: Option<String>) -> Result<PromptPayload, String> {
+    let prompt_id = prompt_id(id)?;
     let config_dir = settings::config_dir(&app);
-    prompt::reset(&config_dir).map_err(|e| e.to_string())?;
+    prompt::reset(&config_dir, prompt_id).map_err(|e| e.to_string())?;
     if let Some(folder) = settings::load(&app).folder {
         let _ = ledger::append(
             &folder,
@@ -451,7 +476,7 @@ fn reset_prompt(app: tauri::AppHandle) -> Result<PromptPayload, String> {
                 at: chrono::Local::now(),
                 trigger: ledger::Trigger::Settings,
                 action: "reset_prompt".to_string(),
-                prompt_id: None,
+                prompt_id: Some(prompt_id.as_str().to_string()),
                 prompt_sha256: None,
                 engine: None,
                 inputs: Vec::new(),
@@ -461,7 +486,7 @@ fn reset_prompt(app: tauri::AppHandle) -> Result<PromptPayload, String> {
             },
         );
     }
-    Ok(prompt_payload(&app))
+    Ok(prompt_payload(&app, prompt_id))
 }
 
 /// The proposal store keeps a proposal between `propose` and the Apply the
@@ -991,28 +1016,54 @@ mod tests {
     fn a_customised_prompt_opens_the_users_own_file() {
         let config = tempfile::tempdir().unwrap();
         let temp = tempfile::tempdir().unwrap();
-        prompt::set(config.path(), prompt::BUNDLED).unwrap();
-        let target = prompt_editor_target(config.path(), temp.path()).unwrap();
-        assert_eq!(target, prompt::prompt_path(config.path()));
+        prompt::set(
+            config.path(),
+            prompt::PromptId::DayContext,
+            prompt::PromptId::DayContext.bundled(),
+        )
+        .unwrap();
+        let target = prompt_editor_target(
+            config.path(),
+            temp.path(),
+            prompt::PromptId::DayContext,
+        )
+        .unwrap();
+        assert_eq!(
+            target,
+            prompt::prompt_path(config.path(), prompt::PromptId::DayContext)
+        );
     }
 
     #[test]
     fn the_bundled_prompt_opens_as_a_read_only_copy_and_stays_uncustomised() {
         let config = tempfile::tempdir().unwrap();
         let temp = tempfile::tempdir().unwrap();
-        let target = prompt_editor_target(config.path(), temp.path()).unwrap();
+        let target = prompt_editor_target(
+            config.path(),
+            temp.path(),
+            prompt::PromptId::DayContext,
+        )
+        .unwrap();
 
         assert!(target.starts_with(temp.path()));
-        assert_eq!(std::fs::read_to_string(&target).unwrap(), prompt::BUNDLED);
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            prompt::PromptId::DayContext.bundled()
+        );
         let mode = std::fs::metadata(&target).unwrap().permissions().mode();
         assert_eq!(mode & 0o222, 0, "the copy is read only");
         assert!(
-            !prompt::is_customised(config.path()),
+            !prompt::is_customised(config.path(), prompt::PromptId::DayContext),
             "opening the prompt is not customising it"
         );
 
         // Opening it twice must not fail on the read-only copy it left.
-        assert!(prompt_editor_target(config.path(), temp.path()).is_ok());
+        assert!(prompt_editor_target(
+            config.path(),
+            temp.path(),
+            prompt::PromptId::DayContext,
+        )
+        .is_ok());
     }
 
     #[test]

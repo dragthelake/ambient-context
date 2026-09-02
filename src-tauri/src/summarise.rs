@@ -119,12 +119,6 @@ pub fn validate(text: &str, max_lines: usize) -> Result<(), Invalid> {
 use chrono::NaiveDate;
 use std::path::{Path, PathBuf};
 
-/// The prompt shipped with this version. A user-supplied prompt replaces it
-/// entirely; this copy is never edited in place, so an update can improve it
-/// without touching anyone's own file.
-#[cfg(test)]
-pub const BUNDLED_PROMPT: &str = include_str!("../prompts/day-context.md");
-
 pub fn summaries_dir(folder: &Path) -> PathBuf {
     folder.join("Summaries")
 }
@@ -133,10 +127,11 @@ pub fn summary_path(folder: &Path, date: NaiveDate) -> PathBuf {
     summaries_dir(folder).join(format!("{}.md", date.format("%Y-%m-%d")))
 }
 
-pub fn build_prompt(template: &str, date: NaiveDate, day_markdown: &str) -> String {
+pub fn build_prompt(template: &str, date: NaiveDate, timeline: &str, kb: &str) -> String {
     template
         .replace("{{DATE}}", &date.format("%Y-%m-%d").to_string())
-        .replace("{{DAY_FILE}}", day_markdown)
+        .replace("{{TIMELINE}}", timeline)
+        .replace("{{KB}}", kb)
 }
 
 pub fn write_summary(folder: &Path, date: NaiveDate, body: &str) -> std::io::Result<()> {
@@ -398,20 +393,37 @@ mod tests {
     }
 
     #[test]
-    fn the_prompt_carries_the_date_and_the_whole_day_file() {
+    fn the_prompt_carries_the_date_timeline_and_knowledge_base() {
         let out = build_prompt(
-            "Date: {{DATE}}\nBody:\n{{DAY_FILE}}",
+            "Date: {{DATE}}\nTimeline:\n{{TIMELINE}}\nKB:\n{{KB}}",
             date(2026, 8, 28),
             "## 09:00 block",
+            "people.md",
         );
-        assert_eq!(out, "Date: 2026-08-28\nBody:\n## 09:00 block");
+        assert_eq!(
+            out,
+            "Date: 2026-08-28\nTimeline:\n## 09:00 block\nKB:\npeople.md"
+        );
     }
 
     #[test]
-    fn the_bundled_prompt_carries_both_placeholders_and_the_reasoning_section() {
-        assert!(BUNDLED_PROMPT.contains("{{DATE}}"));
-        assert!(BUNDLED_PROMPT.contains("{{DAY_FILE}}"));
-        assert!(BUNDLED_PROMPT.contains("## Reasoning"));
+    fn day_file_is_no_longer_a_placeholder() {
+        let out = build_prompt(
+            "Body: {{DAY_FILE}}",
+            date(2026, 8, 28),
+            "timeline",
+            "kb",
+        );
+        assert_eq!(out, "Body: {{DAY_FILE}}");
+    }
+
+    #[test]
+    fn the_bundled_summary_prompt_carries_its_placeholders_and_reasoning() {
+        let bundled = crate::prompt::PromptId::DayContext.bundled();
+        assert!(bundled.contains("{{DATE}}"));
+        assert!(bundled.contains("{{TIMELINE}}"));
+        assert!(bundled.contains("{{KB}}"));
+        assert!(bundled.contains("## Reasoning"));
     }
 
     #[test]

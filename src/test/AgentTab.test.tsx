@@ -39,7 +39,12 @@ function handler(command: string, args?: Record<string, unknown>) {
     case "agent_detect":
       return [];
     case "get_prompt":
-      return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+      return {
+        id: "day-context",
+        text: "You are a careful summariser.",
+        customised: false,
+        path: "/tmp/prompt.md",
+      };
     default:
       throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
   }
@@ -76,7 +81,12 @@ describe("AgentTab", () => {
             ? { state: "not_logged_in", fix: "Run claude login" }
             : { state: "ok" };
         case "get_prompt":
-          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+          return {
+            id: "day-context",
+            text: "You are a careful summariser.",
+            customised: false,
+            path: "/tmp/prompt.md",
+          };
         default:
           throw new Error(`unexpected command ${command}`);
       }
@@ -116,7 +126,12 @@ describe("AgentTab", () => {
         case "agent_auth":
           return { state: "ok" };
         case "get_prompt":
-          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+          return {
+            id: "day-context",
+            text: "You are a careful summariser.",
+            customised: false,
+            path: "/tmp/prompt.md",
+          };
         default:
           throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
       }
@@ -167,7 +182,12 @@ describe("AgentTab", () => {
             release = () => resolve("late reply");
           });
         case "get_prompt":
-          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+          return {
+            id: "day-context",
+            text: "You are a careful summariser.",
+            customised: false,
+            path: "/tmp/prompt.md",
+          };
         default:
           throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
       }
@@ -217,7 +237,12 @@ describe("AgentTab", () => {
         case "agent_test":
           return "Claude replied.";
         case "get_prompt":
-          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+          return {
+            id: "day-context",
+            text: "You are a careful summariser.",
+            customised: false,
+            path: "/tmp/prompt.md",
+          };
         default:
           throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
       }
@@ -260,7 +285,12 @@ describe("AgentTab", () => {
         case "agent_auth":
           return { state: "ok" };
         case "get_prompt":
-          return { text: "You are a careful summariser.", customised: false, path: "/tmp/prompt.md" };
+          return {
+            id: "day-context",
+            text: "You are a careful summariser.",
+            customised: false,
+            path: "/tmp/prompt.md",
+          };
         default:
           throw new Error(`unexpected command ${command} ${JSON.stringify(args)}`);
       }

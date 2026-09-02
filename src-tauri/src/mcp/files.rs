@@ -190,9 +190,11 @@ pub fn list_rules(config_dir: &Path) -> serde_json::Value {
 }
 
 pub fn get_prompt(config_dir: &Path) -> serde_json::Value {
+    let id = crate::prompt::PromptId::DayContext;
     serde_json::json!({
-        "text": crate::prompt::current(config_dir),
-        "customised": crate::prompt::is_customised(config_dir),
+        "id": id.as_str(),
+        "text": crate::prompt::current(config_dir, id),
+        "customised": crate::prompt::is_customised(config_dir, id),
     })
 }
 
@@ -210,7 +212,10 @@ pub fn get_config(config_dir: &Path) -> serde_json::Value {
         );
         map.insert(
             "prompt_customised".into(),
-            serde_json::json!(crate::prompt::is_customised(config_dir)),
+            serde_json::json!(crate::prompt::is_customised(
+                config_dir,
+                crate::prompt::PromptId::DayContext
+            )),
         );
     }
     value
