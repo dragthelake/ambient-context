@@ -8,26 +8,22 @@ about the user's day without asking them to narrate it.
 
 ## Files
 
-- `Days/YYYY-MM-DD/apps.md`: the timeline for one day, with native app bodies.
-- `Days/YYYY-MM-DD/websites.md`: a visit table for websites (no bodies).
-- `Days/YYYY-MM-DD/messages.md`: message bodies routed out of mail and chat.
-- `KB/YYYY-MM-DD/`: six cited knowledge-base files plus `manifest.md`.
+- `YYYY-MM-DD.md`: one file per day, blocks appended in real time.
 - `Summaries/YYYY-MM-DD.md`: one distilled account per day.
 - `Ledger/YYYY-MM-DD.md`: every model action taken on the user's behalf.
 - `AGENTS.md`: this file.
 
-Flat `YYYY-MM-DD.md` files from older versions are ignored.
-
-## Format of the day files
-
-Each day folder holds three append-only files.
-
-`apps.md` blocks look like this:
+## Format of a day file
 
 ```
-## 09:41–10:05 · Zed · ambient-context/src/lib.rs
+---
+date: 2026-08-25
+captured_by: Ambient Context 0.1.0
+---
 
-file: /Users/x/project/src/lib.rs
+## 09:41–10:05 · Chrome · Tauri tray documentation
+
+url: https://v2.tauri.app/learn/system-tray/
 
 <text lines new to this day>
 ```
@@ -35,32 +31,10 @@ file: /Users/x/project/src/lib.rs
 Each `##` block is one stretch of attention: a window the user stayed in.
 The heading carries the time range, the application, and the window title.
 A `file:` line is the path of the document backing that window; a `url:`
-line is the web page. Both are optional. A `routed:` line on a block in
-`apps.md` means the body was written to `messages.md` instead.
-
-`websites.md` is a pipe table of visits: domain, URL, title, dwell and visit
-counts, first and last seen. Bodies are not recorded there.
-
-`messages.md` holds the bodies of routed message windows, with the same block
-headings as `apps.md`.
-
-## The knowledge base
-
-`KB/YYYY-MM-DD/` holds six derived files: `people.md`, `commitments.md`,
-`threads.md`, `products.md`, `issues.md` and `reading.md`, plus
-`manifest.md` which records which ingest call produced each file and from
-which input hashes.
-
-The KB is regenerable from `Days/` alone. Treat it as structured evidence,
-not primary record. Every line in the six files carries a time citation
-(`HH:MM-HH:MM`). `Nothing evident.` means the ingest step found nothing to
-say for that section, not that nothing happened.
+line is the web page. Both are optional.
 
 ## How to read it
 
-- **Read the summary for what a day meant, the KB for structured evidence,
-  and `Days/` for the record.** The summary interprets; the KB cites; the
-  day files are what was actually captured.
 - **The headings are the timeline.** Time range, app and title alone tell
   you most of what the day was. Read all headings first; read block bodies
   only where you need detail.
@@ -80,16 +54,30 @@ say for that section, not that nothing happened.
   numbers are scrubbed before writing. Password managers and private
   browsing windows are never captured at all, so their absence is by
   design.
-- **Be honest about gaps.** The user can stop capture at any time, so
+
+## Building context about the user
+
+- Prefer patterns over incidents: which projects recur, which documents
+  keep being reopened, what a normal morning looks like. One glance at a
+  page rarely means anything; the fifth return to it does.
+- Time spent is signal. A 40-minute block on one document outweighs twenty
+  seconds on ten tabs, whatever the text volume says.
+- Cross-reference days. The same ticket, path or name appearing across
+  files is the thread worth pulling.
+- When summarising a day for memory, lead with what the user worked on and
+  decided, not what they merely saw. Meetings, documents written, and
+  repeated returns to a problem are worth keeping; passing reads mostly
+  are not.
+- Be honest about gaps. The user can stop capture at any time, so
   uncaptured hours are normal and mean nothing beyond "not recorded".
 
 ## Summaries
 
 `Summaries/YYYY-MM-DD.md` holds one distilled account per day, written by
-the user's own LLM from the day's timeline headings and knowledge base.
+the user's own LLM from the day file of the same name.
 
-Read the summary for what a day meant, and the day files and KB for
-evidence. The summary interprets and can be wrong; the record cannot.
+Read the summary for what a day meant, and the day file for evidence. The
+summary interprets and can be wrong; the day file is the record and cannot.
 Every claim in a summary carries the time range that supports it, so open
 the day file at that range rather than trusting the sentence.
 
@@ -98,16 +86,13 @@ happened.
 
 ## Ledger
 
-`Ledger/YYYY-MM-DD.md` records every time the summariser or ingest step
-ran, including the runs that produced nothing. Each entry names the prompt,
-the engine, the files that went in with their content hashes, what came out,
-and why.
+`Ledger/YYYY-MM-DD.md` records every time the summariser ran, including the
+runs that produced nothing. Each entry names the prompt, the engine, the
+files that went in with their content hashes, what came out, and why.
 
-Ingest runs appear as `ingest_messages`, `ingest_apps` and `ingest_websites`.
-The summary run is `summarise_day`. Read the ledger when a summary or KB
-file looks wrong, or when a day has no summary and you need to know whether
-that means it failed or has not run. The hashes let you tell whether an
-input has changed since the output was written.
+Read it when a summary looks wrong, or when a day has no summary and you
+need to know whether that means it failed or has not run. The hashes let you
+tell whether an input has changed since the summary was written.
 
 The reasoning in an entry is the model's own account of its choices. It is
 not a record of what the model computed, and it can be wrong in the same

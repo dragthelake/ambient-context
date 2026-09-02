@@ -1,8 +1,32 @@
 # Changelog
 
-Dated entries rather than versions for now: nothing has been tagged yet, and
-every build is unsigned while Apple Developer enrolment is in progress. Once
-releases exist, entries here become their release notes.
+## 0.2.0
+
+Per-day folders, a daily knowledge base, and summaries that read cited
+evidence instead of raw bodies.
+
+- **Days/ layout:** each day is `Days/YYYY-MM-DD/apps.md` (timeline with
+  native app bodies), `websites.md` (visit table, no bodies) and
+  `messages.md` (routed message bodies).
+- **Message routing:** built-in table plus user `route_messages` rules send
+  mail and chat bodies to `messages.md`.
+- **Own-window capture:** the Ambient Context window and KB files record as
+  headings only.
+- **Knowledge base:** three ingest calls (messages, apps, websites) write six
+  cited files under `KB/YYYY-MM-DD/` plus `manifest.md`.
+- **Summary from KB:** the daily summary prompt receives timeline headings
+  and the KB, not full raw bodies.
+- **Day view:** Raw tabs, KB pane with Ingest and Re-ingest, job step text.
+- **Settings:** separate ingest agent and ingest input cap; prompt selector
+  for all four prompts.
+- **MCP:** `read_kb` and `ingest_day` (twenty tools total).
+- **0.1 flat day files** (`YYYY-MM-DD.md` at the folder root) are no
+  longer read.
+
+---
+
+Dated entries below predate versioning. Nothing had been tagged yet when
+0.2.0 shipped.
 
 ## 2026-08-26
 

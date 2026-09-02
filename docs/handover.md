@@ -11,27 +11,42 @@ measurements, and its open visual items.
 
 ## What the app is
 
-An app that writes a record of what you worked on: one markdown file per day, on your own computer. It reads the focused window through the accessibility API, and never takes screenshots. There is no account and no server, and that claim is on the About screen, so any
-feature that phones home contradicts the product.
+An app that writes a record of what you worked on: one folder per day on your
+own computer, with three raw files (`apps.md`, `websites.md`, `messages.md`),
+an optional agent-built knowledge base under `KB/`, and then a summary. It
+reads the focused window through the accessibility API, and never takes
+screenshots. There is no account and no server, and that claim is on the
+About screen, so any feature that phones home contradicts the product.
 
-Once a day it can hand the day's file to an agent CLI already on the machine
-(Claude Code, Codex, opencode) and save the summary next to the record. That
-run happens under the user's own subscription. Nothing about it is a service.
+Once a day it can run three shorter ingest calls and a summary through an
+agent CLI already on the machine (Claude Code, Codex, opencode). That work
+happens under the user's own subscription. Nothing about it is a service.
 
-An MCP surface lets clients read days, queue summaries and edit rules over a
-unix socket. `docs/mcp.md` is its contract.
+An MCP surface lets clients read days and the KB, queue ingest and summaries,
+and edit rules over a unix socket. `docs/mcp.md` is its contract.
 
 ## Where things stand
 
-Branch `v1`, **31 commits ahead of `origin/v1` and never pushed**. Working
-tree clean. Every CI gate passes: `cargo fmt --check`, `cargo clippy
---all-targets -- -D warnings`, `cargo test`, `npx tsc --noEmit`,
-`npx vitest run` (50 tests), `npm run build`.
+Branch `v1`, ahead of `origin/v1` and not pushed at last check. Version
+**0.2.0**. Every CI gate should pass before you push:
 
-Version is `0.1.0` with no git tags. Nothing has been released, which is why
-the Agent plan takes a breaking MCP rename now rather than later.
+```bash
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
+cd .. && npx tsc --noEmit && npx vitest run && npm run build
+```
+
+At last full run: **394** Rust tests (including `docs_match_tools` and
+`mcp_stdio`), **73** Vitest tests.
 
 ### Built and merged
+
+The **day-scoped knowledge base** (0.2.0): per-day folders, website visit
+rows, message routing, three ingest calls into `KB/YYYY-MM-DD/`, summary from
+KB plus timeline headings, KB view with Ingest and Re-ingest, ingest agent
+settings, and MCP `read_kb` / `ingest_day`. Spec and plan:
+
+- `docs/superpowers/specs/2026-09-02-days-and-kb-design.md`
+- `docs/superpowers/plans/2026-09-02-days-and-kb.md`
 
 The **Overview defrag map**: a Windows 98 Disk Defragmenter field, one cell
 per recorded day, that batch-summarises everything holding raw context with
@@ -45,13 +60,11 @@ day in one click.
 
 ### Specced and planned, not built
 
-The **Agent tab**. Renames "engine" to "agent", gives it its own tab, and
-prompts from the Overview when none is connected.
+The **Agent tab** polish from the older plan (if anything remains) is
+documented separately:
 
 - Spec: `docs/superpowers/specs/2026-09-01-agent-tab-design.md`
 - Plan: `docs/superpowers/plans/2026-09-01-agent-tab.md`
-
-Approved and ready to execute. The execution approach was never chosen.
 
 ### Designed in conversation, not written down
 
@@ -60,6 +73,21 @@ point, offering Copy and Open a GitHub issue. Deliberately no automatic
 diagnostics beyond the app version, because agent stderr and the ledger can
 both carry the user's own content. Blocked only on GitHub Issues being
 enabled on `dragthelake/ambient-context`, which is public.
+
+## Manual QA (0.2.0)
+
+Automated gates were run locally before the 0.2.0 commit. The checklist
+below was **not** executed in this session; run it before calling the release
+done:
+
+1. `npm run tauri dev` with a fresh capture folder.
+2. Capture a mixed hour (editor, browser docs, social inbox URLs, Mail,
+   Slack). Confirm the three day files and that `websites.md` has rows only.
+3. Confirm own-window headings-only and no self-capture block in the editor.
+4. Day view: Raw tabs, Websites ranking, Ingest with step text, six KB files
+   with citations, Summarise with four ledger entries.
+5. Re-ingest after deleting `KB/{today}/`.
+6. MCP: `read_day`, `read_kb`, `ingest_day`, `summarise_day`.
 
 ## Decisions already taken, so they do not need relitigating
 
@@ -70,7 +98,7 @@ enabled on `dragthelake/ambient-context`, which is public.
   string, and the test asserting that string. Renaming them would rewrite
   records the app promised to write once.
 - **The MCP error code `no_engine` becomes `no_agent`**, breaking any client
-  matching the old one. Taken deliberately at 0.1.0 with nothing released.
+  matching the old one. Taken deliberately before release.
 - **The defrag map's Summarise button is uncapped** and carries the day count
   in its label, because each day is one agent run on the user's own
   subscription. `MAX_BACKFILL_DAYS` still caps the scheduled path at seven;

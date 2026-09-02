@@ -1,15 +1,17 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin, Command, Stdio};
 
-const EXPECTED: [&str; 18] = [
+const EXPECTED: [&str; 20] = [
     "add_rule",
     "capture_status",
     "get_config",
     "get_prompt",
+    "ingest_day",
     "list_days",
     "list_rules",
     "open_day",
     "read_day",
+    "read_kb",
     "read_ledger",
     "read_summary",
     "remove_rule",
@@ -76,7 +78,7 @@ impl Drop for Session {
 }
 
 #[test]
-fn the_subcommand_initialises_and_lists_the_eighteen_tools_with_no_app_and_no_config() {
+fn the_subcommand_initialises_and_lists_the_twenty_tools_with_no_app_and_no_config() {
     let mut session = Session::start();
 
     let initialised = session.call(serde_json::json!({

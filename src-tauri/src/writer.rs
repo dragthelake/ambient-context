@@ -367,6 +367,7 @@ pub fn append_block(
 const PREVIOUS_BUNDLED_AGENTS: &[&str] = &[
     "3102846b796ab65642806000543c289e49131d53001b53cada23b0f88467f0af",
     "5302950a122a3433f6a4dbbb0a285f83397d516bf9b7a1ba17619384637dd2ae",
+    "3e2ba105d4490c78b7a998c1b048215e385806d41e40733211f694e313aa6dba",
 ];
 
 fn is_bundled_agents_file(text: &str, current: &str) -> bool {
@@ -407,6 +408,7 @@ mod tests {
     use super::*;
     use crate::rules::Rules;
     use chrono::{Local, TimeZone};
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn date() -> NaiveDate {
@@ -876,6 +878,26 @@ mod tests {
     }
 
     #[test]
+    fn a_previous_bundled_agents_hash_is_replaced_on_upgrade() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let previous = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agents-v0.1.md"),
+        )
+        .unwrap();
+        assert!(
+            is_bundled_agents_file(&previous, include_str!("../assets/AGENTS.md")),
+            "fixture should hash as a previous bundled copy"
+        );
+        fs::write(&path, previous).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            include_str!("../assets/AGENTS.md")
+        );
+    }
+
+    #[test]
     fn writes_agents_md_into_the_folder() {
         let dir = tempdir().unwrap();
         append_block(
@@ -889,6 +911,7 @@ mod tests {
         let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
         assert!(text.contains("## Summaries"));
         assert!(text.contains("## Ledger"));
+        assert!(text.contains("KB/YYYY-MM-DD"));
     }
 
     #[test]
