@@ -81,7 +81,7 @@ export function useDefragState() {
       const ids = await invoke<string[]>("running_batch");
       if (!mounted.current || ids.length === 0) return;
       setJobs(ids);
-      setStatus(`Summarising ${ids.length === 1 ? "1 day" : `${ids.length} days`}`);
+      setStatus(`Processing ${ids.length === 1 ? "1 day" : `${ids.length} days`}`);
     })();
   }, []);
 
@@ -100,7 +100,7 @@ export function useDefragState() {
     try {
       const ids = await invoke<string[]>("summarise_days", { dates });
       setJobs(ids);
-      setStatus(`Summarising ${dates.length} days`);
+      setStatus(`Processing ${dates.length === 1 ? "1 day" : `${dates.length} days`}`);
     } catch (error) {
       setStatus(String(error));
     }
@@ -146,7 +146,7 @@ export function useDefragState() {
             setCancelled((current) => new Set(current).add(job));
           }
           if (state.status === "running") {
-            setStatus(`Summarising ${state.date}`);
+            setStatus(`Processing ${state.date}`);
             setActive(state.date);
           } else {
             // Whatever this job's terminal state, its cell stops working.

@@ -347,7 +347,7 @@ button {
    text-shadow. It never repads: padding shifts change the box size and
    move every neighbour, which is wrong for tabs, map cells, and the
    compact controls in the day view. */
-button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell):not(.link-button) {
+button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell):not(.link-button):not(.overview-note) {
   box-shadow: var(--bevel-in);
   text-shadow: 1px 1px 0 var(--ink);
 }
@@ -505,8 +505,11 @@ button:disabled {
 }
 
 .about-window .window-body {
+  flex: 1;
   text-align: center;
-  padding: 14px 18px 6px;
+  padding: 14px 22px 10px;
+  min-height: 0;
+  overflow: auto;
 }
 
 /* Pixel art, so it must not be smoothed on the way down from 2048px:
@@ -514,8 +517,8 @@ button:disabled {
    mush. Nearest-neighbour keeps the edges hard. */
 .about-icon {
   display: block;
-  width: 128px;
-  height: 128px;
+  width: 96px;
+  height: 96px;
   margin: 0 auto 10px;
   image-rendering: pixelated;
 }
@@ -525,10 +528,11 @@ button:disabled {
   font-size: 19px;
   font-weight: 700;
   margin: 0;
+  text-wrap: balance;
 }
 
 .about-version {
-  margin: 2px 0 12px;
+  margin: 2px 0 14px;
   font-family: var(--mono);
   font-size: 10px;
   letter-spacing: 0.12em;
@@ -537,7 +541,89 @@ button:disabled {
 }
 
 .about-line {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.about-github {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--chrome-dark);
+  box-shadow: 0 -1px 0 var(--chrome-lighter);
+  text-align: left;
+}
+
+.about-github .about-line {
+  margin-bottom: 10px;
+}
+
+.about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.about-actions button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Colophon under a raised hairline, separate from the product copy so the
+   name reads as a signature rather than another paragraph. */
+.about-credit {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--chrome-lighter);
+  box-shadow: inset 0 1px 0 var(--chrome-dark);
+}
+
+.about-credit-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--chrome-dark);
+}
+
+.about-credit-name {
+  appearance: none;
+  border: none;
+  background: none;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px 4px;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--title-a);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.about-credit-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.about-credit-name:active {
+  box-shadow: none;
+  padding: 2px 4px;
+  transform: scale(0.96);
+}
+
+.about-credit-name:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
 }
 
 

@@ -25,8 +25,6 @@ function handler(command: string, args?: Record<string, unknown>) {
         launch_at_login: true,
         idle_secs: 120,
         max_block_chars: 4000,
-        sound_enabled: true,
-        sound_volume: 0.6,
         write_references: true,
         extra_redaction_patterns: [],
       };

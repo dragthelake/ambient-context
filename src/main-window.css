@@ -202,29 +202,151 @@ body:has(.main-window) {
   padding: 5px;
 }
 
-/* Overview */
-
-/* Centred in the pane rather than stacked at the top: the tab has three
-   short groups in a tall window, and left at the top they leave a third of
-   the dialog empty. `safe` keeps the top reachable if the window is short
-   enough for the content to overflow. */
-
-.overview {
-  min-height: 100%;
-  max-width: 620px;
-  margin: 0 auto;
-  padding: 8px 12px;
+/* Overview fills the pane so the Notes group can take leftover height
+   under the map, rather than leaving a blank strip of chrome. */
+.tabpane-overview .tabpane-scroll {
   display: flex;
   flex-direction: column;
-  justify-content: safe center;
+}
+
+/* Overview */
+
+/* Display Properties layout: CRT preview on the left, controls on the
+   right. The map takes the remaining width so more days fit per row.
+   The main window's min width (820) is enough for both columns; narrower
+   than that is not in the product. */
+
+.overview {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px 20px;
+  align-items: stretch;
+}
+
+.overview-preview {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.overview-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+  max-width: 260px;
+  width: 100%;
+  align-self: center;
+}
+
+.overview-links button {
+  width: 100%;
+}
+
+.overview-side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-record {
+  flex: none;
 }
 
 .overview .eye-panel {
-  margin-bottom: 14px;
+  margin-bottom: 0;
+  padding-bottom: 0;
 }
 
 .overview .crt {
-  max-width: 300px;
+  max-width: 260px;
+}
+
+/* Recent notes under the map: the way back into days that already have a
+   written note. Fills leftover height so the right column does not stop
+   short under the defrag controls. */
+.overview-notes {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-notes-empty {
+  padding: 4px 2px 2px;
+}
+
+.overview-notes-empty .empty-state {
+  margin: 0 0 4px;
+}
+
+.overview-notes-empty .empty-note {
+  margin: 0;
+}
+
+.overview-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+}
+
+.overview-note {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overview-note:hover {
+  background: var(--chrome-light);
+}
+
+.overview-note:active {
+  background: var(--chrome-dark);
+  box-shadow: none;
+  padding: 5px 6px;
+}
+
+.overview-note:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -2px;
+}
+
+.overview-note-date {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--chrome-dark);
+  white-space: nowrap;
+}
+
+.overview-note-title {
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Day view */
@@ -279,30 +401,34 @@ body:has(.main-window) {
 }
 
 .day-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
   margin: 6px 0;
-  flex-wrap: wrap;
 }
 
+/* One line for the whole day: what was recorded, and where the summary is
+   up to. It is the only thing between the date and the controls, so it
+   carries every state rather than sitting beside a second span. */
 .day-stats {
+  margin: 0;
   font-family: var(--mono);
   font-size: 11px;
   letter-spacing: 0.04em;
   color: var(--chrome-dark);
 }
 
-.day-summary-state {
+.day-stats.generated {
+  color: var(--ink);
+}
+
+.day-stats.failed {
+  color: var(--warn-ink);
   font-weight: 600;
 }
 
-.day-summary-state.failed {
-  color: var(--warn-ink);
-}
-
-.day-summary-state.generated {
-  color: var(--led-green);
+/* A run in flight is the one state worth reading from across the room. */
+.day-stats.queued,
+.day-stats.running {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 .day-error {
@@ -338,12 +464,20 @@ body:has(.main-window) {
   box-shadow: none;
 }
 
-.day-actions {
+/* The tab strips, on their own row. A second strip appears beside the
+   first on Context and Knowledge; nothing sits to its right to be moved. */
+.day-tabs {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+/* The row under the content box: the tab's own action, then the two that
+   open files. Under the box so what a button acts on is what sits above it. */
+.day-actions {
+  flex: none;
+  padding: 0 14px 10px;
 }
 
 .day-action-buttons {
@@ -351,7 +485,6 @@ body:has(.main-window) {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-left: auto;
 }
 
 .segmented {
@@ -390,10 +523,11 @@ body:has(.main-window) {
   color: var(--chrome-dark);
 }
 
-/* Summary pane */
+/* Notes and Knowledge panes */
 
 /* Frame and scroller split, as everywhere else a bevelled box scrolls. */
-.summary-pane {
+.notes-pane,
+.knowledge-pane {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -402,10 +536,11 @@ body:has(.main-window) {
   overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
-  margin: 10px 12px 12px;
+  margin: 10px 12px;
 }
 
-.summary-pane-scroll {
+.notes-pane-scroll,
+.knowledge-pane-scroll {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -414,32 +549,26 @@ body:has(.main-window) {
   padding: 12px 16px;
 }
 
-.kb-pane {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 2px;
-  overflow: hidden;
-  background: var(--well);
-  box-shadow: var(--bevel-in);
-  margin: 10px 12px 12px;
-}
-
-.kb-pane-scroll {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 8px 16px;
-}
-
-.kb-task::before {
+.knowledge-task::before {
   content: "☐ ";
 }
 
-.kb-item::before {
+.knowledge-item::before {
   content: "· ";
+}
+
+.knowledge-section {
+  margin-bottom: 4px;
+}
+
+/* Scoped past `.reading p`, which would otherwise win on specificity and
+   put a paragraph's margin under the line. */
+.knowledge-pane-scroll .knowledge-built {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+  margin: 0 0 14px;
 }
 
 .empty-state {
@@ -453,8 +582,15 @@ body:has(.main-window) {
   letter-spacing: 0.04em;
 }
 
-.summarise-now {
-  margin-top: 10px;
+/* The sentence under an empty state that says what the action will do. */
+.empty-note {
+  margin: 6px 0 0;
+  max-width: 52ch;
+  color: var(--chrome-dark);
+}
+
+.generate-now {
+  margin-top: 12px;
 }
 
 .reading h1 {
@@ -511,7 +647,7 @@ body:has(.main-window) {
   overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
-  margin: 10px 12px 12px;
+  margin: 10px 12px;
 }
 
 /* The scrolling half of the raw pane; the frame above never moves. */
@@ -533,7 +669,7 @@ body:has(.main-window) {
   overflow: hidden;
   background: var(--well);
   box-shadow: var(--bevel-in);
-  margin: 10px 12px 12px;
+  margin: 10px 12px;
 }
 
 .websites-pane-scroll {

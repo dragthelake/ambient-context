@@ -66,16 +66,22 @@ export function Setup() {
           <legend>What it does</legend>
           <p>
             Ambient Context reads the text of whichever window you have
-            focused and writes it to a markdown file on your computer. One
-            file per day, in a folder you choose.
+            focused and writes it to markdown files on your computer. One
+            day folder at a time, in a folder you choose.
           </p>
           <ul>
             <li>It never takes screenshots or records your screen.</li>
             <li>It only reads the window you are actually looking at.</li>
-            <li>Nothing is sent anywhere. There is no account and no server.</li>
             <li>
-              It skips password fields, password managers and private browsing
-              windows.
+              The app does not upload your record. There is no account and
+              no Ambient Context server. An optional update check talks to
+              GitHub; a synced folder or agent CLI is a boundary you choose.
+            </li>
+            <li>
+              It skips secure password fields at the source, and drops
+              snapshots that match its known password-manager and private
+              browsing rules before writing. Pattern redaction covers common
+              secrets; it is not a complete filter.
             </li>
             <li>
               Stop it any time from the menu bar; it stays stopped until you
@@ -169,7 +175,7 @@ export function Setup() {
             <legend>You are set up</legend>
             <p>
               Click the menu bar icon to open the main window, or right-click
-              it to start and stop capturing, open today's file and reach
+              it to start and stop capturing, reveal the folder and reach
               these settings.
             </p>
           </fieldset>

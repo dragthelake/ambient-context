@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { DiffView } from "./DiffView";
@@ -17,8 +17,59 @@ type HighlightPillProps = {
 
 type PillState =
   | { status: "closed" }
-  | { status: "open"; rect: DOMRect }
+  | { status: "open" }
   | { status: "popover"; target: ProposeTarget };
+
+export type Box = { left: number; top: number; width: number; height: number };
+
+const MARGIN = 8;
+
+/// Where the pill goes for a selection at `anchor`, kept inside `bounds`
+/// (the visible part of the pane). Centred over the selection and above
+/// it; below it when there is no room above; and never past either edge,
+/// which is what clamping the centre point instead of the edges got
+/// wrong. Null when the selection has scrolled out of the visible pane,
+/// since a pill with nothing under it is a pill pointing at nothing.
+export function placePill(
+  anchor: Box,
+  pill: { width: number; height: number },
+  bounds: Box,
+): { left: number; top: number } | null {
+  const anchorBottom = anchor.top + anchor.height;
+  const boundsBottom = bounds.top + bounds.height;
+  if (anchorBottom < bounds.top || anchor.top > boundsBottom) return null;
+  const minLeft = bounds.left + MARGIN;
+  const maxLeft = bounds.left + bounds.width - pill.width - MARGIN;
+  const centred = anchor.left + anchor.width / 2 - pill.width / 2;
+  const left = Math.min(Math.max(centred, minLeft), Math.max(minLeft, maxLeft));
+  const above = anchor.top - pill.height - MARGIN;
+  const top = above >= bounds.top + MARGIN ? above : anchorBottom + MARGIN;
+  return { left, top };
+}
+
+/// The visible part of the pane: its box cut to the viewport.
+function visibleBounds(container: HTMLElement | null): Box {
+  const view = { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  if (!container) return view;
+  const rect = container.getBoundingClientRect();
+  const left = Math.max(rect.left, 0);
+  const top = Math.max(rect.top, 0);
+  return {
+    left,
+    top,
+    width: Math.min(rect.right, view.width) - left,
+    height: Math.min(rect.bottom, view.height) - top,
+  };
+}
+
+/// The current selection's box, read fresh each time so a scrolled pane
+/// gives the new position rather than the one at selection time.
+function selectionBox(): Box | null {
+  const active = window.getSelection();
+  if (!active || active.rangeCount === 0) return null;
+  const rect = active.getRangeAt(0).getBoundingClientRect();
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+}
 
 export function HighlightPill({
   container,
@@ -29,8 +80,15 @@ export function HighlightPill({
   const [state, setState] = useState<PillState>({ status: "closed" });
   const [selection, setSelection] = useState<Selection | null>(null);
   const [copied, setCopied] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const pillRef = useRef<HTMLDivElement | null>(null);
+  // While the mouse is down the selection is still being made, and a pill
+  // that follows every change of it jumps about under the pointer. It
+  // opens on mouseup instead; a keyboard selection has no drag and opens
+  // at once.
+  const dragging = useRef(false);
 
-  const onSelectionChange = useCallback(() => {
+  const openForSelection = useCallback(() => {
     const active = window.getSelection();
     const text = active?.toString().trim() ?? "";
     if (!text || !active || active.rangeCount === 0) {
@@ -42,15 +100,59 @@ export function HighlightPill({
     // Only react to selections inside our own container.
     const anchor = active.anchorNode;
     if (container && anchor && !container.contains(anchor)) return;
-    const rect = active.getRangeAt(0).getBoundingClientRect();
+    if (dragging.current) return;
     setSelection(buildSelection());
-    setState({ status: "open", rect });
+    setState({ status: "open" });
   }, [container, buildSelection]);
 
   useEffect(() => {
-    document.addEventListener("selectionchange", onSelectionChange);
-    return () => document.removeEventListener("selectionchange", onSelectionChange);
-  }, [onSelectionChange]);
+    const onMouseDown = () => {
+      dragging.current = true;
+    };
+    const onMouseUp = () => {
+      dragging.current = false;
+      openForSelection();
+    };
+    document.addEventListener("selectionchange", openForSelection);
+    window.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("selectionchange", openForSelection);
+      window.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, [openForSelection]);
+
+  // Anchored to the selection as it is now, not as it was: the pane
+  // scrolls under the pill and the window resizes, and both move the text.
+  const place = useCallback(() => {
+    const pill = pillRef.current;
+    const anchor = selectionBox();
+    if (!pill || !anchor) {
+      setPosition(null);
+      return;
+    }
+    setPosition(
+      placePill(
+        anchor,
+        { width: pill.offsetWidth, height: pill.offsetHeight },
+        visibleBounds(container),
+      ),
+    );
+  }, [container]);
+
+  useLayoutEffect(() => {
+    if (state.status !== "open") return;
+    place();
+    // Capture phase, so a scroll anywhere under the window reaches here
+    // without a listener on each scrolling element.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [state.status, place]);
 
   useEffect(() => {
     if (state.status !== "open") return;
@@ -94,16 +196,17 @@ export function HighlightPill({
     );
   }
 
-  const { rect } = state;
-
   return (
     <div
+      ref={pillRef}
       className="highlight-pill"
       style={{
         position: "fixed",
-        left: Math.max(8, rect.left + rect.width / 2),
-        top: Math.max(8, rect.top - 44),
-        transform: "translateX(-50%)",
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        // Unmeasured on its first paint, or pointing at text that has
+        // scrolled out of the pane: present for measuring, not shown.
+        visibility: position ? "visible" : "hidden",
       }}
     >
       <Verbs

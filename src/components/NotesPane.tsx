@@ -3,12 +3,13 @@ import { HighlightPill } from "./HighlightPill";
 import type { ReactNode } from "react";
 import type { Selection } from "../lib/rules";
 
-export type SummaryPaneProps = {
+export type NotesPaneProps = {
   markdown: string | null;
   hasCapture: boolean;
   hasAgent: boolean;
   running: boolean;
-  onSummarise: () => void;
+  step: string | null;
+  onGenerate: () => void;
   date: string;
 };
 
@@ -74,22 +75,23 @@ function Pane({
   children: React.ReactNode;
 }) {
   return (
-    <section className={reading ? "summary-pane reading" : "summary-pane"}>
-      <div className="summary-pane-scroll" ref={scrollRef}>
+    <section className={reading ? "notes-pane reading" : "notes-pane"}>
+      <div className="notes-pane-scroll" ref={scrollRef}>
         {children}
       </div>
     </section>
   );
 }
 
-export function SummaryPane({
+export function NotesPane({
   markdown,
   hasCapture,
   hasAgent,
   running,
-  onSummarise,
+  step,
+  onGenerate,
   date,
-}: SummaryPaneProps) {
+}: NotesPaneProps) {
   // Held in state, not a ref: the pill needs the element on the render it
   // is given, and assigning a ref does not schedule one.
   const [pane, setPane] = useState<HTMLElement | null>(null);
@@ -119,8 +121,7 @@ export function SummaryPane({
     return (
       <Pane>
         <p className="empty-state is-running">
-          Summarising now. The agent is reading the day file; this can take a
-          few minutes.
+          {step ?? "Processing the day"}. This can take a few minutes.
           <span className="blink" aria-hidden="true">
             _
           </span>
@@ -148,20 +149,23 @@ export function SummaryPane({
   if (!hasAgent) {
     return (
       <Pane>
-        <p className="empty-state">
-          No summary yet, and no agent is connected. Connect one on the
-          Agent tab, then come back and summarise.
+        <p className="empty-state">No notes for this day yet.</p>
+        <p className="empty-note">
+          Writing them needs an agent. Connect one on the Agent tab, then come
+          back and generate.
         </p>
       </Pane>
     );
   }
   return (
     <Pane>
-      <p className="empty-state">
-        No summary yet for this day. Summarise it from the button above.
+      <p className="empty-state">No notes for this day yet.</p>
+      <p className="empty-note">
+        Generate writes them from the day's knowledge, building the knowledge
+        first if it has not been.
       </p>
-      <button type="button" className="summarise-now" onClick={onSummarise}>
-        Summarise now
+      <button type="button" className="generate-now" onClick={onGenerate}>
+        Generate
       </button>
     </Pane>
   );

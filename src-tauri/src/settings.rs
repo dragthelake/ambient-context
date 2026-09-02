@@ -55,11 +55,6 @@ pub struct Settings {
     /// How long input must be quiet before the open block is closed and
     /// polling stops recording, in seconds. 0 turns the check off.
     pub idle_secs: u64,
-    /// Whether the interface plays its interaction cues. On by default:
-    /// the sounds are short and tied to actions the user took.
-    pub sound_enabled: bool,
-    /// Cue volume, 0.0 to 1.0.
-    pub sound_volume: f64,
     /// Whether `file:` and `url:` reference lines are written.
     pub write_references: bool,
     /// User redaction patterns, appended to the built-ins.
@@ -88,8 +83,6 @@ impl Default for Settings {
             // summariser reads the tail of a long block poorly.
             max_block_chars: 4000,
             idle_secs: 120,
-            sound_enabled: true,
-            sound_volume: 0.6,
             write_references: true,
             extra_redaction_patterns: Vec::new(),
         }

@@ -71,17 +71,55 @@ pub fn read_summary(folder: &Path, date: NaiveDate) -> Option<String> {
     std::fs::read_to_string(crate::summarise::summary_path(folder, date)).ok()
 }
 
+/// Whether a `## ` line sits where the writer puts a heading. The writer
+/// opens every block with a blank line and never writes an empty body
+/// line, so a `## ` line that follows text is body: a day file viewed in an
+/// editor, or a plan quoting the format. The writer escapes those now, but
+/// records from before it did still carry them, and one that parses would
+/// otherwise forge a block that never happened.
+fn in_heading_position(previous: Option<&str>, line: &str) -> bool {
+    line.starts_with("## ") && previous.is_none_or(|p| p.trim().is_empty())
+}
+
+/// Each line with the one before it, which is what a heading's position is
+/// judged against.
+fn with_previous(text: &str) -> impl Iterator<Item = (Option<&str>, &str)> {
+    let mut previous = None;
+    text.lines().map(move |line| {
+        let pair = (previous, line);
+        previous = Some(line);
+        pair
+    })
+}
+
 /// The `## ` headings of apps.md, one per line: the day's clock.
 pub fn timeline(folder: &Path, date: NaiveDate) -> Option<String> {
     let text = read_day(folder, date, DayFile::Apps)?;
     let mut out = String::new();
-    // Only lines the heading parser accepts: a body line that begins with
-    // `## ` (a diff view, a quoted plan) is not a block.
-    for line in text.lines().filter(|l| parse_heading(l).is_some()) {
+    // Only lines in heading position that the parser accepts: a body line
+    // that begins with `## ` (a diff view, a quoted plan) is not a block.
+    for (previous, line) in with_previous(&text) {
+        if in_heading_position(previous, line) && parse_heading(line).is_some() {
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    Some(out)
+}
+
+/// The day text with every body line that begins like a heading escaped
+/// the way the writer escapes them now. For text handed to a model, so a
+/// legacy lookalike cannot be read as a block to cite.
+pub fn escape_false_headings(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for (previous, line) in with_previous(text) {
+        if line.starts_with("## ") && !in_heading_position(previous, line) {
+            out.push('\\');
+        }
         out.push_str(line);
         out.push('\n');
     }
-    Some(out)
+    out
 }
 
 fn minutes(hhmm: &str) -> Option<u32> {
@@ -284,8 +322,8 @@ fn parse_heading(line: &str) -> Option<Heading> {
 
 pub fn parse_blocks(day_text: &str) -> Vec<RawBlock> {
     let mut blocks: Vec<RawBlock> = Vec::new();
-    for line in day_text.lines() {
-        if line.starts_with("## ") {
+    for (previous, line) in with_previous(day_text) {
+        if in_heading_position(previous, line) {
             if let Some((start, end, app, title, replay)) = parse_heading(line) {
                 blocks.push(RawBlock {
                     start,
@@ -395,6 +433,34 @@ mod tests {
             out,
             "## 09:00\u{2013}09:30 \u{00b7} GitHub Desktop \u{00b7} diff\n"
         );
+    }
+
+    /// Captured before the writer escaped such lines: a plan quoting the
+    /// day-file format, written into a body verbatim.
+    const LEGACY: &str = "---\n---\n\n## 15:23\u{2013}15:25 \u{00b7} Obsidian \u{00b7} Checklist\n\nkeeps today's block format so\n## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs <novel body lines> ## 09:41\u{2013}09:48 \u{00b7} Arc\nis a pipe table\n\n## 15:30\u{2013}15:31 \u{00b7} Finder \u{00b7} Days\n";
+
+    #[test]
+    fn a_heading_shaped_body_line_after_text_is_not_a_block() {
+        let dir = tempdir().unwrap();
+        write(dir.path(), date(2026, 9, 2), DayFile::Apps, LEGACY);
+        let out = timeline(dir.path(), date(2026, 9, 2)).unwrap();
+        assert_eq!(
+            out,
+            "## 15:23\u{2013}15:25 \u{00b7} Obsidian \u{00b7} Checklist\n## 15:30\u{2013}15:31 \u{00b7} Finder \u{00b7} Days\n"
+        );
+        assert_eq!(spans(&out), vec![(923, 925), (930, 931)]);
+        let blocks = parse_blocks(LEGACY);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].lines.len(), 3, "the lookalike stays in the body");
+    }
+
+    #[test]
+    fn a_legacy_lookalike_is_escaped_for_the_model_and_real_headings_are_not() {
+        let out = escape_false_headings(LEGACY);
+        assert!(out.contains("\n\\## 09:14\u{2013}09:41"));
+        assert!(out.contains("\n\n## 15:23"));
+        assert!(out.contains("\n\n## 15:30"));
+        assert_eq!(out.lines().count(), LEGACY.lines().count());
     }
 
     #[test]

@@ -19,22 +19,41 @@ function todayIso(): string {
   return `${now.getFullYear()}-${month}-${day}`;
 }
 
-function handler(pendingDay: string | null) {
+function handler(
+  pendingDay: string | null,
+  summary: string | null = null,
+  knowledge: string | null = null,
+) {
   return (command: string) => {
     switch (command) {
       case "take_pending_day":
         return pendingDay;
       case "list_days":
-        return [];
+        return [
+          {
+            date: todayIso(),
+            has_capture: true,
+            has_summary: summary !== null,
+            has_kb: knowledge !== null,
+            bytes: 10,
+            title: null,
+          },
+        ];
       case "read_day":
         return "## 09:00-09:30 Finder\n\nsomething\n";
       case "read_summary":
-        return null;
+        return summary;
       case "get_settings":
-        return { agent: null };
+        return { agent: { label: "Claude Code" } };
       case "job_status":
         // A fresh object every call, as the real command returns.
-        return { when: "2026-08-30T06:00:00+10:00", date: todayIso(), ok: true, message: "done" };
+        return {
+          when: "2026-08-30T06:00:00+10:00",
+          date: todayIso(),
+          ok: true,
+          message: "done",
+          took_ms: 252000,
+        };
       case "read_day_blocks":
         return [];
       case "website_totals":
@@ -42,7 +61,8 @@ function handler(pendingDay: string | null) {
       case "get_rules":
         return { rules: [], built_ins: [], next_id: "r1", error: null };
       case "read_kb":
-        return null;
+        return knowledge;
+      case "summarise_now":
       case "ingest_now":
         return { job_id: "job-9" };
       case "job_state":
@@ -51,7 +71,7 @@ function handler(pendingDay: string | null) {
           date: todayIso(),
           status: "running",
           stderr: null,
-          step: "ingesting apps (2 of 3)",
+          step: "Reading apps (2 of 3)",
         };
       default:
         throw new Error(`unexpected command ${command}`);
@@ -91,19 +111,68 @@ describe("DayView", () => {
     expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
   });
 
-  it("queues an ingest and shows the step text", async () => {
+  it("offers three modes, one action under the box, and nothing about ingesting", async () => {
     mockInvoke(handler(null));
     render(<DayView />);
     await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole("button", { name: "Ingest" }));
-    await waitFor(() => expect(callsOf("ingest_now")[0]?.args?.force).toBe(false));
-    await waitFor(
-      () => expect(screen.getByText("ingesting apps (2 of 3)")).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    for (const label of ["Context", "Knowledge", "Notes"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeTruthy();
+    }
+    expect(screen.queryByText(/Ingest/i)).toBeNull();
+    expect(screen.queryByText(/Summaris/i)).toBeNull();
+    expect(await screen.findByText(/0\.5 h recorded · 1 block · No notes yet/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Process day" })).toBeTruthy();
+  });
+
+  it("processes a day that has no notes and shows the step text", async () => {
+    mockInvoke(handler(null));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Process day" }));
+    await waitFor(() => expect(callsOf("summarise_now")[0]?.args?.force).toBe(false));
+    await waitFor(() => expect(screen.getByText("Reading apps (2 of 3)…")).toBeTruthy(), {
+      timeout: 3000,
+    });
   }, 10000);
 
-  it("switches the raw pane between apps, websites and messages", async () => {
+  it("reprocesses a day that already has notes, and says when they were written", async () => {
+    mockInvoke(handler(null, "---\ndate: today\n---\n\n# Day\n\nSomething happened.\n"));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    expect(await screen.findByText(/Notes 06:00, took 4 min/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Reprocess day" }));
+    await waitFor(() => expect(callsOf("summarise_now")[0]?.args?.force).toBe(true));
+  });
+
+  it("generates only the knowledge from the Knowledge tab", async () => {
+    mockInvoke(handler(null));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
+    expect(await screen.findByText("Nothing built for this day yet.")).toBeTruthy();
+    // One Generate under the box and one in the empty state, both the same run.
+    const buttons = screen.getAllByRole("button", { name: "Generate" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(callsOf("ingest_now")[0]?.args?.force).toBe(false));
+    expect(callsOf("summarise_now")).toHaveLength(0);
+  });
+
+  it("shows one knowledge section at a time, chosen from the strip", async () => {
+    const knowledge = "# people.md\n\n## Dan\nAsked for the notch\n\n# issues.md\n\n- the eye stutters\n";
+    mockInvoke(handler(null, null, knowledge));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
+    expect(await screen.findByText("Dan")).toBeTruthy();
+    expect(screen.queryByText("the eye stutters")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Issues" }));
+    expect(await screen.findByText("the eye stutters")).toBeTruthy();
+    expect(screen.queryByText("Dan")).toBeNull();
+    expect(screen.getByRole("button", { name: "Regenerate" })).toBeTruthy();
+  });
+
+  it("switches the record pane between apps, websites and messages", async () => {
     mockInvoke(handler(null));
     render(<DayView />);
     await waitFor(() => expect(countOf("read_day_blocks")).toBeGreaterThan(0));

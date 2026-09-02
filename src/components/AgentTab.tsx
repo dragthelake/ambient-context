@@ -12,10 +12,12 @@ type Detected = {
 // the two lists move together. Haiku 4.5 takes no effort levels, so the
 // flag only goes on the models that accept it.
 const CLAUDE_MODELS = [
-  { id: "claude-opus-5", label: "Opus 5 (most capable)" },
+  { id: "claude-fable-5-1", label: "Fable 5.1 (most capable)" },
+  { id: "claude-opus-5", label: "Opus 5" },
   { id: "claude-sonnet-5", label: "Sonnet 5 (balanced)" },
   { id: "claude-haiku-4-5", label: "Haiku 4.5 (fastest)" },
 ];
+const DEFAULT_MODEL = "claude-opus-5";
 
 function claudeArgsFor(model: string): string[] {
   const args = ["-p", "--output-format", "text", "--model", model];
@@ -34,7 +36,12 @@ export function AgentTab() {
   const [selected, setSelected] = useState<string | null>(null);
   const [manualCommand, setManualCommand] = useState("");
   const [manualArgs, setManualArgs] = useState("");
-  const [claudeModel, setClaudeModel] = useState(CLAUDE_MODELS[0].id);
+  // Two models for Claude Code: one builds the knowledge from the day's
+  // context, one writes the notes. The notes model rides in the agent's
+  // argv; the context model is saved as the ingest agent, the same command
+  // with a different argv, and only when it differs.
+  const [contextModel, setContextModel] = useState(DEFAULT_MODEL);
+  const [notesModel, setNotesModel] = useState(DEFAULT_MODEL);
   const [capDraft, setCapDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -57,8 +64,16 @@ export function AgentTab() {
         setManualArgs(loaded.agent.args.join(" "));
       }
       if (loaded.agent?.label === "Claude Code") {
-        const model = claudeModelOf(loaded.agent.args);
-        if (model && CLAUDE_MODELS.some((m) => m.id === model)) setClaudeModel(model);
+        const notes = claudeModelOf(loaded.agent.args);
+        const known = (id: string | null) =>
+          id !== null && CLAUDE_MODELS.some((m) => m.id === id) ? id : null;
+        const notesId = known(notes) ?? DEFAULT_MODEL;
+        setNotesModel(notesId);
+        const context =
+          loaded.ingest_agent?.label === "Claude Code"
+            ? known(claudeModelOf(loaded.ingest_agent.args))
+            : null;
+        setContextModel(context ?? notesId);
       }
       if (loaded.agent) {
         setSelected(
@@ -129,10 +144,18 @@ export function AgentTab() {
     // The detected preset pins the default model; the picker's choice
     // replaces it for Claude Code.
     if (found?.label === "Claude Code") {
-      return { ...found, args: claudeArgsFor(claudeModel) };
+      return { ...found, args: claudeArgsFor(notesModel) };
     }
     return found;
-  }, [selected, manualCommand, manualArgs, detected, claudeModel]);
+  }, [selected, manualCommand, manualArgs, detected, notesModel]);
+
+  // The agent for the knowledge calls, or null when the notes agent runs
+  // them too. Only Claude Code offers a second model.
+  const chosenIngestAgent = useCallback((): Agent | null => {
+    const agent = chosenAgent();
+    if (!agent || agent.label !== "Claude Code" || contextModel === notesModel) return null;
+    return { ...agent, args: claudeArgsFor(contextModel) };
+  }, [chosenAgent, contextModel, notesModel]);
 
   const [test, setTest] = useState<{ status: "untested" | "testing" | "ok" | "failed"; text?: string }>({
     status: "untested",
@@ -201,7 +224,8 @@ export function AgentTab() {
               if (!agent) return;
               // The test result is kept: Connect applies the provider that
               // was just tested, so a pass is still true of it.
-              await save((next) => ({ ...next, agent }));
+              const ingest_agent = chosenIngestAgent();
+              await save((next) => ({ ...next, agent, ingest_agent }));
             }}
           >
             Connect
@@ -242,7 +266,7 @@ export function AgentTab() {
             }))
           }
         />
-        Summarise once a day at
+        Process each day at
         <input
           type="time"
           value={settings.schedule_hhmm ?? "06:00"}
@@ -257,7 +281,7 @@ export function AgentTab() {
       </label>
       <p className="settings-note">
         {connected
-          ? "Turning this on summarises up to seven recent captured days, one at a time. Older days can be summarised from the Day view."
+          ? "Turning this on processes up to seven recent recorded days, one at a time. Older days can be processed from the Context tab."
           : "Connect this provider to turn on the daily schedule."}
       </p>
     </div>
@@ -322,8 +346,8 @@ export function AgentTab() {
       <fieldset>
         <legend>Agent</legend>
         <p>
-          Once a day, your own agent reads that day's file and saves a summary
-          beside it.
+          Once a day, your own agent reads that day's context, builds its
+          knowledge and writes its notes beside it.
         </p>
 
         <h3 className="settings-heading">Provider</h3>
@@ -346,25 +370,47 @@ export function AgentTab() {
                 <span className="agent-path">{entry.agent.command}</span>
                 <AgentAuth state={entry.auth} />
                 {entry.agent.label === "Claude Code" ? (
-                  <label className="provider-field">
-                    Model
-                    <select
-                      value={claudeModel}
-                      disabled={connected}
-                      onChange={(event) => {
-                        setClaudeModel(event.target.value);
-                        // A pass describes the model that answered; a
-                        // different model has not passed anything.
-                        setTest({ status: "untested" });
-                      }}
-                    >
-                      {CLAUDE_MODELS.map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <>
+                    <label className="provider-field">
+                      Context model
+                      <select
+                        value={contextModel}
+                        disabled={connected}
+                        onChange={(event) => setContextModel(event.target.value)}
+                      >
+                        {CLAUDE_MODELS.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="provider-field">
+                      Notes model
+                      <select
+                        value={notesModel}
+                        disabled={connected}
+                        onChange={(event) => {
+                          setNotesModel(event.target.value);
+                          // A pass describes the model that answered; a
+                          // different model has not passed anything.
+                          setTest({ status: "untested" });
+                        }}
+                      >
+                        {CLAUDE_MODELS.map((model) => (
+                          <option key={model.id} value={model.id}>
+                            {model.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="settings-note">
+                      The context model reads the day's apps, websites and
+                      messages and builds the knowledge. The notes model writes
+                      the day from that knowledge. A cheaper context model
+                      keeps the cost down where the input is longest.
+                    </p>
+                  </>
                 ) : (
                   <p className="settings-note">
                     Uses the model configured in the CLI's own settings.
@@ -410,34 +456,14 @@ export function AgentTab() {
         </ul>
       </fieldset>
       <fieldset>
-        <legend>Ingest</legend>
+        <legend>Knowledge</legend>
         <p className="settings-note">
-          Three shorter calls build the day's knowledge base before the summary. A
-          cheaper agent can run them.
+          Three shorter calls build the day's knowledge from its context before
+          the notes are written. Over this cap, the longest blocks are trimmed
+          first.
         </p>
         <div className="field-row-stacked">
-          <label htmlFor="ingest-agent">Ingest agent</label>
-          <select
-            id="ingest-agent"
-            value={settings.ingest_agent?.command ?? ""}
-            disabled={!connected}
-            onChange={(event) => {
-              const found =
-                detected.find((d) => d.agent.command === event.target.value)?.agent ??
-                null;
-              void save((next) => ({ ...next, ingest_agent: found }));
-            }}
-          >
-            <option value="">Same as summary</option>
-            {detected.map((d) => (
-              <option key={d.agent.command} value={d.agent.command}>
-                {d.agent.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="field-row-stacked">
-          <label htmlFor="ingest-max-chars">Longest ingest input (characters)</label>
+          <label htmlFor="ingest-max-chars">Longest input per call (characters)</label>
           <input
             id="ingest-max-chars"
             type="number"

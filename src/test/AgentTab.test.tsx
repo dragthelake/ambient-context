@@ -104,8 +104,9 @@ describe("AgentTab", () => {
     expect(await screen.findByText(/Not signed in\. Run claude login/)).toBeTruthy();
   });
 
-  it("connects Claude Code with the chosen model, and Haiku without an effort flag", async () => {
+  it("connects Claude Code with a model for each step, and Haiku without an effort flag", async () => {
     let savedAgent: { args: string[] } | null = null;
+    let savedIngest: { label: string; args: string[] } | null = null;
     mockInvoke((command, args) => {
       switch (command) {
         case "get_settings":
@@ -125,9 +126,15 @@ describe("AgentTab", () => {
             write_references: true,
             extra_redaction_patterns: [],
           };
-        case "set_settings":
-          savedAgent = (args?.next as { agent: { args: string[] } }).agent;
+        case "set_settings": {
+          const next = args?.next as {
+            agent: { args: string[] };
+            ingest_agent: { label: string; args: string[] } | null;
+          };
+          savedAgent = next.agent;
+          savedIngest = next.ingest_agent;
           return null;
+        }
         case "agent_detect":
           return [CLAUDE];
         case "agent_auth":
@@ -146,14 +153,21 @@ describe("AgentTab", () => {
 
     render(<AgentTab />);
     fireEvent.click(await screen.findByRole("radio", { name: "Claude Code" }));
-    fireEvent.change(screen.getByLabelText("Model"), {
+    fireEvent.change(screen.getByLabelText("Notes model"), {
       target: { value: "claude-haiku-4-5" },
+    });
+    fireEvent.change(screen.getByLabelText("Context model"), {
+      target: { value: "claude-fable-5-1" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await screen.findByText("Connected");
     expect(savedAgent!.args).toContain("claude-haiku-4-5");
     // Haiku 4.5 takes no effort levels; passing the flag would fail the run.
     expect(savedAgent!.args).not.toContain("--effort");
+    // The context model is the same command with its own argv.
+    expect(savedIngest!.label).toBe("Claude Code");
+    expect(savedIngest!.args).toContain("claude-fable-5-1");
+    expect(savedIngest!.args).toContain("--effort");
   });
 
   it("shows a failed test, and a result from an abandoned run never lands", async () => {
@@ -328,7 +342,7 @@ describe("AgentTab", () => {
     expect(await screen.findByText("Prompts", { selector: "legend" })).toBeTruthy();
   });
 
-  it("saves a separate ingest agent and the input cap", async () => {
+  it("saves the input cap and offers no separate agent for the knowledge calls", async () => {
     mockInvoke((command, args) => {
       switch (command) {
         case "get_settings":
@@ -369,19 +383,13 @@ describe("AgentTab", () => {
     });
     render(<AgentTab />);
     await screen.findByText("Connected");
-    const picker = (await screen.findByLabelText("Ingest agent")) as HTMLSelectElement;
-    fireEvent.change(picker, { target: { value: "/usr/local/bin/opencode" } });
-    await waitFor(() => expect(callsOf("set_settings").length).toBe(1));
-    const next = callsOf("set_settings")[0].args?.next as {
-      ingest_agent: { command: string } | null;
-    };
-    expect(next.ingest_agent?.command).toBe("/usr/local/bin/opencode");
-    const cap = screen.getByLabelText("Longest ingest input (characters)") as HTMLInputElement;
+    expect(screen.queryByLabelText("Ingest agent")).toBeNull();
+    const cap = screen.getByLabelText("Longest input per call (characters)") as HTMLInputElement;
     fireEvent.change(cap, { target: { value: "250000" } });
     fireEvent.blur(cap);
-    await waitFor(() => expect(callsOf("set_settings").length).toBe(2));
+    await waitFor(() => expect(callsOf("set_settings").length).toBe(1));
     expect(
-      (callsOf("set_settings")[1].args?.next as { ingest_max_chars: number }).ingest_max_chars,
+      (callsOf("set_settings")[0].args?.next as { ingest_max_chars: number }).ingest_max_chars,
     ).toBe(250000);
   });
 

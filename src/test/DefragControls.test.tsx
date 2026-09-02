@@ -18,25 +18,25 @@ const base = {
 describe("DefragControls", () => {
   it("puts the count in the button so the cost is visible before pressing", () => {
     render(<DefragControls {...base} pending={["2026-09-01", "2026-08-31"]} />);
-    const go = screen.getByRole("button", { name: "Summarise 2 days" });
+    const go = screen.getByRole("button", { name: "Process 2 days" });
     expect((go as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("says one day rather than 1 days", () => {
     render(<DefragControls {...base} />);
-    const go = screen.getByRole("button", { name: "Summarise 1 day" });
+    const go = screen.getByRole("button", { name: "Process 1 day" });
     expect((go as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("disables Summarise with no agent connected", () => {
+  it("disables Process with no agent connected", () => {
     render(<DefragControls {...base} hasAgent={false} />);
-    const go = screen.getByRole("button", { name: /Summarise/ });
+    const go = screen.getByRole("button", { name: /Process/ });
     expect((go as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("disables Summarise when nothing is pending", () => {
+  it("disables Process when nothing is pending", () => {
     render(<DefragControls {...base} pending={[]} />);
-    const go = screen.getByRole("button", { name: /Summarise/ });
+    const go = screen.getByRole("button", { name: /Process/ });
     expect((go as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -61,9 +61,9 @@ describe("DefragControls", () => {
 
   it("toggles the legend", () => {
     render(<DefragControls {...base} />);
-    expect(screen.queryByText("Raw context")).toBeNull();
+    expect(screen.queryByText("Recorded, not processed")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Legend" }));
-    expect(screen.getByText("Raw context")).toBeTruthy();
+    expect(screen.getByText("Recorded, not processed")).toBeTruthy();
   });
 
   it("announces legend state with aria-expanded", () => {

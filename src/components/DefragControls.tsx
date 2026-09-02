@@ -2,8 +2,8 @@ import { useState } from "react";
 
 const LEGEND: { state: string; label: string }[] = [
   { state: "empty", label: "Nothing recorded" },
-  { state: "raw", label: "Raw context" },
-  { state: "summarised", label: "Summarised" },
+  { state: "raw", label: "Recorded, not processed" },
+  { state: "summarised", label: "Processed" },
   { state: "failed", label: "Failed" },
 ];
 
@@ -82,7 +82,7 @@ export function DefragControls({
           title={hasAgent ? undefined : "Connect an agent on the Agent tab to use this."}
           onClick={onStart}
         >
-          {`Summarise ${days}`}
+          {`Process ${days}`}
         </button>
         <button type="button" disabled={!running} onClick={onStop}>
           Stop

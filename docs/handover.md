@@ -28,7 +28,7 @@ and edit rules over a unix socket. `docs/mcp.md` is its contract.
 ## Where things stand
 
 Branch `v1`, ahead of `origin/v1` and not pushed at last check. Version
-**0.2.0**. Every CI gate should pass before you push:
+**1.0.0**. Every CI gate should pass before you push:
 
 ```bash
 cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test

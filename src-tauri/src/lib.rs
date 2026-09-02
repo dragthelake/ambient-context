@@ -913,25 +913,6 @@ async fn agent_auth(app: tauri::AppHandle, agent_config: settings::Agent) -> age
         .unwrap_or(agent::AuthState::Unknown)
 }
 
-/// Development diagnostics for the audio path (see src/lib/soundDiag.ts).
-/// Appends one line to sound-diag.log in the app data dir and echoes it to
-/// stderr, so a late cue can be traced without the inspector open.
-#[tauri::command]
-fn sound_diag(app: tauri::AppHandle, line: String) {
-    eprintln!("[sound] {line}");
-    if let Ok(dir) = app.path().app_data_dir() {
-        let _ = std::fs::create_dir_all(&dir);
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.join("sound-diag.log"))
-        {
-            use std::io::Write;
-            let _ = writeln!(file, "{line}");
-        }
-    }
-}
-
 #[tauri::command]
 fn get_settings(app: tauri::AppHandle) -> settings::Settings {
     settings::load(&app)
@@ -1506,7 +1487,7 @@ pub fn open_about_window(app: &tauri::AppHandle) {
         WebviewUrl::App("index.html?view=about".into()),
     )
     .title("About Ambient Context")
-    .inner_size(380.0, 400.0)
+    .inner_size(420.0, 640.0)
     .resizable(false)
     .decorations(false)
     .visible(false)
@@ -1764,7 +1745,6 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            sound_diag,
             permission_status,
             request_permission,
             current_folder,

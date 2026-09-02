@@ -138,7 +138,12 @@ fn call_input(folder: &Path, date: NaiveDate, call: Call) -> Option<String> {
                 folder, date,
             )))
         }
-        other => crate::days::read_day(folder, date, other.source()),
+        // Escaped on the way in as well as on the way out: a record from
+        // before the writer escaped heading-shaped body lines would
+        // otherwise show the model a block it can cite and the validator
+        // cannot find.
+        other => crate::days::read_day(folder, date, other.source())
+            .map(|text| crate::days::escape_false_headings(&text)),
     }
 }
 
@@ -359,7 +364,7 @@ pub fn run_day_pipeline(
         ingest_call(p, *call, date, trigger.clone())?;
     }
     if summarise {
-        on_step("Writing the summary");
+        on_step("Writing the notes");
         summarise_day(p, date, trigger)?;
     }
     Ok(())
@@ -567,6 +572,7 @@ fn tick(app: &AppHandle) {
     }
 
     state.set_running(true);
+    let mut finished: Vec<Finished> = Vec::new();
     for date in pending {
         let started = std::time::Instant::now();
         let result = run_one(
@@ -581,18 +587,21 @@ fn tick(app: &AppHandle) {
             date,
             ok: result.is_ok(),
             message: match &result {
-                Ok(()) => format!("Summarised {date}"),
+                Ok(()) => format!("Processed {date}"),
                 Err(message) => format!("{date} failed: {message}"),
             },
             took_ms: Some(started.elapsed().as_millis() as u64),
         };
         state.record(outcome);
         persist_last_run(app);
-        if let Err(message) = &result {
-            // Nobody is looking at a scheduled run, so a failure that is
-            // only in the ledger is a failure the user finds days later.
-            notify_failure(app, date, message);
-        }
+        finished.push(Finished {
+            date,
+            kind: JobKind::Summarise { force: false },
+            result: result
+                .as_ref()
+                .map(|()| started.elapsed().as_millis() as u64)
+                .map_err(Clone::clone),
+        });
         if result.is_err() {
             // One failure is usually the agent, and every following day
             // would fail the same way. Stop and let the user see it.
@@ -618,7 +627,7 @@ fn tick(app: &AppHandle) {
         let result = run_one(app, date, job.trigger, kind, |step| {
             app.state::<JobQueue>().record_step(&job_id, step);
         });
-        let took_ms = Some(started.elapsed().as_millis() as u64);
+        let took_ms = started.elapsed().as_millis() as u64;
         let status = match &result {
             Ok(()) => JobStatus::Done,
             Err(stderr) => JobStatus::Failed {
@@ -631,37 +640,122 @@ fn tick(app: &AppHandle) {
             date,
             ok: result.is_ok(),
             message: match (&result, kind) {
-                (Ok(()), JobKind::Summarise { .. }) => format!("Summarised {date}"),
-                (Ok(()), JobKind::Ingest { .. }) => format!("Ingested {date}"),
+                (Ok(()), JobKind::Summarise { .. }) => format!("Processed {date}"),
+                (Ok(()), JobKind::Ingest { .. }) => format!("Built knowledge for {date}"),
                 (Err(message), _) => format!("{date} failed: {message}"),
             },
-            took_ms,
+            took_ms: Some(took_ms),
         };
         state.record(outcome);
         persist_last_run(app);
+        finished.push(Finished {
+            date,
+            kind,
+            result: result.map(|()| took_ms),
+        });
     }
     state.set_running(false);
+    notify_finished(app, &finished);
     crate::tray::refresh(
         app,
         app.state::<crate::capture::CaptureState>().is_running(),
     );
 }
 
-/// Tells the user a scheduled summary failed. On-demand failures do not
-/// notify: the window is already showing the reason to someone watching it.
-/// The first line only, because a notification body is two lines wide and
-/// the ledger holds the rest.
-fn notify_failure(app: &AppHandle, date: NaiveDate, message: &str) {
+/// One run of a batch as the notice reports it: which day, what it did,
+/// and either how long it took or why it failed.
+struct Finished {
+    date: NaiveDate,
+    kind: JobKind,
+    result: Result<u64, String>,
+}
+
+/// "took 40s" or "took 4 min", in the coarsest unit that is still true;
+/// the day view uses the same rule.
+fn took(ms: u64) -> String {
+    if ms < 60_000 {
+        format!("took {}s", (ms as f64 / 1000.0).round().max(1.0) as u64)
+    } else {
+        format!("took {} min", (ms as f64 / 60_000.0).round() as u64)
+    }
+}
+
+fn long_date(date: NaiveDate) -> String {
+    date.format("%A %-e %B").to_string()
+}
+
+/// The one notification a batch earns, or none. A run takes minutes and the
+/// window is usually behind something else by the time it ends, so the end
+/// is worth a notice: what got done, or the first thing that failed. A
+/// success is quiet while the window is focused, because the day view is
+/// already showing it; a failure never is. Several days are one line with
+/// counts, not one notice each. The reason is its first line only: a
+/// notification body is two lines wide and the ledger holds the rest.
+fn batch_notice(finished: &[Finished], window_focused: bool) -> Option<String> {
+    let failures: Vec<&Finished> = finished.iter().filter(|f| f.result.is_err()).collect();
+    if finished.is_empty() || (failures.is_empty() && window_focused) {
+        return None;
+    }
+    let first_line = |message: &String| message.lines().next().unwrap_or("").to_string();
+    if let [one] = finished {
+        return Some(match (&one.result, one.kind) {
+            (Ok(ms), JobKind::Ingest { .. }) => {
+                format!("Built knowledge for {}, {}", long_date(one.date), took(*ms))
+            }
+            (Ok(ms), JobKind::Summarise { .. }) => {
+                format!("Processed {}, {}", long_date(one.date), took(*ms))
+            }
+            (Err(message), _) => {
+                format!("{} failed: {}", long_date(one.date), first_line(message))
+            }
+        });
+    }
+    let done = finished.len() - failures.len();
+    let days = |n: usize| {
+        if n == 1 {
+            "1 day".to_string()
+        } else {
+            format!("{n} days")
+        }
+    };
+    let verb = if finished
+        .iter()
+        .all(|f| matches!(f.kind, JobKind::Ingest { .. }))
+    {
+        "Built knowledge for"
+    } else {
+        "Processed"
+    };
+    let mut notice = match failures.first() {
+        None => format!("{verb} {}", days(done)),
+        Some(_) if done == 0 => format!("{} failed", days(failures.len())),
+        Some(_) => format!("{verb} {}, {} failed", days(done), failures.len()),
+    };
+    if let Some(first) = failures.first() {
+        if let Err(message) = &first.result {
+            notice.push_str(&format!(". {}: {}", first.date, first_line(message)));
+        }
+    }
+    Some(notice)
+}
+
+fn notify_finished(app: &AppHandle, finished: &[Finished]) {
     use tauri_plugin_notification::NotificationExt;
-    let first_line = message.lines().next().unwrap_or(message);
+    let focused = app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
+    let Some(body) = batch_notice(finished, focused) else {
+        return;
+    };
     if let Err(error) = app
         .notification()
         .builder()
         .title("Ambient Context")
-        .body(format!("{date}'s summary failed: {first_line}"))
+        .body(body)
         .show()
     {
-        eprintln!("[jobs] could not show the failure notification: {error}");
+        eprintln!("[jobs] could not show the notification: {error}");
     }
 }
 
@@ -1209,7 +1303,7 @@ mod tests {
                 "Reading messages (1 of 3)".to_string(),
                 "Reading apps (2 of 3)".to_string(),
                 "Reading websites (3 of 3)".to_string(),
-                "Writing the summary".to_string(),
+                "Writing the notes".to_string(),
             ]
         );
         assert!(crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
@@ -1241,7 +1335,7 @@ mod tests {
             |s| steps.push(s.to_string()),
         )
         .unwrap();
-        assert_eq!(steps, vec!["Writing the summary".to_string()]);
+        assert_eq!(steps, vec!["Writing the notes".to_string()]);
 
         steps.clear();
         run_day_pipeline(
@@ -1446,6 +1540,103 @@ mod tests {
         ))
         .unwrap();
         assert!(text.contains("could not be kept"), "{text}");
+    }
+
+    fn finished(date: NaiveDate, kind: JobKind, result: Result<u64, &str>) -> Finished {
+        Finished {
+            date,
+            kind,
+            result: result.map_err(str::to_string),
+        }
+    }
+
+    #[test]
+    fn one_processed_day_is_named_with_how_long_it_took() {
+        let runs = [finished(
+            day(2026, 9, 2),
+            JobKind::Summarise { force: false },
+            Ok(252_000),
+        )];
+        assert_eq!(
+            batch_notice(&runs, false).as_deref(),
+            Some("Processed Wednesday 2 September, took 4 min")
+        );
+        let runs = [finished(
+            day(2026, 9, 2),
+            JobKind::Ingest { force: true },
+            Ok(40_000),
+        )];
+        assert_eq!(
+            batch_notice(&runs, false).as_deref(),
+            Some("Built knowledge for Wednesday 2 September, took 40s")
+        );
+    }
+
+    #[test]
+    fn a_success_is_quiet_while_the_window_is_focused_and_a_failure_is_not() {
+        let ok = [finished(
+            day(2026, 9, 2),
+            JobKind::Summarise { force: false },
+            Ok(1_000),
+        )];
+        assert_eq!(batch_notice(&ok, true), None);
+        let failed = [finished(
+            day(2026, 9, 2),
+            JobKind::Summarise { force: false },
+            Err("products.md: 09:41-09:48 is outside every captured block\nmore detail"),
+        )];
+        assert_eq!(
+            batch_notice(&failed, true).as_deref(),
+            Some("Wednesday 2 September failed: products.md: 09:41-09:48 is outside every captured block")
+        );
+    }
+
+    #[test]
+    fn a_batch_is_one_notice_counting_days_and_naming_the_first_failure() {
+        let runs = [
+            finished(
+                day(2026, 8, 30),
+                JobKind::Summarise { force: false },
+                Ok(1_000),
+            ),
+            finished(
+                day(2026, 8, 31),
+                JobKind::Summarise { force: false },
+                Err("the agent returned nothing"),
+            ),
+            finished(
+                day(2026, 9, 1),
+                JobKind::Summarise { force: false },
+                Ok(1_000),
+            ),
+            finished(
+                day(2026, 9, 2),
+                JobKind::Summarise { force: false },
+                Err("later"),
+            ),
+        ];
+        assert_eq!(
+            batch_notice(&runs, false).as_deref(),
+            Some("Processed 2 days, 2 failed. 2026-08-31: the agent returned nothing")
+        );
+        let all_ok = [
+            finished(
+                day(2026, 9, 1),
+                JobKind::Summarise { force: false },
+                Ok(1_000),
+            ),
+            finished(
+                day(2026, 9, 2),
+                JobKind::Summarise { force: false },
+                Ok(1_000),
+            ),
+        ];
+        assert_eq!(
+            batch_notice(&all_ok, false).as_deref(),
+            Some("Processed 2 days")
+        );
+        assert_eq!(batch_notice(&all_ok, true), None);
+        assert_eq!(batch_notice(&[], false), None);
     }
 
     #[test]

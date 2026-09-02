@@ -2,9 +2,14 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import appIcon from "../assets/app-icon.png";
+import { GITHUB_NEW_ISSUE, GITHUB_REPO } from "../lib/github";
 
 function closeWindow() {
   void getCurrentWindow().close();
+}
+
+function open(url: string) {
+  void invoke("open_link", { url });
 }
 
 export function About() {
@@ -45,28 +50,43 @@ export function About() {
         </p>
 
         <p className="about-line">
-          A written record of what you worked on. One markdown file per day,
-          on your computer.
-        </p>
-        <p className="about-line">
-          Nothing is sent anywhere. There is no account and no server.
+          A macOS menu bar app that keeps a written record of what you work
+          on, for your own LLM to read. While the eye in your menu bar is
+          open, Ambient Context reads the text of whichever window you have
+          focused (via the macOS accessibility tree, every few seconds) and
+          appends it to plain markdown files in a folder you choose. Point
+          Claude Code or any other agent at that folder and it can answer
+          &ldquo;what did I work on Tuesday?&rdquo;, build memory about your
+          projects, or write your standup for you.
         </p>
 
-        <p className="credit">
-          Built by{" "}
-          <button
-            type="button"
-            className="credit-link"
-            onClick={() =>
-              void invoke("open_link", {
-                url: "https://twitter.com/cameronsmith",
-              })
-            }
-          >
-            Cameron Smith
-          </button>
-        </p>
+        <section className="about-github" aria-label="Source and feedback">
+          <p className="about-line">
+            Ambient Context is open source. If it is useful, a star on GitHub
+            helps others find it. Bugs, rough edges and ideas are welcome as
+            issues.
+          </p>
+          <div className="about-actions">
+            <button type="button" onClick={() => open(GITHUB_REPO)}>
+              Star on GitHub
+            </button>
+            <button type="button" onClick={() => open(GITHUB_NEW_ISSUE)}>
+              Report a bug
+            </button>
+          </div>
+        </section>
       </div>
+
+      <footer className="about-credit">
+        <span className="about-credit-label">Built by</span>
+        <button
+          type="button"
+          className="about-credit-name"
+          onClick={() => open("https://twitter.com/cameronsmith")}
+        >
+          Cameron Smith
+        </button>
+      </footer>
     </main>
   );
 }

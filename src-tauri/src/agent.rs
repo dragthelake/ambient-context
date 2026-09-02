@@ -340,7 +340,12 @@ pub const CLAUDE_DEFAULT_MODEL: &str = "claude-opus-5";
 
 /// The models the Agent tab offers for Claude Code. AgentTab.tsx carries
 /// the same list with display names; the two move together.
-pub const CLAUDE_MODELS: &[&str] = &["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"];
+pub const CLAUDE_MODELS: &[&str] = &[
+    "claude-fable-5-1",
+    "claude-opus-5",
+    "claude-sonnet-5",
+    "claude-haiku-4-5",
+];
 
 /// argv for one Claude Code model. Haiku 4.5 takes no effort levels, so
 /// the flag only goes on the models that accept it.

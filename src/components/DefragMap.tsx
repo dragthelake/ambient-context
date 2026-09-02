@@ -4,9 +4,9 @@ import type { DayEntry } from "../lib/days";
 
 const STATE_WORDS: Record<Cell["state"], string> = {
   empty: "Nothing recorded",
-  raw: "Raw context, not summarised",
-  summarised: "Summarised",
-  failed: "Last summarise failed",
+  raw: "Recorded, not processed",
+  summarised: "Processed",
+  failed: "Last run failed",
 };
 
 function longDate(iso: string): string {

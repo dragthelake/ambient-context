@@ -1,6 +1,6 @@
 [package]
 name = "ambient-context"
-version = "0.2.0"
+version = "1.0.0"
 description = "A menu bar app that keeps a written record of what you worked on."
 authors = ["Cameron Smith"]
 edition = "2021"

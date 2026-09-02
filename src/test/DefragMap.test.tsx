@@ -87,7 +87,7 @@ describe("DefragMap", () => {
     // as an empty day rather than a summarised one.
     fireEvent.mouseEnter(cell);
     const info = screen.getByRole("tooltip").textContent ?? "";
-    expect(info).toContain("Summarised");
+    expect(info).toContain("Processed");
     expect(info).not.toContain("0 B");
 
     fireEvent.click(cell);

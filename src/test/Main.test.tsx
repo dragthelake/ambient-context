@@ -66,16 +66,6 @@ vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({ close: () => undefined }),
 }));
 
-// jsdom has no AudioContext, so the wrapper would swallow every cue and the
-// tests could not see when one fires. A spy in its place records the calls.
-const playSpy = vi.hoisted(() => vi.fn());
-vi.mock("../lib/sound", () => ({
-  play: playSpy,
-  primeAudio: () => undefined,
-  bind: () => undefined,
-  applySoundSettings: () => undefined,
-}));
-
 // The Overview tab's commands, plus the Context tab's: clicking a map cell
 // switches to Context and mounts DayView for real, so its own mount-time
 // commands need answers too, or they reject unhandled once the test moves
@@ -92,8 +82,6 @@ function handler(command: string) {
       // The union of keys Overview, Main and DayView each read on mount, plus
       // the Settings tab's own panels once the Agent tab test switches to it.
       return {
-        sound_enabled: true,
-        sound_volume: 0.6,
         agent: null,
         extra_redaction_patterns: [],
       };
@@ -192,10 +180,12 @@ describe("the main window's tab strip", () => {
       ).toBeGreaterThan(0),
     );
     fireEvent.click(screen.getAllByRole("button", { name: RECORDED_LABEL })[0]);
+    // The day view has a mode tab called Context too, so ask for the
+    // window's own tab by id rather than by name.
     await waitFor(() =>
-      expect(
-        screen.getByRole("tab", { name: "Context" }).getAttribute("aria-selected"),
-      ).toBe("true"),
+      expect(document.getElementById("tab-context")?.getAttribute("aria-selected")).toBe(
+        "true",
+      ),
     );
   });
 
@@ -221,40 +211,6 @@ describe("the main window's tab strip", () => {
 
     await waitFor(() => expect(screen.getByText(TODAY_HEADING)).toBeTruthy());
     expect(screen.queryByText(OLDER_HEADING)).toBe(null);
-  });
-
-  it("cues a tab change on pointerdown, not on the click that follows", async () => {
-    mockInvoke(handler);
-    render(<Main />);
-    playSpy.mockClear();
-    const context = screen.getByRole("tab", { name: "Context" });
-
-    // The cue belongs to the moment the finger goes down. A click lands on
-    // release, some 80 to 120ms later for a real press, and that gap is
-    // heard as lag on top of whatever the output device adds.
-    fireEvent.pointerDown(context);
-    expect(playSpy).toHaveBeenCalledTimes(1);
-    expect(playSpy).toHaveBeenCalledWith("tick");
-
-    // The click that completes the same press must not cue again.
-    fireEvent.click(context, { detail: 1 });
-    expect(playSpy).toHaveBeenCalledTimes(1);
-
-    // Pressing the tab that is already current is not a change.
-    fireEvent.pointerDown(context);
-    expect(playSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it("still cues a tab change made from the keyboard", async () => {
-    mockInvoke(handler);
-    render(<Main />);
-    playSpy.mockClear();
-
-    // Enter and Space raise a click with no pointerdown before it and
-    // detail 0, which is how a keyboard activation is told apart.
-    fireEvent.click(screen.getByRole("tab", { name: "Context" }), { detail: 0 });
-    expect(playSpy).toHaveBeenCalledTimes(1);
-    expect(playSpy).toHaveBeenCalledWith("tick");
   });
 
   it("opens a day from an earlier month when its cell is clicked", async () => {
@@ -311,7 +267,7 @@ describe("the main window's tab strip", () => {
     mockInvoke(handler);
     render(<Main />);
     expect(
-      await screen.findByText("No agent connected. Summarising needs one."),
+      await screen.findByText("No agent connected. Processing a day needs one."),
     ).toBeTruthy();
   });
 

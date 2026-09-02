@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { DayActions } from "./DayActions";
 import { DayHeader } from "./DayHeader";
-import { KbPane } from "./KbPane";
+import { KnowledgePane } from "./KnowledgePane";
+import { NotesPane } from "./NotesPane";
 import { RawPane } from "./RawPane";
-import { SummaryPane } from "./SummaryPane";
 import { WebsitesPane } from "./WebsitesPane";
-import type { DayEntry, DayFile } from "../lib/days";
+import type { DayEntry, DayFile, KnowledgeSection } from "../lib/days";
 
 export type { DayEntry };
 
@@ -17,7 +18,14 @@ export type Outcome = {
   date: string;
   ok: boolean;
   message: string;
+  /// How long the whole run for that day took. Absent on an outcome
+  /// recorded by a build before the runner measured it.
+  took_ms: number | null;
 };
+
+/// Context is the day as it was captured, Knowledge the wiki built from
+/// it, Notes the written day.
+export type DayMode = "context" | "knowledge" | "notes";
 
 /// Compare two outcomes by value: `job_status` returns a fresh object every
 /// call, and setting an equal-but-new one re-renders the whole day for nothing.
@@ -28,7 +36,8 @@ function sameOutcome(a: Outcome | null, b: Outcome | null): boolean {
     a.when === b.when &&
     a.date === b.date &&
     a.ok === b.ok &&
-    a.message === b.message
+    a.message === b.message &&
+    a.took_ms === b.took_ms
   );
 }
 
@@ -46,7 +55,7 @@ export type SummaryState =
   | { kind: "none" }
   | { kind: "queued" }
   | { kind: "running" }
-  | { kind: "generated"; at: string }
+  | { kind: "generated"; at: string; tookMs: number | null }
   | { kind: "failed"; message: string };
 
 /// The runner prefixes failures with "{date} failed: ". In the day header
@@ -105,12 +114,13 @@ export function DayView({ date }: { date?: string } = {}) {
     message: string;
     when: string;
   } | null>(null);
-  // Raw is the default for today: today is what you are still recording.
-  const [mode, setMode] = useState<"raw" | "kb" | "summary">(() =>
-    selected === todayIso() ? "raw" : "summary",
+  // Context is the default for today: today is what you are still recording.
+  const [mode, setMode] = useState<DayMode>(() =>
+    selected === todayIso() ? "context" : "notes",
   );
   const [rawFile, setRawFile] = useState<DayFile>("apps");
-  const [kbRefresh, setKbRefresh] = useState(0);
+  const [section, setSection] = useState<KnowledgeSection>("people.md");
+  const [knowledgeRefresh, setKnowledgeRefresh] = useState(0);
 
   // A plain setter since the calendar rail went: nothing else has to be
   // kept in step with the selected day. Wrapped anyway so the call sites
@@ -139,17 +149,14 @@ export function DayView({ date }: { date?: string } = {}) {
   }, [selectDate]);
 
   // The same effect the open-day event has, on an internal route: the
-  // Overview map opens a day without going through Tauri. Routed through
-  // selectDate, not setSelected directly, so the rail's month follows a
-  // cross-month click instead of leaving the calendar on the month it
-  // already had.
+  // Overview map opens a day without going through Tauri.
   useEffect(() => {
     if (date) selectDate(date);
   }, [date, selectDate]);
 
-  // Every recorded day, not one month of them. The rail wanted a month to
-  // draw a grid; the header only wants the entry for the selected day, and
-  // this is the list the Overview map already reads.
+  // Every recorded day, not one month of them. The header only wants the
+  // entry for the selected day, and this is the list the Overview map
+  // already reads.
   const refreshDays = useCallback(async () => {
     setDays(await invoke<DayEntry[]>("list_days"));
   }, []);
@@ -189,9 +196,9 @@ export function DayView({ date }: { date?: string } = {}) {
       setDayMarkdown(day);
       setSummaryMarkdown(summary);
       setHasAgent(settings.agent !== null);
-      // Raw is the default for today; Summary for a past day that has one.
+      // Context is the default for today; Notes for a past day that has them.
       setMode((current) =>
-        selected === todayIso() ? current : summary ? "summary" : "raw",
+        selected === todayIso() ? current : summary ? "notes" : "context",
       );
     })();
     return () => {
@@ -242,45 +249,15 @@ export function DayView({ date }: { date?: string } = {}) {
     void refreshDays();
   }, [selected, refreshDays, refreshOutcome]);
 
-  // Runs are queued and serial. The command returns a job id straight away;
-  // the view follows that one job and nobody else's.
-  const onSummarise = useCallback(async () => {
-    setMode("summary");
-    try {
-      const started = await invoke<{ job_id: string }>("summarise_now", {
-        date: selected,
-      });
-      setJob({
-        id: started.job_id,
-        date: selected,
-        status: "queued",
-        stderr: null,
-        step: null,
-      });
-      setManualFailure((current) =>
-        current && current.date === selected ? null : current,
-      );
-    } catch (error) {
-      setJob({
-        id: "",
-        date: selected,
-        status: "failed",
-        stderr: String(error),
-        step: null,
-      });
-      setManualFailure({
-        date: selected,
-        message: String(error),
-        when: new Date().toISOString(),
-      });
-    }
-  }, [selected]);
-
-  const onIngest = useCallback(
-    async (force: boolean) => {
-      setMode("kb");
+  // Runs are queued and serial. Either command returns a job id straight
+  // away; the view follows that one job and nobody else's. `summarise_now`
+  // is the whole pipeline (knowledge, then notes); `ingest_now` stops after
+  // the knowledge. `force` is what separates Regenerate from Generate: a
+  // day whose calls were already accepted is otherwise left alone.
+  const startRun = useCallback(
+    async (command: "summarise_now" | "ingest_now", force: boolean) => {
       try {
-        const started = await invoke<{ job_id: string }>("ingest_now", {
+        const started = await invoke<{ job_id: string }>(command, {
           date: selected,
           force,
         });
@@ -310,6 +287,22 @@ export function DayView({ date }: { date?: string } = {}) {
       }
     },
     [selected],
+  );
+
+  const onProcess = useCallback(
+    (force: boolean) => {
+      setMode("notes");
+      void startRun("summarise_now", force);
+    },
+    [startRun],
+  );
+
+  const onGenerateKnowledge = useCallback(
+    (force: boolean) => {
+      setMode("knowledge");
+      void startRun("ingest_now", force);
+    },
+    [startRun],
   );
 
   const jobId = job && job.date === selected ? job.id : null;
@@ -348,7 +341,7 @@ export function DayView({ date }: { date?: string } = {}) {
           setManualFailure((current) =>
             current && current.date === state.date ? null : current,
           );
-          setKbRefresh((n) => n + 1);
+          setKnowledgeRefresh((n) => n + 1);
           await reloadDay();
         }
       })();
@@ -374,8 +367,8 @@ export function DayView({ date }: { date?: string } = {}) {
       return { kind: "failed", message: manualFailure.message };
     }
     if (summaryMarkdown) {
-      const at = outcome && outcome.date === selected ? outcome.when : "";
-      return { kind: "generated", at };
+      const mine = outcome && outcome.date === selected ? outcome : null;
+      return { kind: "generated", at: mine?.when ?? "", tookMs: mine?.took_ms ?? null };
     }
     if (outcome && outcome.date === selected && !outcome.ok) {
       return {
@@ -385,6 +378,9 @@ export function DayView({ date }: { date?: string } = {}) {
     }
     return { kind: "none" };
   }, [summaryMarkdown, outcome, selected, jobStatus, manualFailure]);
+
+  const hasNotes = summaryMarkdown !== null;
+  const hasKnowledge = entry?.has_kb ?? false;
 
   return (
     <div className="day-view">
@@ -398,30 +394,51 @@ export function DayView({ date }: { date?: string } = {}) {
           onMode={setMode}
           rawFile={rawFile}
           onRawFile={setRawFile}
+          section={section}
+          onSection={setSection}
           onPrev={onPrev}
           onNext={onNext}
           onToday={onToday}
-          onSummarise={onSummarise}
-          onIngest={onIngest}
-          hasKb={entry?.has_kb ?? false}
           step={job && job.date === selected ? job.step : null}
         />
-        {mode === "summary" ? (
-          <SummaryPane
+        {mode === "notes" ? (
+          <NotesPane
             markdown={summaryMarkdown}
             hasCapture={entry?.has_capture ?? false}
             hasAgent={hasAgent}
             running={running}
-            onSummarise={onSummarise}
+            step={job && job.date === selected ? job.step : null}
+            onGenerate={() => onProcess(hasNotes)}
             date={selected}
           />
-        ) : mode === "kb" ? (
-          <KbPane date={selected} refreshKey={kbRefresh} />
+        ) : mode === "knowledge" ? (
+          <KnowledgePane
+            date={selected}
+            section={section}
+            refreshKey={knowledgeRefresh}
+            running={running}
+            step={job && job.date === selected ? job.step : null}
+            hasAgent={hasAgent}
+            onGenerate={() => onGenerateKnowledge(hasKnowledge)}
+          />
         ) : rawFile === "websites" ? (
           <WebsitesPane date={selected} />
         ) : (
-          <RawPane date={selected} mode={mode} file={rawFile} />
+          // The pane is only ever mounted in Context mode, and its own
+          // scroll restore keys off that.
+          <RawPane date={selected} mode="raw" file={rawFile} />
         )}
+        <DayActions
+          date={selected}
+          mode={mode}
+          rawFile={rawFile}
+          running={running}
+          hasAgent={hasAgent}
+          hasKnowledge={hasKnowledge}
+          hasNotes={hasNotes}
+          onProcess={onProcess}
+          onGenerateKnowledge={onGenerateKnowledge}
+        />
       </div>
     </div>
   );

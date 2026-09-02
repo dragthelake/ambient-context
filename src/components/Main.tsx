@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AgentTab } from "./AgentTab";
 import { AppSettings } from "./AppSettings";
@@ -8,11 +7,8 @@ import { McpSettings } from "./McpSettings";
 import { Overview } from "./Overview";
 import { RecordingSettings } from "./RecordingSettings";
 import { RulesSettings } from "./RulesSettings";
-import { SoundSettings } from "./SoundSettings";
 import { StorageSettings } from "./StorageSettings";
-import { applySoundSettings, bind, play } from "../lib/sound";
 import { useAppStatus } from "../lib/status";
-import type { Settings } from "../lib/days";
 import "../main-window.css";
 
 const TABS = [
@@ -43,16 +39,6 @@ export function Main() {
     setTab("context");
   };
 
-  // Wire up the declarative cues once, then hand the sound engine the
-  // user's saved preferences. Both are read-once: the Settings tab applies
-  // its own changes as they are made.
-  useEffect(() => {
-    bind();
-    void invoke<Settings>("get_settings").then((saved) =>
-      applySoundSettings(saved.sound_enabled, saved.sound_volume),
-    );
-  }, []);
-
   // Tray Settings on an already-open window. A cold open carries ?tab= in
   // the URL instead, which survives React Strict Mode's remount.
   useEffect(() => {
@@ -82,17 +68,7 @@ export function Main() {
             aria-controls={`pane-${id}`}
             aria-selected={tab === id}
             className={tab === id ? "tab is-current" : "tab"}
-            // The cue fires on pointerdown, not click. A click lands on
-            // release, 80 to 120ms after the finger went down, and that gap
-            // is heard as lag on top of what the output device adds (about
-            // 16ms on the built-in speakers, 160ms over Bluetooth).
-            onPointerDown={() => {
-              if (id !== tab) play("tick");
-            }}
-            onClick={(event) => {
-              // Keyboard activation raises a click with no pointerdown and
-              // detail 0; it gets its cue here. A mouse click already had one.
-              if (id !== tab && event.detail === 0) play("tick");
+            onClick={() => {
               // A tab pressed directly is not a request for a particular day, so
               // drop any day the map asked for. Without this the Context tab would
               // keep reopening the last cell clicked, for the rest of the session.
@@ -132,7 +108,6 @@ export function Main() {
               <RecordingSettings />
               <RulesSettings />
               <AppSettings />
-              <SoundSettings />
               <McpSettings />
             </div>
           )}

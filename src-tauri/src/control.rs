@@ -212,8 +212,6 @@ pub mod writes {
         "idle_secs",
         "ingest_max_chars",
         "write_references",
-        "sound_enabled",
-        "sound_volume",
         "extra_redaction_patterns",
     ];
 

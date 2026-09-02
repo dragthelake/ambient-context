@@ -211,7 +211,7 @@ describe("useDefragState", () => {
 
     // A rejected start never sets new ids. Leaving the last batch's ids in
     // place leaves `running` true against jobs that already finished, which
-    // enables Stop, disables Summarise, and polls every dead id.
+    // enables Stop, disables Process, and polls every dead id.
     rejecting = true;
     await act(async () => {
       screen.getByText("start").click();
@@ -236,11 +236,11 @@ describe("useDefragState", () => {
     });
     render(<Probe />);
     // The runner outlives the window, so a window reopened mid-batch has to
-    // pick the batch back up: Stop is unreachable otherwise, and Summarise
+    // pick the batch back up: Stop is unreachable otherwise, and Process
     // would offer to enqueue days that are already on their way.
     await waitFor(() => expect(screen.getByTestId("progress").textContent).toBe("0/2"));
     expect(screen.getByTestId("running").textContent).toBe("true");
-    expect(screen.getByTestId("status").textContent).toBe("Summarising 2 days");
+    expect(screen.getByTestId("status").textContent).toBe("Processing 2 days");
   });
 
   it("recomputes today when the day list reloads", async () => {

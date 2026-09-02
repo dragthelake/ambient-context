@@ -104,7 +104,7 @@ export function PromptSettings() {
           value={id}
           onChange={(event) => setId(event.target.value as PromptId)}
         >
-          <option value="day-context">Daily summary</option>
+          <option value="day-context">Daily notes</option>
           <option value="ingest-messages">Ingest messages</option>
           <option value="ingest-apps">Ingest apps</option>
           <option value="ingest-websites">Ingest websites</option>

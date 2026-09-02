@@ -9,35 +9,39 @@ your own LLM to read.
 
 While the eye in your menu bar is open, Ambient Context reads the text of
 whichever window you have focused (via the macOS accessibility tree, every
-few seconds) and appends it to a plain markdown file: one file per day, in
-a folder you choose. Point Claude Code or any other agent at that folder
-and it can answer "what did I work on Tuesday?", build memory about your
-projects, or write your standup for you.
+few seconds) and appends it to plain markdown files in a folder you choose:
+one day folder with apps, websites and messages. Point Claude Code or any
+other agent at that folder and it can answer "what did I work on Tuesday?",
+build memory about your projects, or write your standup for you.
 
-- **No screenshots, no video.** It reads text through the accessibility
-  API, nothing else.
-- **Nothing leaves your machine.** No account, no server, no telemetry, no
-  bundled model. This build makes no network calls at all; the signed
-  release will add a single update check against GitHub.
-- **Files you own.** Plain markdown in a folder you chose. Move them,
-  grep them, delete them.
-- **Redaction before writing.** Password managers and private browsing
-  windows are never captured. Password fields are skipped at the source,
-  and credentials, API keys and card-shaped numbers are scrubbed before
-  anything touches disk.
+- **No screenshots, no video.** Capture reads text through the accessibility
+  API. There is no screenshot, screen-recording or OCR path.
+- **No account and no upload of your record.** There is no Ambient Context
+  server and no telemetry. Optional update checks hit GitHub Releases. If
+  you connect an agent CLI, that tool runs on your machine under your own
+  subscription. A synced capture folder (iCloud, Dropbox, …) is a separate
+  boundary you choose.
+- **Files you own.** Plain markdown in a folder you chose. Move them, grep
+  them, delete them.
+- **Defence in depth before writing.** Secure password fields are skipped
+  at the accessibility source. Recognised password-manager apps and private
+  browsing windows are dropped before a block is kept. Known credential,
+  API-key and card-shaped patterns are scrubbed to `[redacted]`. These are
+  heuristics, not a guarantee that every secret is removed.
 - **Built to be read by an LLM.** Lines are deduplicated across the day,
-  interface junk is filtered out, and each block records the document path
-  or URL it was looking at so your agent can open the real thing instead
-  of trusting fragments. The folder carries an `AGENTS.md` explaining the
-  format to whatever reads it.
+  interface junk is filtered out, and blocks record a document path or URL
+  where the focused app exposes one. The folder carries an `AGENTS.md`
+  explaining the format to whatever reads it.
 
 Requires macOS 14+ on Apple Silicon.
 
+The full model, claims matrix and known gaps are in
+[Privacy and security](docs/privacy-and-security.md).
+
 ## Status
 
-Early and unsigned. There is no notarised download yet (Apple Developer
-enrolment is in progress), so for now you build it yourself, which takes
-about two minutes:
+Version **1.0.0**. There is no notarised download yet (Apple Developer
+enrolment is in progress), so for now you build it yourself:
 
 ## Build and run
 
@@ -61,35 +65,26 @@ For development, `npm run tauri dev` runs it with hot reload.
 1. The settings window opens by itself. Grant Accessibility when asked:
    this is the permission that lets the app read window text, and nothing
    works without it.
-2. Choose where to save. The default is `~/Ambient Context`, deliberately
-   outside `~/Documents` so iCloud does not sync your record off the
-   machine.
+2. Choose where to save. Prefer a folder outside iCloud Drive if you want
+   the files to stay on this computer only.
 3. That's it. Recording starts once setup is complete and starts with the
    app from then on. Click the eye in the menu bar to stop; stopping is
    remembered until you start again.
 
-Open eye: recording. Closed eye: not. Right-click the icon for today's
-file, the folder and settings.
+Open eye: recording. Closed eye: not. Right-click the icon for the
+folder and settings.
 
-## What a day file looks like
+## What a day looks like
 
-```markdown
----
-date: 2026-08-25
-captured_by: Ambient Context 0.1.0
----
+Each day is a folder under `Days/YYYY-MM-DD/`:
 
-## 09:41–10:05 · Chrome · Tauri tray documentation
+- `apps.md`: the timeline, with native app bodies
+- `websites.md`: visit rows (no page bodies)
+- `messages.md`: routed mail and chat bodies
 
-url: https://v2.tauri.app/learn/system-tray/
-
-<text seen in that window, first time it appeared today>
-```
-
-Block headings are the day's timeline. Body lines are written once per day
-no matter how often they are seen, so the file stays small enough to hand
-to an LLM whole. `AGENTS.md` in the capture folder documents the format
-and how to read it well.
+Optional derived files: `KB/YYYY-MM-DD/` (structured notes) and
+`Summaries/YYYY-MM-DD.md`. `AGENTS.md` in the capture folder documents the
+format and how to read it well.
 
 ## Notes for testers
 
@@ -107,14 +102,15 @@ and how to read it well.
 
 ```bash
 cd src-tauri && cargo test
+cd .. && npx tsc --noEmit && npx vitest run
 ```
 
-## Privacy model, in one paragraph
+## Privacy, short version
 
-The app reads only the focused window: never background windows, other
-displays or minimised windows, and never while the screen is locked. It
-excludes password managers and private browsing entirely, skips secure
-input fields at the accessibility level, and pattern-scrubs secrets before
-writing. Everything it produces is plaintext on your own disk, and the
-capture folder is excluded from capture so it cannot observe itself. If
-you find a hole in any of this, please open an issue.
+The app reads only the focused window, not background windows, and not
+while the screen is locked. Secure fields, recognised password managers and
+private browsing titles are filtered before writing; pattern redaction
+covers common secrets. Output is plaintext on disk you control. See
+[Privacy and security](docs/privacy-and-security.md) for the evidence and
+the gaps. If you find a hole, please
+[open an issue](https://github.com/dragthelake/ambient-context/issues).

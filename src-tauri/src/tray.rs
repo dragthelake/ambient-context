@@ -93,7 +93,6 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
         MenuItem::with_id(app, "last_run", text, false, None::<&str>)?
     };
     let overview = MenuItem::with_id(app, "overview", "Open Overview\u{2026}", true, None::<&str>)?;
-    let open_today = MenuItem::with_id(app, "open_today", "Open Today's File", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Settings\u{2026}", true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", "About\u{2026}", true, None::<&str>)?;
@@ -107,7 +106,6 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
             &last_run,
             &PredefinedMenuItem::separator(app)?,
             &overview,
-            &open_today,
             &reveal,
             &PredefinedMenuItem::separator(app)?,
             &setup,
@@ -163,13 +161,6 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             let config = settings::load(app);
             match event.id().as_ref() {
-                "open_today" => {
-                    if let Some(folder) = &config.folder {
-                        let path = crate::writer::DayFile::Apps
-                            .path(folder, chrono::Local::now().date_naive());
-                        let _ = std::process::Command::new("open").arg(path).spawn();
-                    }
-                }
                 "reveal" => {
                     if let Some(folder) = &config.folder {
                         let _ = std::process::Command::new("open").arg(folder).spawn();

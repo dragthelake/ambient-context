@@ -25,8 +25,6 @@ export type Settings = {
   launch_at_login: boolean;
   idle_secs: number;
   max_block_chars: number;
-  sound_enabled: boolean;
-  sound_volume: number;
   write_references: boolean;
   extra_redaction_patterns: string[];
 };
@@ -54,3 +52,16 @@ export type DayEntry = {
   bytes: number;
   title: string | null;
 };
+
+/// The six knowledge files in reading order, with the label each carries
+/// on its tab. The file names are the backend's and never reach the reader.
+export const KNOWLEDGE_SECTIONS = [
+  ["people.md", "People"],
+  ["commitments.md", "Commitments"],
+  ["threads.md", "Threads"],
+  ["products.md", "Products"],
+  ["issues.md", "Issues"],
+  ["reading.md", "Reading"],
+] as const;
+
+export type KnowledgeSection = (typeof KNOWLEDGE_SECTIONS)[number][0];
