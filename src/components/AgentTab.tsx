@@ -35,6 +35,7 @@ export function AgentTab() {
   const [manualCommand, setManualCommand] = useState("");
   const [manualArgs, setManualArgs] = useState("");
   const [claudeModel, setClaudeModel] = useState(CLAUDE_MODELS[0].id);
+  const [capDraft, setCapDraft] = useState("");
   const [saving, setSaving] = useState(false);
 
   const readSettings = useCallback(async () => {
@@ -46,6 +47,7 @@ export function AgentTab() {
   useEffect(() => {
     void (async () => {
       const loaded = await readSettings();
+      setCapDraft(String(loaded.ingest_max_chars));
       const found = await invoke<Agent[]>("agent_detect");
       // Every row starts unprobed, including the saved one: an agent that
       // has since been logged out must not be shown as fine.
@@ -183,7 +185,7 @@ export function AgentTab() {
             type="button"
             disabled={saving}
             onClick={async () => {
-              await save((next) => ({ ...next, agent: null }));
+              await save((next) => ({ ...next, agent: null, ingest_agent: null }));
               testRun.current += 1;
               setTest({ status: "untested" });
             }}
@@ -406,6 +408,51 @@ export function AgentTab() {
             </div>,
           )}
         </ul>
+      </fieldset>
+      <fieldset>
+        <legend>Ingest</legend>
+        <p className="settings-note">
+          Three shorter calls build the day's knowledge base before the summary. A
+          cheaper agent can run them.
+        </p>
+        <div className="field-row-stacked">
+          <label htmlFor="ingest-agent">Ingest agent</label>
+          <select
+            id="ingest-agent"
+            value={settings.ingest_agent?.command ?? ""}
+            disabled={!connected}
+            onChange={(event) => {
+              const found =
+                detected.find((d) => d.agent.command === event.target.value)?.agent ??
+                null;
+              void save((next) => ({ ...next, ingest_agent: found }));
+            }}
+          >
+            <option value="">Same as summary</option>
+            {detected.map((d) => (
+              <option key={d.agent.command} value={d.agent.command}>
+                {d.agent.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field-row-stacked">
+          <label htmlFor="ingest-max-chars">Longest ingest input (characters)</label>
+          <input
+            id="ingest-max-chars"
+            type="number"
+            min={10000}
+            step={10000}
+            value={capDraft}
+            onChange={(event) => setCapDraft(event.target.value)}
+            onBlur={() => {
+              const n = Number(capDraft);
+              if (Number.isFinite(n) && n >= 10000) {
+                void save((next) => ({ ...next, ingest_max_chars: n }));
+              }
+            }}
+          />
+        </div>
       </fieldset>
       <PromptSettings />
     </>

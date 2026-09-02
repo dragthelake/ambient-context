@@ -9,9 +9,14 @@ export type PromptPayload = {
   path: string;
 };
 
-const DAY_CONTEXT = "day-context";
+export type PromptId =
+  | "day-context"
+  | "ingest-messages"
+  | "ingest-apps"
+  | "ingest-websites";
 
 export function PromptSettings() {
+  const [id, setId] = useState<PromptId>("day-context");
   const [payload, setPayload] = useState<PromptPayload | null>(null);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -20,10 +25,11 @@ export function PromptSettings() {
   const [copied, setCopied] = useState(false);
 
   const read = useCallback(async () => {
-    const next = await invoke<PromptPayload>("get_prompt", { id: DAY_CONTEXT });
+    const next = await invoke<PromptPayload>("get_prompt", { id });
     setPayload(next);
     setDraft(next.text);
-  }, []);
+    setConfirming(false);
+  }, [id]);
 
   useEffect(() => {
     void read();
@@ -31,10 +37,7 @@ export function PromptSettings() {
 
   const save = async () => {
     try {
-      const next = await invoke<PromptPayload>("set_prompt", {
-        id: DAY_CONTEXT,
-        text: draft,
-      });
+      const next = await invoke<PromptPayload>("set_prompt", { id, text: draft });
       setPayload(next);
       setDraft(next.text);
       setError(null);
@@ -49,7 +52,7 @@ export function PromptSettings() {
 
   const reset = async () => {
     try {
-      const next = await invoke<PromptPayload>("reset_prompt", { id: DAY_CONTEXT });
+      const next = await invoke<PromptPayload>("reset_prompt", { id });
       setPayload(next);
       setDraft(next.text);
       setError(null);
@@ -70,7 +73,7 @@ export function PromptSettings() {
   // bundled one when nothing has been customised yet.
   const openInEditor = async () => {
     try {
-      await invoke("open_prompt_in_editor", { id: DAY_CONTEXT });
+      await invoke("open_prompt_in_editor", { id });
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -81,7 +84,7 @@ export function PromptSettings() {
 
   return (
     <fieldset>
-      <legend>Daily summary prompt</legend>
+      <legend>Prompts</legend>
       <p className="settings-note">
         {payload.customised
           ? `Using your prompt at ${payload.path}`
@@ -95,9 +98,23 @@ export function PromptSettings() {
       {error ? <p className="warn">{error}</p> : null}
 
       <div className="field-row-stacked">
-        <label htmlFor="daily-summary-prompt">Prompt text</label>
+        <label htmlFor="prompt-id">Prompt</label>
+        <select
+          id="prompt-id"
+          value={id}
+          onChange={(event) => setId(event.target.value as PromptId)}
+        >
+          <option value="day-context">Daily summary</option>
+          <option value="ingest-messages">Ingest messages</option>
+          <option value="ingest-apps">Ingest apps</option>
+          <option value="ingest-websites">Ingest websites</option>
+        </select>
+      </div>
+
+      <div className="field-row-stacked">
+        <label htmlFor="prompt-text">Prompt text</label>
         <textarea
-          id="daily-summary-prompt"
+          id="prompt-text"
           rows={16}
           spellCheck={false}
           value={draft}
