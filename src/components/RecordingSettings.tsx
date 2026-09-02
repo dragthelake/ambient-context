@@ -52,6 +52,12 @@ export function RecordingSettings() {
           value={settings.min_dwell_secs}
           onChange={(value) => void save((next) => ({ ...next, min_dwell_secs: value }))}
         />
+        <NumberField
+          label="Idle after (seconds)"
+          hint="When there has been no keyboard or mouse input for this long, the open block is closed and nothing is recorded until you return. 0 turns this off."
+          value={settings.idle_secs}
+          onChange={(value) => void save((next) => ({ ...next, idle_secs: value }))}
+        />
       </div>
 
       <h3 className="settings-heading">Blocks</h3>

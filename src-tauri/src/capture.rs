@@ -47,6 +47,14 @@ fn rules_mtime(config_dir: &Path) -> Option<std::time::SystemTime> {
         .ok()
 }
 
+/// Whether this poll falls in a stretch with no keyboard or mouse input.
+/// `idle_secs` of 0 turns the check off, and a platform that cannot report
+/// idle time is never idle rather than always idle. Pure, so the poll loop
+/// itself needs no test harness.
+fn is_idle(idle_secs: u64, since: Option<f64>) -> bool {
+    idle_secs > 0 && since.is_some_and(|seconds| seconds >= idle_secs as f64)
+}
+
 /// The app must not record itself reading its own record. Matched by the
 /// document or URL path first (editors expose AXDocument), then by a
 /// window title carrying a date together with the folder name or one of
@@ -149,6 +157,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         let mut dedup = writer::DayDedup::new();
         let interval = Duration::from_secs(settings.interval_secs.max(1));
         let mut failed_reads: u32 = 0;
+        let mut idle = false;
         let mut counter_day = Local::now().date_naive();
         let config_dir = settings::config_dir(&app);
         let mut rules_error: Option<String> = None;
@@ -208,46 +217,69 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 shape = next_shape;
             }
 
-            match reader::PlatformReader.snapshot() {
-                Some(raw) => {
-                    failed_reads = 0;
-                    if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
-                        if is_own_output(&clean, &folder) {
-                            // Looking at the capture file is not work worth
-                            // recording, and recording it recurses.
-                        } else {
-                            let clean = Snapshot {
-                                text: clean
-                                    .text
-                                    .iter()
-                                    .filter_map(|line| prune::normalise_line(line))
-                                    .collect(),
-                                ..clean
-                            };
-                            if let Some(block) = segmenter.push(clean, Local::now()) {
-                                match writer::append_block(
-                                    &folder, &block, &mut dedup, shape, &rules,
-                                ) {
-                                    Ok(()) => {
-                                        counter.fetch_add(1, Ordering::SeqCst);
+            // An unattended machine is not work. Closing the open block at
+            // the point input stopped keeps the afternoon's first block from
+            // starting at lunchtime, and nothing is recorded until the user
+            // comes back.
+            let since_input = reader::PlatformReader.seconds_since_input();
+            if is_idle(current.idle_secs, since_input) {
+                if !idle {
+                    idle = true;
+                    let seconds = since_input.unwrap_or_default();
+                    eprintln!("[capture] idle after {seconds:.0}s, block closed");
+                    if let Some(block) = segmenter.flush(Local::now()) {
+                        if writer::append_block(&folder, &block, &mut dedup, shape, &rules).is_ok()
+                        {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                }
+            } else {
+                if idle {
+                    idle = false;
+                    eprintln!("[capture] input resumed, recording again");
+                }
+                match reader::PlatformReader.snapshot() {
+                    Some(raw) => {
+                        failed_reads = 0;
+                        if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
+                            if is_own_output(&clean, &folder) {
+                                // Looking at the capture file is not work worth
+                                // recording, and recording it recurses.
+                            } else {
+                                let clean = Snapshot {
+                                    text: clean
+                                        .text
+                                        .iter()
+                                        .filter_map(|line| prune::normalise_line(line))
+                                        .collect(),
+                                    ..clean
+                                };
+                                if let Some(block) = segmenter.push(clean, Local::now()) {
+                                    match writer::append_block(
+                                        &folder, &block, &mut dedup, shape, &rules,
+                                    ) {
+                                        Ok(()) => {
+                                            counter.fetch_add(1, Ordering::SeqCst);
+                                        }
+                                        Err(e) => eprintln!("[capture] write failed: {e}"),
                                     }
-                                    Err(e) => eprintln!("[capture] write failed: {e}"),
                                 }
                             }
                         }
                     }
-                }
-                None => {
-                    // A locked screen, a hung target or a dropped read.
-                    // Three misses in a row closes the open block, so a
-                    // block ends at the lock rather than spanning lunch.
-                    failed_reads += 1;
-                    if failed_reads == 3 {
-                        if let Some(block) = segmenter.flush(Local::now()) {
-                            if writer::append_block(&folder, &block, &mut dedup, shape, &rules)
-                                .is_ok()
-                            {
-                                counter.fetch_add(1, Ordering::SeqCst);
+                    None => {
+                        // A locked screen, a hung target or a dropped read.
+                        // Three misses in a row closes the open block, so a
+                        // block ends at the lock rather than spanning lunch.
+                        failed_reads += 1;
+                        if failed_reads == 3 {
+                            if let Some(block) = segmenter.flush(Local::now()) {
+                                if writer::append_block(&folder, &block, &mut dedup, shape, &rules)
+                                    .is_ok()
+                                {
+                                    counter.fetch_add(1, Ordering::SeqCst);
+                                }
                             }
                         }
                     }
@@ -371,6 +403,27 @@ mod tests {
         let (_, after_fix) = load_rules_for_capture(dir.path(), &mut reported);
         assert!(!after_fix);
         assert!(reported.is_none(), "a fixed file clears the reported error");
+    }
+
+    #[test]
+    fn zero_idle_secs_turns_the_check_off() {
+        assert!(!is_idle(0, Some(3600.0)));
+    }
+
+    #[test]
+    fn a_platform_with_no_idle_reading_is_never_idle() {
+        assert!(!is_idle(120, None));
+    }
+
+    #[test]
+    fn input_just_under_the_threshold_is_not_idle() {
+        assert!(!is_idle(120, Some(119.9)));
+    }
+
+    #[test]
+    fn input_at_the_threshold_is_idle() {
+        assert!(is_idle(120, Some(120.0)));
+        assert!(is_idle(120, Some(600.0)));
     }
 
     #[test]

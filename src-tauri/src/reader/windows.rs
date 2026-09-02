@@ -15,3 +15,8 @@ pub fn request_permission() -> Permission {
 pub fn snapshot() -> Option<Snapshot> {
     None
 }
+
+/// No idle reading yet, so the idle check never fires on Windows.
+pub fn seconds_since_input() -> Option<f64> {
+    None
+}

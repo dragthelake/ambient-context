@@ -50,8 +50,11 @@ pub struct Settings {
     /// a hole in it where a reboot was is worth less than no record.
     pub launch_at_login: bool,
     /// The longest a single block's body can be, in characters. 0 is
-    /// unlimited, which is the shipped behaviour.
+    /// unlimited.
     pub max_block_chars: usize,
+    /// How long input must be quiet before the open block is closed and
+    /// polling stops recording, in seconds. 0 turns the check off.
+    pub idle_secs: u64,
     /// Whether the interface plays its interaction cues. On by default:
     /// the sounds are short and tied to actions the user took.
     pub sound_enabled: bool,
@@ -80,7 +83,11 @@ impl Default for Settings {
             schedule_hhmm: None,
             editor: None,
             launch_at_login: true,
-            max_block_chars: 0,
+            // A block that runs for hours because the machine was left
+            // unattended is worth less than several bounded ones, and the
+            // summariser reads the tail of a long block poorly.
+            max_block_chars: 4000,
+            idle_secs: 120,
             sound_enabled: true,
             sound_volume: 0.6,
             write_references: true,
@@ -149,6 +156,21 @@ mod tests {
         assert_eq!(settings.interval_secs, 5);
         assert_eq!(settings.min_dwell_secs, 10);
         assert_eq!(settings.folder, None);
+    }
+
+    #[test]
+    fn idle_defaults_to_two_minutes_and_blocks_are_capped() {
+        let settings = Settings::default();
+        assert_eq!(settings.idle_secs, 120);
+        assert_eq!(settings.max_block_chars, 4000);
+    }
+
+    #[test]
+    fn idle_secs_defaults_when_missing_from_the_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
+        assert_eq!(read_from(&path).idle_secs, 120);
     }
 
     #[test]

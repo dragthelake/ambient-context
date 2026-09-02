@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import SwiftRs
 
 // Status codes crossing the C boundary: 0 = not granted, 1 = granted.
@@ -22,6 +23,16 @@ public func ambientAxRequestPermission() -> Int32 {
     let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     let options = [key: true] as CFDictionary
     return AXIsProcessTrustedWithOptions(options) ? 1 : 0
+}
+
+/// Seconds since the last keyboard or mouse event anywhere in the session,
+/// so a machine left alone stops extending the open block. Returns -1 when
+/// the "any input" event type cannot be formed, which the caller reads as
+/// "no idle reading on this platform" rather than as zero seconds idle.
+@_cdecl("ambient_ax_seconds_since_input")
+public func ambientAxSecondsSinceInput() -> Double {
+    guard let anyInput = CGEventType(rawValue: ~0) else { return -1 }
+    return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
 }
 
 // Content in browsers and Electron apps nests 15 to 30 levels deep, so the

@@ -23,6 +23,7 @@ export type Settings = {
   schedule_hhmm: string | null;
   editor: string | null;
   launch_at_login: boolean;
+  idle_secs: number;
   max_block_chars: number;
   sound_enabled: boolean;
   sound_volume: number;

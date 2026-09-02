@@ -19,6 +19,11 @@ pub struct Snapshot {
 
 pub trait WindowReader {
     fn snapshot(&self) -> Option<Snapshot>;
+
+    /// Seconds since the last keyboard or mouse input. None where the
+    /// platform cannot report it, which the idle check reads as "not idle"
+    /// rather than guessing.
+    fn seconds_since_input(&self) -> Option<f64>;
 }
 
 pub struct PlatformReader;
@@ -32,6 +37,21 @@ impl WindowReader for PlatformReader {
         #[cfg(target_os = "windows")]
         {
             windows::snapshot()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    }
+
+    fn seconds_since_input(&self) -> Option<f64> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::seconds_since_input()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            windows::seconds_since_input()
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {

@@ -204,6 +204,7 @@ pub mod writes {
         "launch_at_login",
         "editor",
         "max_block_chars",
+        "idle_secs",
         "ingest_max_chars",
         "write_references",
         "sound_enabled",
