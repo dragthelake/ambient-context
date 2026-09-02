@@ -6,6 +6,7 @@ const ACTION_LABELS: Record<RuleAction, string> = {
   exclude: "Don't record",
   headings_only: "Headings only",
   full: "Record fully",
+  route_messages: "Record in messages.md",
 };
 
 function targetParts(target: RuleTarget): { kind: string; value: string } {
@@ -24,6 +25,10 @@ function builtInTitle(id: string): string {
       return "Secure text fields";
     case "builtin:secret-patterns":
       return "Secrets and card numbers";
+    case "builtin:message-surfaces":
+      return "Message surfaces";
+    case "builtin:own-window":
+      return "Own window";
     default:
       return id.replace("builtin:", "");
   }

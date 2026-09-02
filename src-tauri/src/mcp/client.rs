@@ -42,8 +42,8 @@ fn build(
         serde_json::from_value::<crate::rules::Rule>(value).map_err(|error| {
             tool_error(format!(
                 "The rule argument is not a valid rule: {error}. A rule needs a target with \
-                 exactly one of app, website or title, and an action of exclude, headings_only \
-                 or full. The id is optional when adding and required when updating or removing."
+                 exactly one of app, website or title, and an action of exclude, headings_only, \
+                 route_messages or full. The id is optional when adding and required when updating or removing."
             ))
         })
     };

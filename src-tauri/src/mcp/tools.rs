@@ -45,8 +45,8 @@ fn rule_property() -> serde_json::Value {
             },
             "action": {
                 "type": "string",
-                "enum": ["exclude", "headings_only", "full"],
-                "description": "exclude drops the window entirely, headings_only keeps the heading and drops the body, full is the default and carves an exception out of a broader rule."
+                "enum": ["exclude", "headings_only", "full", "route_messages"],
+                "description": "exclude drops the window entirely, headings_only keeps the heading and drops the body, full is the default and carves an exception out of a broader rule, route_messages records the body in messages.md."
             },
             "note": { "type": "string", "description": "Optional note explaining why the rule exists." }
         },

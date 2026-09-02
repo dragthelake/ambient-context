@@ -11,6 +11,7 @@ mod propose;
 mod prune;
 mod reader;
 mod redact;
+mod route;
 mod rules;
 mod segment;
 mod settings;

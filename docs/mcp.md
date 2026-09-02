@@ -243,7 +243,7 @@ snapshot. Ledgered with your client named. Needs the app running. Input:
           },
           "additionalProperties": false
         },
-        "action": { "type": "string", "enum": ["exclude", "headings_only", "full"] },
+        "action": { "type": "string", "enum": ["exclude", "headings_only", "full", "route_messages"] },
         "note": { "type": "string" }
       },
       "required": ["target", "action"],

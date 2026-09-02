@@ -3,7 +3,7 @@ export type RuleTarget =
   | { website: string }
   | { title: string };
 
-export type RuleAction = "exclude" | "headings_only" | "full";
+export type RuleAction = "exclude" | "headings_only" | "full" | "route_messages";
 
 export type Rule = {
   id: string;

@@ -28,6 +28,9 @@ pub enum Action {
     Exclude,
     HeadingsOnly,
     Full,
+    /// Record the body in messages.md rather than treating the block as a
+    /// visit row or an app body.
+    RouteMessages,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -145,6 +148,18 @@ pub fn built_ins() -> Vec<BuiltIn> {
             description:
                 "Keys, tokens, bearer headers, labelled secrets and card-shaped numbers are replaced with [redacted]."
                     .to_string(),
+        },
+        BuiltIn {
+            id: "builtin:message-surfaces".to_string(),
+            description: format!(
+                "Bodies from message surfaces are recorded in messages.md. Applications: {}. Web addresses: {}.",
+                crate::route::MESSAGE_APPS.join(", "),
+                crate::route::MESSAGE_URLS.join(", ")
+            ),
+        },
+        BuiltIn {
+            id: "builtin:own-window".to_string(),
+            description: "Ambient Context's own window is recorded as headings only.".to_string(),
         },
     ]
 }
@@ -277,6 +292,7 @@ pub enum Decision {
     Exclude,
     HeadingsOnly,
     Full,
+    RouteMessages,
 }
 
 /// The host of a URL, lowercased, with any `www.` prefix dropped. Written
@@ -341,7 +357,7 @@ fn protection(action: Action) -> u8 {
     match action {
         Action::Exclude => 2,
         Action::HeadingsOnly => 1,
-        Action::Full => 0,
+        Action::Full | Action::RouteMessages => 0,
     }
 }
 
@@ -354,6 +370,7 @@ pub fn decide(rules: &Rules, app: &str, title: Option<&str>, url: Option<&str>) 
     match winner.map(|rule| rule.action) {
         Some(Action::Exclude) => Decision::Exclude,
         Some(Action::HeadingsOnly) => Decision::HeadingsOnly,
+        Some(Action::RouteMessages) => Decision::RouteMessages,
         Some(Action::Full) | None => Decision::Full,
     }
 }
@@ -569,12 +586,14 @@ mod tests {
     }
 
     #[test]
-    fn the_built_ins_name_all_four_protections() {
+    fn the_built_ins_name_all_six_protections() {
         let ids: Vec<String> = built_ins().into_iter().map(|b| b.id).collect();
         assert!(ids.contains(&"builtin:password-managers".to_string()));
         assert!(ids.contains(&"builtin:private-windows".to_string()));
         assert!(ids.contains(&"builtin:secure-fields".to_string()));
         assert!(ids.contains(&"builtin:secret-patterns".to_string()));
+        assert!(ids.contains(&"builtin:message-surfaces".to_string()));
+        assert!(ids.contains(&"builtin:own-window".to_string()));
     }
 
     #[test]

@@ -25,6 +25,14 @@ pub fn is_excluded_app(app: &str) -> bool {
         .any(|excluded| lower.contains(excluded))
 }
 
+/// The app's own process. Its window shows settings text and the
+/// summaries it wrote, which recorded 165 KB in one measured day and fed
+/// the summary back into itself.
+pub fn is_own_app(app: &str) -> bool {
+    let lower = app.to_lowercase();
+    lower == "ambient-context" || lower == "ambient context"
+}
+
 /// Window-title markers for private browsing in the major browsers. The
 /// browser is the redaction layer's largest blind spot: banking and health
 /// happen inside Safari and Chrome, which can never be on the app exclusion
@@ -116,6 +124,7 @@ pub fn redact_snapshot(
     if decision == crate::rules::Decision::Exclude {
         return None;
     }
+    let own_app = is_own_app(&snapshot.app);
     Some(Snapshot {
         app: snapshot.app,
         window_title: snapshot.window_title.map(|t| redact_line_with(&t, extra)),
@@ -126,7 +135,7 @@ pub fn redact_snapshot(
             .iter()
             .map(|l| redact_line_with(l, extra))
             .collect(),
-        headings_only: decision == crate::rules::Decision::HeadingsOnly,
+        headings_only: decision == crate::rules::Decision::HeadingsOnly || own_app,
     })
 }
 
@@ -147,6 +156,18 @@ mod tests {
         assert!(!is_excluded_app("Linear"));
         assert!(!is_excluded_app("Slack"));
         assert!(!is_excluded_app("Safari"));
+    }
+
+    #[test]
+    fn the_apps_own_window_is_headings_only() {
+        use crate::reader::Snapshot;
+        let snap = Snapshot {
+            app: "Ambient Context".into(),
+            text: vec!["Volume 55 %".into()],
+            ..Default::default()
+        };
+        let out = redact_snapshot(snap, &crate::rules::Rules::default(), &[]).unwrap();
+        assert!(out.headings_only);
     }
 
     #[test]
