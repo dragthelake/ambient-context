@@ -468,7 +468,7 @@ fn read_day_blocks(app: tauri::AppHandle, date: String) -> Vec<days::RawBlock> {
     let Ok(date) = chrono::NaiveDate::parse_from_str(&date, "%Y-%m-%d") else {
         return Vec::new();
     };
-    days::read_day(&folder, date)
+    days::read_day(&folder, date, writer::DayFile::Apps)
         .map(|text| days::parse_blocks(&text))
         .unwrap_or_default()
 }
@@ -1219,7 +1219,7 @@ fn days_in_month(app: tauri::AppHandle, year: i32, month: u32) -> Vec<days::DayE
 #[tauri::command]
 fn read_day(app: tauri::AppHandle, date: String) -> Option<String> {
     let folder = settings::load(&app).folder?;
-    days::read_day(&folder, parse_date(&date).ok()?)
+    days::read_day(&folder, parse_date(&date).ok()?, writer::DayFile::Apps)
 }
 
 #[tauri::command]

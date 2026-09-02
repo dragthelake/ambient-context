@@ -42,6 +42,7 @@ pub fn list_days(folder: &Path) -> serde_json::Value {
                 "date": day.date.to_string(),
                 "has_capture": day.has_capture,
                 "has_summary": day.has_summary,
+                "has_kb": day.has_kb,
                 "bytes": day.bytes,
                 "title": day.title,
             })
@@ -72,10 +73,11 @@ fn valid_time(value: &str) -> Result<&str, FileError> {
 pub fn read_day(
     folder: &Path,
     date: NaiveDate,
+    file: crate::writer::DayFile,
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<String, FileError> {
-    let text = crate::days::read_day(folder, date).ok_or(FileError::NoCapture(date))?;
+    let text = crate::days::read_day(folder, date, file).ok_or(FileError::NoCapture(date))?;
     if from.is_none() && to.is_none() {
         return Ok(text);
     }
@@ -223,6 +225,7 @@ pub fn folder_from(config_dir: &Path) -> Result<std::path::PathBuf, FileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::writer::DayFile;
 
     fn folder_with_a_day() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
@@ -297,7 +300,14 @@ mod tests {
             day,
         )
         .unwrap();
-        let text = read_day(dir.path(), date(2026, 8, 30), Some("08:00"), Some("10:00")).unwrap();
+        let text = read_day(
+            dir.path(),
+            date(2026, 8, 30),
+            DayFile::Apps,
+            Some("08:00"),
+            Some("10:00"),
+        )
+        .unwrap();
         assert!(text.contains("Pages"));
         // The heading that is not a time belongs to the block above it.
         assert!(text.contains("\u{65e5}\u{672c}\u{8a9e}"));
@@ -307,7 +317,7 @@ mod tests {
     #[test]
     fn a_whole_day_comes_back_verbatim() {
         let dir = folder_with_a_day();
-        let text = read_day(dir.path(), date(2026, 8, 30), None, None).unwrap();
+        let text = read_day(dir.path(), date(2026, 8, 30), DayFile::Apps, None, None).unwrap();
         assert!(text.starts_with("---\ndate: 2026-08-30"));
         assert!(text.contains("Standup moved to nine."));
     }
@@ -315,7 +325,14 @@ mod tests {
     #[test]
     fn a_time_slice_keeps_whole_blocks_inside_the_range() {
         let dir = folder_with_a_day();
-        let text = read_day(dir.path(), date(2026, 8, 30), Some("10:00"), Some("12:00")).unwrap();
+        let text = read_day(
+            dir.path(),
+            date(2026, 8, 30),
+            DayFile::Apps,
+            Some("10:00"),
+            Some("12:00"),
+        )
+        .unwrap();
         assert!(text.contains("Xcode"));
         assert!(!text.contains("Safari"), "the 09:00 block leaked in");
         assert!(!text.contains("Slack"), "the 16:00 block leaked in");
@@ -324,7 +341,14 @@ mod tests {
     #[test]
     fn a_slice_is_half_open_so_a_block_starting_at_to_is_excluded() {
         let dir = folder_with_a_day();
-        let text = read_day(dir.path(), date(2026, 8, 30), Some("09:00"), Some("11:05")).unwrap();
+        let text = read_day(
+            dir.path(),
+            date(2026, 8, 30),
+            DayFile::Apps,
+            Some("09:00"),
+            Some("11:05"),
+        )
+        .unwrap();
         assert!(text.contains("Safari"));
         assert!(!text.contains("Xcode"));
     }
@@ -332,14 +356,28 @@ mod tests {
     #[test]
     fn a_slice_drops_the_frontmatter_because_it_is_not_a_block() {
         let dir = folder_with_a_day();
-        let text = read_day(dir.path(), date(2026, 8, 30), Some("09:00"), None).unwrap();
+        let text = read_day(
+            dir.path(),
+            date(2026, 8, 30),
+            DayFile::Apps,
+            Some("09:00"),
+            None,
+        )
+        .unwrap();
         assert!(text.starts_with("## 09:00"));
     }
 
     #[test]
     fn a_bad_time_is_rejected_with_the_expected_form() {
         let dir = folder_with_a_day();
-        let error = read_day(dir.path(), date(2026, 8, 30), Some("9am"), None).unwrap_err();
+        let error = read_day(
+            dir.path(),
+            date(2026, 8, 30),
+            DayFile::Apps,
+            Some("9am"),
+            None,
+        )
+        .unwrap_err();
         assert!(matches!(error, FileError::BadTime(_)));
     }
 
@@ -347,7 +385,7 @@ mod tests {
     fn a_missing_day_is_not_found_rather_than_empty() {
         let dir = folder_with_a_day();
         assert!(matches!(
-            read_day(dir.path(), date(2026, 8, 29), None, None),
+            read_day(dir.path(), date(2026, 8, 29), DayFile::Apps, None, None),
             Err(FileError::NoCapture(_))
         ));
     }

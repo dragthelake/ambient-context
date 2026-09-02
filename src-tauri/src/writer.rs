@@ -117,7 +117,6 @@ pub enum DayFile {
 }
 
 impl DayFile {
-    #[allow(dead_code)]
     pub fn all() -> [DayFile; 3] {
         [DayFile::Apps, DayFile::Websites, DayFile::Messages]
     }

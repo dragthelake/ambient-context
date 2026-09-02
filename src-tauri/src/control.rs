@@ -89,7 +89,7 @@ fn summarise_day(app: &AppHandle, date: &str, client: &str) -> Response {
     let Some(folder) = config.folder.clone() else {
         return Response::err("invalid", "No capture folder is set.");
     };
-    if crate::days::read_day(&folder, date).is_none() {
+    if crate::days::read_day(&folder, date, crate::writer::DayFile::Apps).is_none() {
         return Response::err("not_found", format!("There is no capture for {date}."));
     }
     let queue = app.state::<jobs::JobQueue>();

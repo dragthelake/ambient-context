@@ -313,7 +313,7 @@ fn read_call(
                 let date = required_date(arguments)?;
                 let from = arguments["from"].as_str();
                 let to = arguments["to"].as_str();
-                files::read_day(&dir, date, from, to)
+                files::read_day(&dir, date, crate::writer::DayFile::Apps, from, to)
                     .map(ok_text)
                     .map_err(|error| tool_error(error.to_string()))
             };
@@ -521,10 +521,8 @@ mod tests {
         )
         .unwrap();
         std::fs::write(
-            crate::writer::DayFile::Apps.path(
-                folder.path(),
-                NaiveDate::from_ymd_opt(2026, 8, 30).unwrap(),
-            ),
+            crate::writer::DayFile::Apps
+                .path(folder.path(), NaiveDate::from_ymd_opt(2026, 8, 30).unwrap()),
             "## 09:00\u{2013}09:20 \u{b7} Safari \u{b7} Postgres docs\n\nIndex-only scans.\n",
         )
         .unwrap();

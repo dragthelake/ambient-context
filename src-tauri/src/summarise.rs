@@ -166,18 +166,15 @@ fn dates_in(dir: &Path) -> Vec<NaiveDate> {
     dates
 }
 
+/// Every date with a Days/ folder. Flat 0.1 day files are ignored.
 pub fn list_captured(folder: &Path) -> Vec<NaiveDate> {
-    let days_dir = crate::writer::days_dir(folder);
-    let entries = match std::fs::read_dir(&days_dir) {
-        Ok(entries) => entries,
-        Err(_) => return Vec::new(),
+    let Ok(entries) = std::fs::read_dir(crate::writer::days_dir(folder)) else {
+        return Vec::new();
     };
     let mut dates: Vec<NaiveDate> = entries
         .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().is_dir())
         .filter_map(|entry| {
-            if !entry.file_type().ok()?.is_dir() {
-                return None;
-            }
             NaiveDate::parse_from_str(&entry.file_name().to_string_lossy(), "%Y-%m-%d").ok()
         })
         .collect();
