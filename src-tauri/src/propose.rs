@@ -313,6 +313,7 @@ pub fn propose(
     config_dir: &Path,
     folder: &Path,
     agent: &crate::agent::Agent,
+    env: &std::collections::HashMap<String, String>,
     target: ProposeTarget,
     selection: Selection,
     instruction: &str,
@@ -329,7 +330,7 @@ pub fn propose(
     // which is the cheapest thing that turns a near-miss into a usable
     // answer and the only mitigation this feature gets.
     for attempt in 0..2 {
-        let run = crate::agent::run(agent, &prompt);
+        let run = crate::agent::run_in(agent, &prompt, env);
         if run.timed_out || run.status != 0 {
             let stderr = if run.timed_out {
                 format!("timed out after {}s", agent.timeout_secs)
@@ -653,6 +654,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(GOOD_RULES),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -672,6 +674,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(GOOD_RULES),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -690,6 +693,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent("cat >/dev/null; echo 'not logged in' >&2; exit 1"),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "x",
@@ -713,6 +717,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(&script),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "x",
@@ -735,6 +740,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(script),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "x",
@@ -751,6 +757,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(GOOD_RULES),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -771,6 +778,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(GOOD_RULES),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",
@@ -789,6 +797,7 @@ mod tests {
             config.path(),
             folder.path(),
             &fake_agent(GOOD_RULES),
+            &std::collections::HashMap::new(),
             ProposeTarget::Rules,
             selection(),
             "never record Slack",

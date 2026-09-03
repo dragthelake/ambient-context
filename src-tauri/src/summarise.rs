@@ -74,11 +74,22 @@ pub fn unfence(text: &str) -> &str {
     }
 }
 
-/// Times, ranges and dates. Blanked out of the body before the figure
-/// scan so `2026` and `1100` are never read as claims about quantities.
+/// Times, ranges and dates: the ISO form the prompt uses, and the written
+/// forms a heading takes ("Tuesday 2 September 2026", "September 2, 2026",
+/// "Sep 2026"). Blanked out of the body before the figure scan so `2026`
+/// and `1100` are never read as claims about quantities. The timeline
+/// carries only the ISO form, so a year written out in prose would
+/// otherwise reject the whole day.
 fn clock() -> &'static Regex {
     static CLOCK: OnceLock<Regex> = OnceLock::new();
-    CLOCK.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}|\d{1,2}:\d{2}").unwrap())
+    CLOCK.get_or_init(|| {
+        let month = r"(?i:(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?)";
+        let day = r"\d{1,2}(?:st|nd|rd|th)?";
+        Regex::new(&format!(
+            r"\d{{4}}-\d{{2}}-\d{{2}}|\d{{1,2}}:\d{{2}}|\b{day}\s+{month},?\s+\d{{4}}\b|\b{month}\s+{day},?\s+\d{{4}}\b|\b{month}\s+\d{{4}}\b"
+        ))
+        .unwrap()
+    })
 }
 
 /// A quantity (three digits or more) or a hash. These are the claims a
@@ -423,6 +434,27 @@ mod tests {
         // would all be unsupported figures without the mask.
         let text = good().replace("the thing.", "the thing, carried over from 2026-08-27.");
         assert_eq!(check(&text), Ok(()));
+    }
+
+    #[test]
+    fn dates_written_out_are_not_figures() {
+        // A heading or sentence that writes the year in prose is a date,
+        // not a count, and the evidence only ever carries the ISO form.
+        for phrase in [
+            "carried over from 2 September 2026.",
+            "carried over from Tuesday 2nd September 2026.",
+            "carried over from September 2, 2026.",
+            "carried over from Sept 2026.",
+        ] {
+            let text = good().replace("the thing.", &format!("the thing, {phrase}"));
+            assert_eq!(check(&text), Ok(()), "{phrase}");
+        }
+        // A bare year-sized number is still a figure.
+        let text = good().replace("the thing.", "the thing, 1999 tests green.");
+        assert_eq!(
+            check(&text),
+            Err(Invalid::UnsupportedFigure("1999".to_string()))
+        );
     }
 
     #[test]

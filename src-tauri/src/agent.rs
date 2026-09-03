@@ -25,13 +25,14 @@ pub struct RunOutput {
     pub timed_out: bool,
 }
 
-/// Runs the agent with a freshly captured login-shell environment and
-/// reports the outcome as data. A missing binary is a failure with status
-/// 127 and its explanation on stderr, the same shape a failing CLI
-/// produces.
-pub fn run(agent: &Agent, stdin: &str) -> RunOutput {
-    let env = login_shell_env();
-    match run_with_env(agent, stdin, &env) {
+/// Runs the agent in the given environment and reports the outcome as
+/// data, for callers that ledger a failure rather than match on it. A
+/// missing binary is a failure with status 127 and its explanation on
+/// stderr, the same shape a failing CLI produces. The environment is the
+/// caller's: the app caches the login shell's, and capturing a fresh one
+/// costs two shell spawns.
+pub fn run_in(agent: &Agent, stdin: &str, env: &HashMap<String, String>) -> RunOutput {
+    match run_with_env(agent, stdin, env) {
         Ok(stdout) => RunOutput {
             stdout,
             stderr: String::new(),
@@ -567,7 +568,7 @@ mod tests {
     #[test]
     fn a_nonzero_exit_carries_its_stderr() {
         let agent = agent_for("/bin/sh", &["-c", "echo boom >&2; exit 3"], 10);
-        let out = run(&agent, "x");
+        let out = run_in(&agent, "x", &HashMap::new());
         assert_eq!(out.status, 3);
         assert!(out.stderr.contains("boom"), "stderr was {:?}", out.stderr);
     }
@@ -575,7 +576,7 @@ mod tests {
     #[test]
     fn a_nonzero_exit_falls_back_to_stdout_when_stderr_is_empty() {
         let agent = agent_for("/bin/sh", &["-c", "echo out of tokens; exit 1"], 10);
-        let out = run(&agent, "x");
+        let out = run_in(&agent, "x", &HashMap::new());
         assert_eq!(out.status, 1);
         assert_eq!(out.stderr, "out of tokens");
     }

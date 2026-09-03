@@ -573,14 +573,35 @@ fn tick(app: &AppHandle) {
 
     state.set_running(true);
     let mut finished: Vec<Finished> = Vec::new();
-    for date in pending {
+    // Listed before any of them runs, so the window sees the whole batch
+    // and Stop reaches it, the same as a batch it queued itself. Invisible,
+    // a scheduled run leaves "Process N days" enabled with the same days
+    // in it, and a click summarises each of them twice.
+    let queue = app.state::<JobQueue>();
+    let kind = JobKind::Summarise { force: false };
+    let mut scheduled = pending
+        .into_iter()
+        .map(|date| (queue.track(date, kind), date))
+        .collect::<Vec<_>>()
+        .into_iter();
+    for (id, date) in scheduled.by_ref() {
+        if !should_run(generation, queue.generation()) {
+            queue.record(&id.0, JobStatus::Cancelled);
+            continue;
+        }
+        queue.record(&id.0, JobStatus::Running);
         let started = std::time::Instant::now();
-        let result = run_one(
-            app,
-            date,
-            ledger::Trigger::Schedule,
-            JobKind::Summarise { force: false },
-            |_| {},
+        let result = run_one(app, date, ledger::Trigger::Schedule, kind, |step| {
+            queue.record_step(&id.0, step);
+        });
+        queue.record(
+            &id.0,
+            match &result {
+                Ok(()) => JobStatus::Done,
+                Err(stderr) => JobStatus::Failed {
+                    stderr: stderr.clone(),
+                },
+            },
         );
         let outcome = Outcome {
             when: Local::now(),
@@ -607,6 +628,11 @@ fn tick(app: &AppHandle) {
             // would fail the same way. Stop and let the user see it.
             break;
         }
+    }
+    // The days after a failure never ran. Left as queued they would be
+    // outstanding forever, with the window polling them.
+    for (id, _) in scheduled {
+        queue.record(&id.0, JobStatus::Cancelled);
     }
     // Queued on-demand runs, from the window and from MCP clients named in
     // each job's trigger. A queued failure only stops its own job.
@@ -846,15 +872,25 @@ impl JobQueue {
     }
 
     fn push(&self, date: NaiveDate, kind: JobKind, trigger: ledger::Trigger) -> JobId {
-        use std::sync::atomic::Ordering;
-        let n = self.counter.fetch_add(1, Ordering::SeqCst);
-        let id = format!("job-{n}");
+        let id = self.track(date, kind);
         self.queue.lock().expect("job queue").push_back(QueuedJob {
-            id: id.clone(),
+            id: id.0.clone(),
             date,
             kind,
             trigger,
         });
+        self.work.notify_all();
+        id
+    }
+
+    /// Lists a run in the history without queueing it, for the scheduled
+    /// backfill: the tick runs those days itself, but the window adopts
+    /// what `outstanding` reports and MCP clients read `recent`, and a
+    /// batch neither can see is one the window offers to enqueue again.
+    pub fn track(&self, date: NaiveDate, kind: JobKind) -> JobId {
+        use std::sync::atomic::Ordering;
+        let n = self.counter.fetch_add(1, Ordering::SeqCst);
+        let id = format!("job-{n}");
         self.history.lock().expect("job history").push(JobSummary {
             id: id.clone(),
             date,
@@ -862,7 +898,6 @@ impl JobQueue {
             status: JobStatus::Queued,
             step: None,
         });
-        self.work.notify_all();
         JobId(id)
     }
 
@@ -1888,5 +1923,26 @@ mod tests {
         queue.record(&cancelled.0, JobStatus::Cancelled);
 
         assert_eq!(queue.outstanding(), vec![running.0, still_queued.0]);
+    }
+
+    #[test]
+    fn a_tracked_scheduled_run_is_outstanding_until_it_finishes_and_never_queued() {
+        let queue = JobQueue::for_test();
+        let id = queue.track(day(2026, 8, 28), JobKind::Summarise { force: false });
+        assert_eq!(queue.outstanding(), vec![id.0.clone()]);
+        assert!(
+            queue.find(&id.0).is_some(),
+            "pollable by id like a queued job"
+        );
+        assert!(
+            queue
+                .drain_if_idle(&JobState::with_last_run(None))
+                .is_empty(),
+            "the tick runs it itself; nothing waits in the queue"
+        );
+        queue.record(&id.0, JobStatus::Running);
+        assert_eq!(queue.outstanding(), vec![id.0.clone()]);
+        queue.record(&id.0, JobStatus::Done);
+        assert!(queue.outstanding().is_empty());
     }
 }

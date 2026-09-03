@@ -50,8 +50,11 @@ export function AppSettings() {
           checked={settings.launch_at_login}
           onChange={(event) =>
             void invoke("set_launch_at_login", { enabled: event.target.checked })
+              // A refusal is shown, not swallowed: the setting is saved
+              // before the OS answers, so the box would otherwise claim a
+              // login item the machine does not have.
+              .catch((error) => setAutostartError(String(error)))
               .then(readSettings)
-              .catch(() => undefined)
           }
         />
         <label htmlFor={launchId}>Ambient Context opens when you log in</label>

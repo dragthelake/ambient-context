@@ -169,13 +169,17 @@ export function useDefragState() {
   useEffect(() => {
     if (jobs.length === 0 || done.size < jobs.length) return;
     setActive(null);
-    if (cancelled.size > 0) {
-      setStatus(`Stopped, ${cancelled.size} skipped`);
+    if (failed.size > 0) {
+      // A failure outranks the skips it caused: the scheduled backfill
+      // stops at the first failed day and lists the rest as skipped, and
+      // the reason is the part worth reading.
+      const reason = firstFailure.current ? `: ${firstFailure.current}` : "";
+      const skipped = cancelled.size > 0 ? `, ${cancelled.size} skipped` : "";
+      setStatus(`Finished, ${failed.size} failed${reason}${skipped}`);
       return;
     }
-    if (failed.size > 0) {
-      const reason = firstFailure.current ? `: ${firstFailure.current}` : "";
-      setStatus(`Finished, ${failed.size} failed${reason}`);
+    if (cancelled.size > 0) {
+      setStatus(`Stopped, ${cancelled.size} skipped`);
       return;
     }
     setStatus("Ready");

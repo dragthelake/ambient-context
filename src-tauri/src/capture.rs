@@ -57,8 +57,9 @@ fn is_idle(idle_secs: u64, since: Option<f64>) -> bool {
 
 /// The app must not record itself reading its own record. Matched by the
 /// document or URL path first (editors expose AXDocument), then by a
-/// window title carrying a date together with the folder name or one of
-/// the record's file names.
+/// window title carrying a date: on its own as a file name, which is how
+/// a summary or ledger entry shows in an app that exposes no path, or
+/// together with the folder name or one of the record's file names.
 fn is_own_output(snapshot: &Snapshot, folder: &Path) -> bool {
     let folder_str = folder.to_string_lossy();
     if snapshot
@@ -79,9 +80,13 @@ fn is_own_output(snapshot: &Snapshot, folder: &Path) -> bool {
         return false;
     };
     static DATE: OnceLock<Regex> = OnceLock::new();
-    let date = DATE.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}").unwrap());
-    if !date.is_match(title) {
+    let date = DATE.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}(\.md)?").unwrap());
+    let mut dates = date.find_iter(title).peekable();
+    if dates.peek().is_none() {
         return false;
+    }
+    if dates.any(|found| found.as_str().ends_with(".md")) {
+        return true;
     }
     let folder_name = folder
         .file_name()
@@ -112,6 +117,11 @@ pub struct CaptureState {
     /// outlived a timed-out stop cannot be revived by the next start
     /// flipping `running` back on.
     generation: Arc<AtomicU64>,
+    /// The app the last read found in front, for `capture_status` over
+    /// MCP. Read here it costs nothing; walked again from a socket thread,
+    /// beside the poll thread's own walk, it hit the focused app twice.
+    /// None while capture is off.
+    focused_app: Arc<Mutex<Option<String>>>,
 }
 
 /// What a poll thread checks between reads: still asked to run, and still
@@ -140,6 +150,16 @@ impl CaptureState {
     pub fn blocks_today(&self) -> usize {
         self.blocks_today.load(Ordering::SeqCst)
     }
+
+    pub fn focused_app(&self) -> Option<String> {
+        self.focused_app.lock().ok().and_then(|slot| slot.clone())
+    }
+}
+
+fn set_focused_app(slot: &Mutex<Option<String>>, app: Option<String>) {
+    if let Ok(mut current) = slot.lock() {
+        *current = app;
+    }
 }
 
 /// Spawns the poll thread. Returns immediately. Calling this while already
@@ -151,6 +171,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
     };
 
     let counter = state.blocks_today.clone();
+    let focused = state.focused_app.clone();
 
     let spawned = spawn_tracked(state, move |alive| {
         let mut segmenter = Segmenter::new(settings.min_dwell_secs, settings.similarity_threshold);
@@ -242,6 +263,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 match reader::PlatformReader.snapshot() {
                     Some(raw) => {
                         failed_reads = 0;
+                        set_focused_app(&focused, Some(raw.app.clone()));
                         if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
                             if is_own_output(&clean, &folder) {
                                 // Looking at the capture file is not work worth
@@ -272,6 +294,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                         // A locked screen, a hung target or a dropped read.
                         // Three misses in a row closes the open block, so a
                         // block ends at the lock rather than spanning lunch.
+                        set_focused_app(&focused, None);
                         failed_reads += 1;
                         if failed_reads == 3 {
                             if let Some(block) = segmenter.flush(Local::now()) {
@@ -305,6 +328,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         }
+        set_focused_app(&focused, None);
         crate::tray::refresh(&app, false);
     });
     if !spawned {
@@ -590,6 +614,34 @@ mod tests {
             ..Default::default()
         };
         assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_file_named_for_its_day_is_own_output_without_a_path() {
+        // Summaries/ and Ledger/ files are named for their day, and an app
+        // with no AXDocument shows only that name.
+        let snap = Snapshot {
+            app: "Preview".to_string(),
+            window_title: Some("2026-08-25.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+        let later = Snapshot {
+            app: "Preview".to_string(),
+            window_title: Some("Notes - 2026-08-25.md - edited".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&later, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_focused_app_is_reported_only_while_a_read_has_seen_one() {
+        let state = CaptureState::new();
+        assert_eq!(state.focused_app(), None);
+        set_focused_app(&state.focused_app, Some("Xcode".to_string()));
+        assert_eq!(state.clone().focused_app(), Some("Xcode".to_string()));
+        set_focused_app(&state.focused_app, None);
+        assert_eq!(state.focused_app(), None);
     }
 
     #[test]

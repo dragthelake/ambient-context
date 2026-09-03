@@ -124,4 +124,26 @@ describe("AppSettings", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("shows a refusal the toggle itself provokes rather than swallowing it", async () => {
+    // The setting is saved before the OS answers, so the box would
+    // otherwise sit ticked beside a login item that was never registered.
+    let refused: string | null = null;
+    mockInvoke((command, args) => {
+      if (command === "set_launch_at_login") {
+        refused = "operation not permitted";
+        return Promise.reject(refused);
+      }
+      if (command === "autostart_error") return refused;
+      return handler(command, args);
+    });
+    render(<AppSettings />);
+    fireEvent.click(await screen.findByLabelText("Ambient Context opens when you log in"));
+    expect(
+      await screen.findByText(
+        "Login item could not be updated: operation not permitted",
+      ),
+    ).toBeTruthy();
+    await waitFor(() => expect(callsOf("get_settings").length).toBeGreaterThan(1));
+  });
 });

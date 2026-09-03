@@ -60,7 +60,7 @@ pub fn defs() -> Vec<Def> {
         Def {
             name: "capture_status",
             title: "Capture status",
-            description: "Reports whether capture is running, how many blocks were recorded today, which app is focused, and the eight most recent jobs with their status, kind and step. Poll this after summarise_day or ingest_day to see whether a job finished.",
+            description: "Reports whether capture is running, how many blocks were recorded today, which app was in front at the last poll (null while capture is off), and the eight most recent jobs with their status, kind and step. Poll this after summarise_day or ingest_day to see whether a job finished.",
             input_schema: none(),
             read_only: true, destructive: false, idempotent: true,
         },

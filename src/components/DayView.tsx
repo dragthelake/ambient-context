@@ -154,6 +154,10 @@ export function DayView({ date }: { date?: string } = {}) {
     })();
     const unlisten = listen<string>("open-day", (event) => {
       if (event.payload) selectDate(event.payload);
+      // The same request was also left for a view that was not yet
+      // listening. This one was, so take it: left in place it would be
+      // replayed the next time this view mounts.
+      void invoke("take_pending_day").catch(() => undefined);
     });
     return () => {
       cancelled = true;

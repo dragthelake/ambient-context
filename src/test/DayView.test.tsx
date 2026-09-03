@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { callsOf, countOf, mockInvoke } from "./tauri-mock";
+import { callsOf, countOf, emit, mockInvoke } from "./tauri-mock";
 import { DayView } from "../components/DayView";
 
 vi.mock("@tauri-apps/api/core", async () => {
@@ -111,6 +111,16 @@ describe("DayView", () => {
       expect(callsOf("read_day").some((call) => call.args?.date === "2026-07-04")).toBe(true),
     );
     expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
+  });
+
+  it("takes the pending day again after an open-day event, so a remount cannot replay it", async () => {
+    mockInvoke(handler(null));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("take_pending_day")).toBe(1));
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    emit("open-day", "2026-07-04");
+    expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
+    await waitFor(() => expect(countOf("take_pending_day")).toBe(2));
   });
 
   it("offers three modes, one action under the box, and nothing about ingesting", async () => {

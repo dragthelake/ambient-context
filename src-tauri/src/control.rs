@@ -36,7 +36,9 @@ fn capture_status(app: &AppHandle) -> Response {
     Response::Ok(serde_json::json!({
         "running": state.is_running(),
         "blocks_today": state.blocks_today(),
-        "focused_app": crate::reader::macos::snapshot().map(|snap| snap.app),
+        // What the poll thread last saw, not a second accessibility walk
+        // from this socket thread beside the poll thread's own.
+        "focused_app": state.focused_app(),
         "jobs": queue.recent(),
     }))
 }

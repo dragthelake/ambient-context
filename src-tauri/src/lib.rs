@@ -151,9 +151,12 @@ fn start_if_enabled(app: tauri::AppHandle) -> CaptureStatus {
     }
 }
 
+/// Off the main thread: a stop waits for the poll thread to leave, up to
+/// `capture::STOP_TIMEOUT`, and the window must keep painting meanwhile.
 #[tauri::command]
-fn toggle_capture(app: tauri::AppHandle) -> CaptureStatus {
-    tray::toggle_capture(&app);
+async fn toggle_capture(app: tauri::AppHandle) -> CaptureStatus {
+    let handle = app.clone();
+    let _ = tauri::async_runtime::spawn_blocking(move || tray::toggle_capture(&handle)).await;
     let state = app.state::<capture::CaptureState>();
     CaptureStatus {
         running: state.is_running(),
@@ -575,10 +578,14 @@ async fn propose(
     let config_dir = settings::config_dir(&app);
     let handle = app.clone();
     let proposal = tauri::async_runtime::spawn_blocking(move || {
+        // The cached login-shell environment every other agent path uses.
+        // Computing it afresh costs two shell spawns per attempt.
+        let env = agent_env(&app);
         propose::propose(
             &config_dir,
             &folder,
             &agent,
+            &env,
             target,
             selection,
             &instruction,
@@ -597,34 +604,48 @@ async fn propose(
     Ok(proposal)
 }
 
-#[tauri::command]
-fn apply_proposal(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let proposal = app
-        .state::<ProposalStore>()
+/// A proposal by id, left in the store. It leaves only once the decision
+/// about it has been carried out: taken out first, a failed apply (a
+/// read-only rules file, say) could be neither retried nor discarded, and
+/// the agent run's output would be lost with the popover.
+fn proposal_by_id(app: &tauri::AppHandle, id: &str) -> Result<propose::Proposal, String> {
+    app.state::<ProposalStore>()
         .0
         .lock()
         .expect("proposal store")
-        .remove(&id)
-        .ok_or_else(|| "that proposal is no longer available".to_string())?;
+        .get(id)
+        .cloned()
+        .ok_or_else(|| "that proposal is no longer available".to_string())
+}
+
+fn forget_proposal(app: &tauri::AppHandle, id: &str) {
+    app.state::<ProposalStore>()
+        .0
+        .lock()
+        .expect("proposal store")
+        .remove(id);
+}
+
+#[tauri::command]
+fn apply_proposal(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let proposal = proposal_by_id(&app, &id)?;
     let folder = settings::load(&app)
         .folder
         .ok_or_else(|| "no capture folder is set".to_string())?;
-    propose::apply(&settings::config_dir(&app), &folder, &proposal)
+    propose::apply(&settings::config_dir(&app), &folder, &proposal)?;
+    forget_proposal(&app, &id);
+    Ok(())
 }
 
 #[tauri::command]
 fn discard_proposal(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let proposal = app
-        .state::<ProposalStore>()
-        .0
-        .lock()
-        .expect("proposal store")
-        .remove(&id)
-        .ok_or_else(|| "that proposal is no longer available".to_string())?;
+    let proposal = proposal_by_id(&app, &id)?;
     let folder = settings::load(&app)
         .folder
         .ok_or_else(|| "no capture folder is set".to_string())?;
-    propose::discard(&folder, &proposal).map_err(|e| e.to_string())
+    propose::discard(&folder, &proposal).map_err(|e| e.to_string())?;
+    forget_proposal(&app, &id);
+    Ok(())
 }
 
 #[tauri::command]
@@ -841,9 +862,14 @@ async fn refresh_agent_env(app: tauri::AppHandle) -> Vec<settings::Agent> {
     .unwrap_or_default()
 }
 
+/// Off the main thread: the first caller after launch can find the warm-up
+/// thread still holding the environment lock while its login shells run,
+/// and a sync command would freeze the window until they returned.
 #[tauri::command]
-fn agent_detect(app: tauri::AppHandle) -> Vec<settings::Agent> {
-    agent::detect(&agent_env(&app))
+async fn agent_detect(app: tauri::AppHandle) -> Vec<settings::Agent> {
+    tauri::async_runtime::spawn_blocking(move || agent::detect(&agent_env(&app)))
+        .await
+        .unwrap_or_default()
 }
 
 /// Proves the connection now, in front of someone who can fix it, rather
@@ -1033,11 +1059,19 @@ pub(crate) fn set_launch_at_login_inner(
         None => settings::save(app, &config).map_err(|e| e.to_string())?,
     }
     let manager = app.autolaunch();
-    if enabled {
-        manager.enable().map_err(|e| e.to_string())
+    let outcome = if enabled {
+        manager.enable()
     } else {
-        manager.disable().map_err(|e| e.to_string())
+        manager.disable()
     }
+    .map_err(|e| e.to_string());
+    // Remembered either way. The page reads this on its next mount, and a
+    // refusal the OS gives now must show there exactly as one found at
+    // startup does; a success clears an earlier failure.
+    if let Ok(mut slot) = app.state::<AutostartState>().0.lock() {
+        *slot = outcome.clone().err();
+    }
+    outcome
 }
 
 /// The Overview tab's way back to first-run setup, for the case it is
@@ -1579,9 +1613,10 @@ impl PendingOpenDay {
     }
 }
 
-/// Read once, on mount, by the Day view. Taking it clears it, so a later
-/// reload shows the day the user last chose rather than replaying an old
-/// request.
+/// Read by the Day view on mount, and again after it handles an `open-day`
+/// event, since both carry the same request. Taking it clears it, so a
+/// later mount shows the day the user last chose rather than replaying an
+/// old request.
 #[tauri::command]
 fn take_pending_day(app: tauri::AppHandle) -> Option<String> {
     app.state::<PendingOpenDay>().take()
@@ -1594,7 +1629,10 @@ fn take_pending_day(app: tauri::AppHandle) -> Option<String> {
 pub fn open_main_window_on(app: &tauri::AppHandle, date: chrono::NaiveDate) {
     let date = date.to_string();
     app.state::<PendingOpenDay>().put(date.clone());
-    open_main_window(app);
+    // The Day view is the only thing that collects the request, and it is
+    // mounted only while the Context tab is chosen: a cold open lands on
+    // that tab by URL, an open window is switched to it by event.
+    open_main_window_with_tab(app, Some("context"));
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.emit("open-day", date);
     }
