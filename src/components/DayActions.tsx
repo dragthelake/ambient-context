@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { DayFile } from "../lib/days";
+import type { DayFile, KnowledgeSection } from "../lib/days";
 import type { DayMode } from "./DayView";
 
 export type DayActionsProps = {
   date: string;
   mode: DayMode;
   rawFile: DayFile;
+  section: KnowledgeSection;
   running: boolean;
   hasAgent: boolean;
   hasKnowledge: boolean;
@@ -76,6 +77,7 @@ export function DayActions({
   date,
   mode,
   rawFile,
+  section,
   running,
   hasAgent,
   hasKnowledge,
@@ -88,11 +90,17 @@ export function DayActions({
 
   const onOpen = async () => {
     try {
-      // "context" is not a file the backend knows: it is whichever of the
-      // three day files the strip above is showing.
+      // Neither "context" nor "knowledge" is a file the backend knows: each
+      // is whichever file the strip above is showing, one of the three day
+      // files or one of the six knowledge sections.
       await invoke("open_in_editor", {
         date,
-        which: mode === "notes" ? "summary" : mode === "knowledge" ? "kb" : rawFile,
+        which:
+          mode === "notes"
+            ? "summary"
+            : mode === "knowledge"
+              ? `kb/${section}`
+              : rawFile,
       });
       setActionError(null);
     } catch (error) {

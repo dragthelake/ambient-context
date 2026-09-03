@@ -26,16 +26,17 @@ export function AppSettings() {
 
   /// An empty field means the system handler, which is None on the Rust
   /// side, not an empty path that would fail to open anything.
-  const saveEditor = useCallback(
-    async (path: string) => {
-      if (!settings) return;
-      const next = { ...settings, editor: path.trim() === "" ? null : path.trim() };
-      await invoke("set_settings", { next });
-      setSettings(next);
-      setEditor(next.editor ?? "");
-    },
-    [settings],
-  );
+  ///
+  /// Read before write, for the reason `RecordingSettings` gives: this panel
+  /// sends the whole settings object, so anything another panel changed
+  /// since mount would be put back from a stale snapshot.
+  const saveEditor = useCallback(async (path: string) => {
+    const current = await invoke<Settings>("get_settings");
+    const next = { ...current, editor: path.trim() === "" ? null : path.trim() };
+    await invoke("set_settings", { next });
+    setSettings(next);
+    setEditor(next.editor ?? "");
+  }, []);
 
   if (!settings) return null;
 

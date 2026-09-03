@@ -212,6 +212,10 @@ fn parse_day_file(file: Option<String>) -> Result<writer::DayFile, String> {
 
 /// Which file a Day view action means. Unknown values return None rather
 /// than defaulting, so a typo opens nothing instead of the wrong file.
+///
+/// The knowledge is six files rather than one, and the Knowledge tab shows
+/// them a section at a time, so it names the section it is showing as
+/// `kb/<file>.md`. A name that is not one of the six is not a file.
 fn target_path(
     folder: &std::path::Path,
     date: chrono::NaiveDate,
@@ -222,8 +226,10 @@ fn target_path(
             writer::DayFile::from_name(which).map(|f| f.path(folder, date))
         }
         "summary" => Some(summarise::summary_path(folder, date)),
-        "kb" => Some(crate::ingest::kb_dir(folder, date).join("threads.md")),
-        _ => None,
+        other => other
+            .strip_prefix("kb/")
+            .filter(|file| crate::ingest::KB_FILES.contains(file))
+            .map(|file| crate::ingest::kb_dir(folder, date).join(file)),
     }
 }
 
@@ -1090,10 +1096,33 @@ mod tests {
             std::path::PathBuf::from("/f/Summaries/2026-09-02.md")
         );
         assert_eq!(
-            target_path(f, d, "kb").unwrap(),
+            target_path(f, d, "kb/threads.md").unwrap(),
             std::path::PathBuf::from("/f/KB/2026-09-02/threads.md")
         );
         assert!(target_path(f, d, "day").is_none());
+    }
+
+    #[test]
+    fn every_knowledge_section_opens_its_own_file() {
+        // Open in editor used to resolve every section to threads.md, so
+        // five of the six opened a file the reader was not looking at.
+        let f = std::path::Path::new("/f");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        for file in crate::ingest::KB_FILES {
+            assert_eq!(
+                target_path(f, d, &format!("kb/{file}")).unwrap(),
+                std::path::PathBuf::from(format!("/f/KB/2026-09-02/{file}"))
+            );
+        }
+    }
+
+    #[test]
+    fn a_knowledge_name_that_is_not_one_of_the_six_opens_nothing() {
+        let f = std::path::Path::new("/f");
+        let d = chrono::NaiveDate::from_ymd_opt(2026, 9, 2).unwrap();
+        assert_eq!(target_path(f, d, "kb/manifest.md"), None);
+        assert_eq!(target_path(f, d, "kb/../../etc/passwd"), None);
+        assert_eq!(target_path(f, d, "kb"), None);
     }
 
     #[test]

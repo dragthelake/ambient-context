@@ -22,9 +22,14 @@ export function RecordingSettings() {
   /// Returns the backend's refusal, or null when the save went through. A
   /// refused save leaves the component's state alone, so the draft the user
   /// is looking at is still the draft they typed.
+  ///
+  /// `set_settings` takes the whole object and has no merge, and the other
+  /// panels on this page write it too, so the change is applied to a value
+  /// read now rather than to the one this panel loaded at mount. Without
+  /// that, editing a field here puts back whatever the folder picker or the
+  /// Application panel changed in between.
   const save = useCallback(async (change: (next: Settings) => Settings) => {
-    if (!settings) return null;
-    const next = change({ ...settings });
+    const next = change(await invoke<Settings>("get_settings"));
     try {
       await invoke("set_settings", { next });
     } catch (error) {
@@ -32,7 +37,7 @@ export function RecordingSettings() {
     }
     setSettings(next);
     return null;
-  }, [settings]);
+  }, []);
 
   if (!settings) return null;
 

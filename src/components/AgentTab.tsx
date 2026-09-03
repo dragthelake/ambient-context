@@ -85,20 +85,19 @@ export function AgentTab() {
     })();
   }, [readSettings]);
 
-  const save = useCallback(
-    async (change: (next: Settings) => Settings) => {
-      if (!settings) return;
-      setSaving(true);
-      try {
-        const next = change({ ...settings });
-        await invoke("set_settings", { next });
-        setSettings(next);
-      } finally {
-        setSaving(false);
-      }
-    },
-    [settings],
-  );
+  /// Applied to settings read now, not to the snapshot this tab loaded:
+  /// `set_settings` writes the whole object with no merge, and the Settings
+  /// page can change the folder or the editor while this tab is mounted.
+  const save = useCallback(async (change: (next: Settings) => Settings) => {
+    setSaving(true);
+    try {
+      const next = change(await invoke<Settings>("get_settings"));
+      await invoke("set_settings", { next });
+      setSettings(next);
+    } finally {
+      setSaving(false);
+    }
+  }, []);
 
   const detectedCommands = detected.map((d) => d.agent.command).join("\n");
 

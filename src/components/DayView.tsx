@@ -27,6 +27,19 @@ export type Outcome = {
 /// it, Notes the written day.
 export type DayMode = "context" | "knowledge" | "notes";
 
+/// Whether a keystroke belongs to whatever the user is typing into rather
+/// than to the day-navigation shortcuts. The propose popover's textarea and
+/// the day picker's inputs both sit inside this view, and a global keydown
+/// listener sees their keys too.
+export function isTypingTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    (target instanceof HTMLElement && target.isContentEditable)
+  );
+}
+
 /// Compare two outcomes by value: `job_status` returns a fresh object every
 /// call, and setting an equal-but-new one re-renders the whole day for nothing.
 function sameOutcome(a: Outcome | null, b: Outcome | null): boolean {
@@ -227,9 +240,12 @@ export function DayView({ date }: { date?: string } = {}) {
   );
   const onToday = useCallback(() => selectDate(todayIso()), [selectDate]);
 
+  // A window listener sees keystrokes a focused field is already using, so
+  // typing a note in the propose popover's textarea would otherwise jump the
+  // day. Every kind of editable target is skipped, not just <input>.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.target instanceof HTMLInputElement) return;
+      if (isTypingTarget(event.target)) return;
       if (event.key === "ArrowLeft") onPrev();
       if (event.key === "ArrowRight") onNext();
       if (event.key.toLowerCase() === "t") onToday();
@@ -432,6 +448,7 @@ export function DayView({ date }: { date?: string } = {}) {
           date={selected}
           mode={mode}
           rawFile={rawFile}
+          section={section}
           running={running}
           hasAgent={hasAgent}
           hasKnowledge={hasKnowledge}

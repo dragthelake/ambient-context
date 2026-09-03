@@ -258,8 +258,16 @@ pub mod writes {
             }
             merged.insert(key, value);
         }
-        serde_json::from_value::<settings::Settings>(serde_json::Value::Object(merged))
-            .map_err(|error| ("invalid", error.to_string()))
+        let patched: settings::Settings =
+            serde_json::from_value(serde_json::Value::Object(merged))
+                .map_err(|error| ("invalid", error.to_string()))?;
+        // The same check the Settings page runs. An extra redaction pattern
+        // that is not a regex is dropped silently at capture time, so a patch
+        // that carried one would be answered ok, ledgered as applied, and
+        // redact nothing. Validating here rather than in `set_config` means
+        // no caller can reach a saved `Settings` without passing it.
+        crate::check_settings(&patched).map_err(|message| ("invalid", message))?;
+        Ok(patched)
     }
 
     /// Hashes a file as it stands now. Called before a write, because that
@@ -664,5 +672,34 @@ mod tests {
     fn a_patch_that_is_not_an_object_is_refused() {
         let error = apply_patch(&Settings::default(), serde_json::json!([1, 2])).unwrap_err();
         assert_eq!(error.0, "invalid");
+    }
+
+    #[test]
+    fn a_redaction_pattern_that_is_not_a_regex_is_refused_here_too() {
+        // The Settings page refuses this value. A patch that got past this
+        // handler would be answered ok and ledgered as applied, and then
+        // dropped silently at capture time, so the user would believe text
+        // was being redacted that never was.
+        let error = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "extra_redaction_patterns": ["fine", "([bad"] }),
+        )
+        .unwrap_err();
+        assert_eq!(error.0, "invalid");
+        assert!(
+            error.1.contains("pattern 2 is not a valid regular expression"),
+            "{}",
+            error.1
+        );
+    }
+
+    #[test]
+    fn valid_redaction_patterns_still_go_through() {
+        let patched = apply_patch(
+            &Settings::default(),
+            serde_json::json!({ "extra_redaction_patterns": ["[A-Z]{3}-\\d+"] }),
+        )
+        .unwrap();
+        assert_eq!(patched.extra_redaction_patterns, vec!["[A-Z]{3}-\\d+"]);
     }
 }

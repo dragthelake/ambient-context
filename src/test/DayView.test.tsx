@@ -54,6 +54,8 @@ function handler(
           message: "done",
           took_ms: 252000,
         };
+      case "open_in_editor":
+        return null;
       case "read_day_blocks":
         return [];
       case "website_totals":
@@ -170,6 +172,38 @@ describe("DayView", () => {
     expect(await screen.findByText("the eye stutters")).toBeTruthy();
     expect(screen.queryByText("Dan")).toBeNull();
     expect(screen.getByRole("button", { name: "Regenerate" })).toBeTruthy();
+  });
+
+  it("opens the knowledge section on screen, not always the first one", async () => {
+    // The command used to resolve every section to threads.md, so five of
+    // the six opened a file the reader was not looking at.
+    const knowledge = "# people.md\n\n## Dan\nAsked for the notch\n\n# issues.md\n\n- the eye stutters\n";
+    mockInvoke(handler(null, null, knowledge));
+    render(<DayView />);
+    await waitFor(() => expect(countOf("list_days")).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("tab", { name: "Knowledge" }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Issues" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open in editor" }));
+    await waitFor(() => expect(countOf("open_in_editor")).toBe(1));
+    expect(callsOf("open_in_editor")[0].args?.which).toBe("kb/issues.md");
+  });
+
+  it("leaves the day alone while a textarea has the keystroke", async () => {
+    // The propose popover renders a textarea inside this view, and the day
+    // shortcuts listen on the window, so typing "t" used to jump to today
+    // and the arrow keys used to move a day.
+    mockInvoke(handler("2026-07-04"));
+    render(<DayView />);
+    expect(await screen.findByText(/4 July 2026/)).toBeTruthy();
+    const typing = document.createElement("textarea");
+    document.body.appendChild(typing);
+    fireEvent.keyDown(typing, { key: "t" });
+    fireEvent.keyDown(typing, { key: "ArrowRight" });
+    expect(screen.getByText(/4 July 2026/)).toBeTruthy();
+    // The same keys still work when nothing is being typed into.
+    fireEvent.keyDown(document.body, { key: "ArrowRight" });
+    expect(await screen.findByText(/5 July 2026/)).toBeTruthy();
+    typing.remove();
   });
 
   it("switches the record pane between apps, websites and messages", async () => {
