@@ -215,6 +215,7 @@ pub mod writes {
         "ingest_max_chars",
         "write_references",
         "extra_redaction_patterns",
+        "check_updates",
     ];
 
     pub fn apply_patch(

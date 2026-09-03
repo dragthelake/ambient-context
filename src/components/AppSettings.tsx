@@ -11,6 +11,7 @@ export function AppSettings() {
   const [editor, setEditor] = useState("");
   const [autostartError, setAutostartError] = useState<string | null>(null);
   const launchId = useId();
+  const updatesId = useId();
   const editorId = useId();
 
   const readSettings = useCallback(async () => {
@@ -33,6 +34,15 @@ export function AppSettings() {
   const saveEditor = useCallback(async (path: string) => {
     const current = await invoke<Settings>("get_settings");
     const next = { ...current, editor: path.trim() === "" ? null : path.trim() };
+    await invoke("set_settings", { next });
+    setSettings(next);
+    setEditor(next.editor ?? "");
+  }, []);
+
+  /// Read before write, as `saveEditor` does and for the same reason.
+  const saveCheckUpdates = useCallback(async (enabled: boolean) => {
+    const current = await invoke<Settings>("get_settings");
+    const next = { ...current, check_updates: enabled };
     await invoke("set_settings", { next });
     setSettings(next);
     setEditor(next.editor ?? "");
@@ -68,6 +78,22 @@ export function AppSettings() {
           Login item could not be updated: {autostartError}
         </p>
       ) : null}
+
+      <div className="field-row">
+        <input
+          type="checkbox"
+          id={updatesId}
+          checked={settings.check_updates}
+          onChange={(event) => void saveCheckUpdates(event.target.checked)}
+        />
+        <label htmlFor={updatesId}>Check for updates automatically</label>
+      </div>
+      <p className="settings-note">
+        Asks GitHub Releases for a newer version shortly after launch and
+        every six hours. No capture content is sent; GitHub sees the request
+        itself, as with any download. You can always check from the menu
+        bar.
+      </p>
 
       <div className="field-row-stacked">
         <label htmlFor={editorId}>Open files with</label>
