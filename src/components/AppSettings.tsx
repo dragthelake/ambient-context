@@ -45,6 +45,7 @@ export function AppSettings() {
     const next = { ...current, check_updates: enabled };
     await invoke("set_settings", { next });
     setSettings(next);
+    setEditor(next.editor ?? "");
   }, []);
 
   if (!settings) return null;
@@ -89,8 +90,9 @@ export function AppSettings() {
       </div>
       <p className="settings-note">
         Asks GitHub Releases for a newer version shortly after launch and
-        every six hours. Nothing about you or your record is sent. You can
-        always check from the menu bar.
+        every six hours. No capture content is sent; GitHub sees the request
+        itself, as with any download. You can always check from the menu
+        bar.
       </p>
 
       <div className="field-row-stacked">

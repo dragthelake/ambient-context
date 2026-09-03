@@ -98,15 +98,19 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
     let about = MenuItem::with_id(app, "about", "About\u{2026}", true, None::<&str>)?;
     let update = {
         // The one item whose label the background check changes: an offer
-        // to install once a version is held, a manual check until then.
-        let pending = app
+        // to install once a version is held, a progress note while it
+        // installs, a manual check until then. Disabled during the install
+        // so a second click cannot mean something different from the first.
+        let offer = app
             .try_state::<crate::update::UpdateState>()
-            .and_then(|state| state.pending_version());
+            .map(|state| state.offer())
+            .unwrap_or(crate::update::Offer::None);
+        let enabled = !matches!(offer, crate::update::Offer::Installing(_));
         MenuItem::with_id(
             app,
             "update",
-            crate::update::menu_label(pending.as_deref()),
-            true,
+            crate::update::menu_label(&offer),
+            enabled,
             None::<&str>,
         )?
     };
