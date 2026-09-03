@@ -32,3 +32,4 @@ dist-ssr
 
 # Local agent plans, specs, reviews and scratch (not for the public tree)
 .superpowers/
+.cursor/rules/no-cursor-contributor.mdc
