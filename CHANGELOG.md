@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.0.1
+
+The app now updates itself. A 1.0.0 install has no updater and must be
+replaced by hand with this release; from 1.0.1 on, a new version arrives
+as a notification and a menu bar item.
+
+### Automatic updates
+
+- **Background check** thirty seconds after launch and every six hours,
+  on its own thread so it runs whether or not a folder or agent is set
+  up. Offline or a GitHub error is logged and never shown.
+- **One notification per version per launch:** "Version X is available.
+  Update from the menu bar."
+- **Menu bar:** a standing **Check for Updates…** item under About…. While
+  a version is held it reads **Update to X…**; clicking it downloads,
+  verifies the signature, installs, flushes the open capture block the way
+  Quit does, and relaunches. During the install it reads **Installing X…**
+  and is disabled. With nothing held it runs the check and reports the
+  outcome.
+- **About window:** a **Check for updates** button that runs the same
+  check with its dialogs.
+- **Setting:** Check for updates automatically, on by default, under
+  Application; also `check_updates` over MCP `set_config`. Off leaves the
+  manual paths only.
+- The privacy document's network table says when the check runs and what
+  it sends.
+
+### Release and docs
+
+- **Disk image renamed.** Releases carry `Ambient-Context-<version>.dmg`
+  and a fixed-name `Ambient-Context.dmg`, so a direct download link stays
+  valid from one release to the next.
+- **README rewritten** around why the record exists, with product
+  screenshots, the 1.0.0 demo, and a download button above the fold.
+
 ## 1.0.0
 
 First public release. The 0.2.0 pipeline (per-day folders, a cited
