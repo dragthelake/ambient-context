@@ -53,3 +53,26 @@ jobs:
           releaseName: Ambient Context ${{ github.ref_name }}
           releaseDraft: true
           args: --target aarch64-apple-darwin
+
+      # tauri-action names the disk image "Ambient Context_1.0.1_aarch64.dmg"
+      # and GitHub turns the space into a dot on upload. Two cleaner names
+      # replace it on the draft: a versioned one for the Releases page, and a
+      # fixed one so a direct download link never goes stale between
+      # releases. The updater bundle and its signature are left alone;
+      # latest.json points at them.
+      - name: Name the disk image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          built="$(find src-tauri/target -path '*/release/bundle/dmg/*.dmg' -print -quit)"
+          test -n "$built" || { echo "no dmg under the bundle directory" >&2; exit 1; }
+          cp "$built" "Ambient-Context-${version}.dmg"
+          cp "$built" "Ambient-Context.dmg"
+          gh release upload "$TAG" "Ambient-Context-${version}.dmg" "Ambient-Context.dmg" --clobber
+          # The asset name GitHub gave the original, spaces already dotted.
+          original="$(basename "$built" | tr ' ' '.')"
+          gh release delete-asset "$TAG" "$original" --yes
+          gh release view "$TAG" --json assets --jq '.assets[].name'
