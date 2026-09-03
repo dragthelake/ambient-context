@@ -123,10 +123,10 @@ digit-varying re-captures at both block and day scope. Short identifiers
 those two days: roughly 10% smaller output on top of the existing dedup,
 with no real content lost in sampling.
 
-**A prompt for turning a day into context.** The bundled day-context prompt
+**A prompt for turning a day into context.** `docs/day-context-prompt.md`
 distils a captured day into a compact summary another LLM can work from:
 timeline sessions, work and outcomes, open loops, and a capped
-"worth remembering" list.
+"worth remembering" list. Treat it as a starting point.
 
 **Licences.** The project is now MIT. The bundled Funnel fonts carry their
 SIL OFL text.
