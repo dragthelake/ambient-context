@@ -73,6 +73,12 @@ export function About() {
             <button type="button" onClick={() => open(GITHUB_NEW_ISSUE)}>
               Report a bug
             </button>
+            <button
+              type="button"
+              onClick={() => void invoke("check_for_updates_now")}
+            >
+              Check for updates
+            </button>
           </div>
         </section>
       </div>

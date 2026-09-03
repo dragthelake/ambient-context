@@ -20,6 +20,7 @@ mod segment;
 mod settings;
 mod summarise;
 mod tray;
+mod update;
 mod window_chrome;
 mod writer;
 
@@ -27,8 +28,7 @@ use serde::Serialize;
 use std::os::unix::fs::PermissionsExt;
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
 fn permission_status() -> String {
@@ -1735,73 +1735,10 @@ pub fn open_setup_window(app: &tauri::AppHandle) {
     }
 }
 
-pub fn check_for_updates(app: &tauri::AppHandle) {
-    let handle = app.clone();
-    tauri::async_runtime::spawn(async move {
-        let updater = match handle.updater() {
-            Ok(updater) => updater,
-            Err(error) => {
-                show_update_message(
-                    &handle,
-                    MessageDialogKind::Error,
-                    &format!("Could not check for updates.\n{error}"),
-                );
-                return;
-            }
-        };
-
-        match updater.check().await {
-            Ok(Some(update)) => {
-                let install = handle
-                    .dialog()
-                    .message(format!(
-                        "Version {} is available. Install it now?",
-                        update.version
-                    ))
-                    .title("Ambient Context")
-                    .kind(MessageDialogKind::Info)
-                    .buttons(MessageDialogButtons::OkCancelCustom(
-                        "Install".to_string(),
-                        "Later".to_string(),
-                    ))
-                    .blocking_show();
-                if !install {
-                    return;
-                }
-                if let Err(error) = update.download_and_install(|_, _| {}, || {}).await {
-                    show_update_message(
-                        &handle,
-                        MessageDialogKind::Error,
-                        &format!("The update failed.\n{error}"),
-                    );
-                    return;
-                }
-                handle.restart();
-            }
-            Ok(None) => {
-                show_update_message(
-                    &handle,
-                    MessageDialogKind::Info,
-                    "You're on the latest version.",
-                );
-            }
-            Err(error) => {
-                show_update_message(
-                    &handle,
-                    MessageDialogKind::Error,
-                    &format!("Could not check for updates.\n{error}"),
-                );
-            }
-        }
-    });
-}
-
-fn show_update_message(app: &tauri::AppHandle, kind: MessageDialogKind, message: &str) {
-    app.dialog()
-        .message(message)
-        .title("Ambient Context")
-        .kind(kind)
-        .blocking_show();
+/// The About window's button. The outcome is shown by the check itself.
+#[tauri::command]
+fn check_for_updates_now(app: tauri::AppHandle) {
+    update::check_interactive(&app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1864,7 +1801,8 @@ pub fn run() {
             discard_proposal,
             copy_context,
             mcp_registration,
-            take_pending_day
+            take_pending_day,
+            check_for_updates_now
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1894,7 +1832,9 @@ pub fn run() {
             app.manage(jobs::JobQueue::default());
             app.manage(ProposalStore::default());
             app.manage(PendingOpenDay::default());
+            app.manage(update::UpdateState::default());
             jobs::start(app.handle().clone());
+            update::start(app.handle().clone());
             // The control socket, for the mcp subcommand. A failure to bind is
             // reported to stderr and nothing else: an app that will not start
             // because an MCP socket is busy is worse than an app with no MCP.

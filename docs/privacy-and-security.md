@@ -96,7 +96,7 @@ synced.
 
 | Channel | When | What leaves |
 | --- | --- | --- |
-| GitHub Releases updater | When you check for updates | Version check against the configured `latest.json` endpoint; download if you install |
+| GitHub Releases updater | Shortly after launch and every six hours while running, unless you turn the check off in Settings (it is on by default); and whenever you choose Check for Updates | Version check against the configured `latest.json` endpoint; the signed bundle is downloaded only when you install |
 | `open_link` | When you press a link in the UI | Opens a URL in your default browser |
 | Agent CLI | When you process a day | Prompt and capture excerpts you already stored, under that CLI's own network and retention policy |
 | MCP client | When a client connects | Whatever that client reads or writes over the local socket / stdio bridge |
