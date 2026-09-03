@@ -84,7 +84,7 @@ describe("the two stylesheets", () => {
       (rule) => rule.selector.startsWith("button:active") && rule.decls.has("box-shadow"),
     );
     expect(pressed).toHaveLength(1);
-    for (const excluded of [".titlebar-button", ".tab", ".defrag-cell", ".link-button"]) {
+    for (const excluded of [".tab", ".defrag-cell", ".link-button"]) {
       expect(pressed[0].selector).toContain(`:not(${excluded})`);
     }
   });

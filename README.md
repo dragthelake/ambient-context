@@ -95,8 +95,8 @@ format and how to read it well.
   known cost of the mechanism.
 - GPU-rendered terminals (Kitty, Alacritty) expose little or no text.
   Terminal.app and iTerm2 work.
-- Capture your findings: which apps come back rich, partial or empty is
-  exactly the feedback that helps (`docs/census.md` has the template).
+- If an app comes back empty or thin, open an issue with the app name and
+  what you were doing in it.
 
 ## Tests
 

@@ -387,8 +387,8 @@ pub fn normalize_claude_agent(agent: &mut Agent) {
 }
 
 /// Label, binary name, and the argv that makes it read one prompt from
-/// stdin and print one answer to stdout. Taken verbatim from
-/// docs/engine-spike.md; do not invent entries for CLIs nobody has run.
+/// stdin and print one answer to stdout. Only CLIs verified on a real
+/// machine belong here; do not invent entries for ones nobody has run.
 const PRESETS: &[(&str, &str, &[&str])] = &[
     ("Claude Code", "claude", CLAUDE_CODE_ARGS),
     (
@@ -398,11 +398,10 @@ const PRESETS: &[(&str, &str, &[&str])] = &[
     ),
     ("opencode", "opencode", &["run"]),
 ];
-// Not presets, per the spike: cursor-agent (its headless mode gates on
-// per-directory workspace trust and the only bypass also force-allows
-// commands), and goose, gemini, amp and copilot (not installed on the
-// build machine, so unverified). All are reachable through the manual
-// template in Settings.
+// Not presets: cursor-agent (its headless mode gates on per-directory
+// workspace trust and the only bypass also force-allows commands), and
+// goose, gemini, amp and copilot (not verified on the build machine). All
+// are reachable through the manual template in Settings.
 
 /// Resolves a binary name against a PATH, the way a shell would. Used
 /// instead of shelling out to `which` so detection cannot itself depend on

@@ -123,10 +123,10 @@ digit-varying re-captures at both block and day scope. Short identifiers
 those two days: roughly 10% smaller output on top of the existing dedup,
 with no real content lost in sampling.
 
-**A prompt for turning a day into context.** `docs/day-context-prompt.md`
+**A prompt for turning a day into context.** The bundled day-context prompt
 distils a captured day into a compact summary another LLM can work from:
 timeline sessions, work and outcomes, open loops, and a capped
-"worth remembering" list. Treat it as a starting point.
+"worth remembering" list.
 
 **Licences.** The project is now MIT. The bundled Funnel fonts carry their
 SIL OFL text.
@@ -182,6 +182,3 @@ mine.
   capture in those apps are thin.
 - GPU-rendered terminals (Kitty, Alacritty) expose little or no text.
   Terminal.app and iTerm2 work.
-- The systematic coverage census (which apps come back rich, partial or
-  empty, and what always-on Chromium accessibility costs in CPU and
-  memory) has not been run yet. `docs/census.md` has the template.

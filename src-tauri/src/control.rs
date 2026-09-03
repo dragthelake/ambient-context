@@ -258,9 +258,8 @@ pub mod writes {
             }
             merged.insert(key, value);
         }
-        let patched: settings::Settings =
-            serde_json::from_value(serde_json::Value::Object(merged))
-                .map_err(|error| ("invalid", error.to_string()))?;
+        let patched: settings::Settings = serde_json::from_value(serde_json::Value::Object(merged))
+            .map_err(|error| ("invalid", error.to_string()))?;
         // The same check the Settings page runs. An extra redaction pattern
         // that is not a regex is dropped silently at capture time, so a patch
         // that carried one would be answered ok, ledgered as applied, and
@@ -687,7 +686,9 @@ mod tests {
         .unwrap_err();
         assert_eq!(error.0, "invalid");
         assert!(
-            error.1.contains("pattern 2 is not a valid regular expression"),
+            error
+                .1
+                .contains("pattern 2 is not a valid regular expression"),
             "{}",
             error.1
         );

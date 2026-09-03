@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { CLOSE_GLYPH, PixelGlyph } from "./PixelGlyph";
 import { EyePanel } from "./EyePanel";
 import { useAppStatus, type CaptureStatus } from "../lib/status";
 import { looksSynced } from "./StorageSettings";
@@ -49,14 +48,9 @@ export function Setup() {
         <span className="titlebar-text" data-tauri-drag-region>
           AMBIENT_CONTEXT
         </span>
-        <button
-          type="button"
-          className="titlebar-button"
-          aria-label="Close settings"
-          onClick={closeWindow}
-        >
-          <PixelGlyph pattern={CLOSE_GLYPH} />
-        </button>
+        <div className="titlebar-controls">
+          <button type="button" aria-label="Close settings" onClick={closeWindow} />
+        </div>
       </div>
 
       <div className="window-body">

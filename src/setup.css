@@ -133,46 +133,47 @@ body {
   letter-spacing: 0.08em;
 }
 
-/* Circular, 16px, which is the reference's button width and fits the 22px
-   title bar with its 2px padding and a pixel to spare.
+/* The 98.css title bar close control: 16x14, bevelled, with the period
+   bitmap X. Shared by every window that draws its own title bar, so setup
+   and About close the same way and there is one control to keep in step.
 
-   Flat on purpose. A bevel does not survive at this size on a circle. An
-   offset inset shadow displaces the interior instead of making a ring,
-   which is why the radios in Settings are SVG arcs; and a conic gradient
-   painting a two-tone ring notches visibly where its light and dark halves
-   meet, with the thickness going uneven around the curve. One flat disc
-   and one solid outline is what reads cleanly at 16px. */
-.titlebar-button {
+   Both minimums are reset, not only the width. The generic button rule
+   sets a 75px min-width and a 23px min-height, and a minimum outranks a
+   height, so leaving min-height alone stretches the control and the X
+   stops landing on whole pixels. */
+.titlebar-controls {
+  display: flex;
+}
+
+.titlebar-controls button {
   appearance: none;
-  width: 16px;
-  height: 16px;
-  min-width: 0;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  border: 1px solid var(--chrome-darker);
-  background: var(--chrome);
-  color: var(--ink);
-  /* Explicitly off, not merely unset: the generic `button` rule below sets
-     --bevel-out, whose offset inset shadows smear on a circle. */
-  box-shadow: none;
-}
-
-/* The glyph inherits the button's ink, so pressed and disabled states
-   carry it without a second colour to keep in step. */
-.pixel-glyph {
   display: block;
-  fill: currentColor;
+  width: 16px;
+  height: 14px;
+  min-width: 16px;
+  min-height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  color: transparent;
+  background-color: var(--chrome);
+  box-shadow: var(--bevel-out);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg width='8' height='7' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M0 0h2v1h1v1h2V1h1V0h2v1H7v1H6v1H5v1h1v1h1v1h1v1H6V6H5V5H3v1H2v1H0V6h1V5h1V4h1V3H2V2H1V1H0V0z' fill='%23000'/%3E%3C/svg%3E");
+  background-position: top 3px left 4px;
+  background-repeat: no-repeat;
 }
 
-/* Pressed: the disc darkens. No glyph nudge, which is the other half of
-   keeping this simple: `padding: 1px 0 0 1px` on a fixed-height button only
-   ever moved the glyph sideways, because centring inside a box one pixel
-   shorter resolves to the same row. */
-.titlebar-button:active {
-  background: var(--chrome-dark);
+/* Named rather than left to the generic press rule, so the control keeps
+   its sink whatever that rule's exclusion list does later. */
+.titlebar-controls button:active {
+  box-shadow: var(--bevel-in);
 }
+
+.titlebar-controls button:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
 
 /* Body */
 
@@ -347,7 +348,7 @@ button {
    text-shadow. It never repads: padding shifts change the box size and
    move every neighbour, which is wrong for tabs, map cells, and the
    compact controls in the day view. */
-button:active:not(:disabled):not(.titlebar-button):not(.tab):not(.defrag-cell):not(.link-button):not(.overview-note) {
+button:active:not(:disabled):not(.tab):not(.defrag-cell):not(.link-button):not(.overview-note) {
   box-shadow: var(--bevel-in);
   text-shadow: 1px 1px 0 var(--ink);
 }
@@ -470,39 +471,6 @@ button:disabled {
 
 /* About */
 
-.about-window .titlebar-controls {
-  display: flex;
-}
-
-/* The 98.css title-bar close control: 16x14, bevelled, bitmap X. Only
-   About uses this; setup keeps the circular pixel close. */
-.about-window .titlebar-controls button {
-  appearance: none;
-  display: block;
-  width: 16px;
-  height: 14px;
-  min-width: 16px;
-  min-height: 14px;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  color: transparent;
-  background-color: var(--chrome);
-  box-shadow: var(--bevel-out);
-  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg width='8' height='7' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M0 0h2v1h1v1h2V1h1V0h2v1H7v1H6v1H5v1h1v1h1v1h1v1H6V6H5V5H3v1H2v1H0V6h1V5h1V4h1V3H2V2H1V1H0V0z' fill='%23000'/%3E%3C/svg%3E");
-  background-position: top 3px left 4px;
-  background-repeat: no-repeat;
-}
-
-.about-window .titlebar-controls button:active {
-  box-shadow: var(--bevel-in);
-  text-shadow: 1px 1px 0 var(--ink);
-}
-
-.about-window .titlebar-controls button:focus-visible {
-  outline: 1px dotted var(--ink);
-  outline-offset: -4px;
-}
 
 .about-window .window-body {
   flex: 1;

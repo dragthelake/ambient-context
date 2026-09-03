@@ -225,6 +225,40 @@ public func ambientHideWindowButtons(_ windowPointer: Int64) -> Int32 {
     return hidden
 }
 
+/// Lightens the traffic lights on an unfocused window. Since macOS 26 the
+/// inactive buttons are not a fixed grey but a translucent tint over
+/// whatever sits behind them, so on this app's navy title bar the light
+/// appearance renders them darker than the bar itself (measured #000058 on
+/// #000080) and they read as three black holes. The dark appearance tints
+/// the other way and they come out lighter than the bar. The focused red,
+/// amber and green are opaque and unchanged either way.
+///
+/// The appearance goes on the window, which is what the title bar's theme
+/// frame draws the buttons from. The content view is then pinned back to
+/// light. That second half is belt and braces rather than load bearing:
+/// WebKit takes prefers-color-scheme from the page's own `color-scheme`,
+/// which this one never declares, so the content renders light either way,
+/// and captures of the Settings tab with and without it are identical. It
+/// stays because the day someone writes `color-scheme: light dark` the
+/// window's appearance becomes the thing that decides, and a page with no
+/// dark palette would turn dark with no obvious cause.
+///
+/// Returns the number of layers set, so a missing content view is visible
+/// to the caller rather than passing silently. AppKit is main-thread only,
+/// so the caller marshals.
+@_cdecl("ambient_lighten_inactive_traffic_lights")
+public func ambientLightenInactiveTrafficLights(_ windowPointer: Int64) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    window.appearance = NSAppearance(named: .darkAqua)
+    guard let content = window.contentView else { return 1 }
+    content.appearance = NSAppearance(named: .aqua)
+    return 2
+}
+
 /// Moves the traffic-light cluster without touching the title bar container,
 /// which keeps the window layout intact. `x` is the close button's leading
 /// edge in window coordinates; `yFromTop` is the distance from the window's

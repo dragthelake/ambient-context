@@ -1489,6 +1489,8 @@ fn open_main_window_with_tab(app: &tauri::AppHandle, tab: Option<&str>) {
         .hidden_title(true)
         .build()
     {
+        // Before show, so the first frame already has readable buttons.
+        window_chrome::lighten_inactive_traffic_lights(&window);
         let _ = window.show();
         window_chrome::centre_traffic_lights(&window);
         let _ = window.set_focus();
