@@ -27,6 +27,7 @@ export type Settings = {
   max_block_chars: number;
   write_references: boolean;
   extra_redaction_patterns: string[];
+  check_updates: boolean;
 };
 
 export type DayFile = "apps" | "websites" | "messages";

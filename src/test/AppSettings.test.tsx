@@ -30,6 +30,7 @@ function reset() {
     max_block_chars: 4000,
     write_references: true,
     extra_redaction_patterns: [],
+    check_updates: true,
   };
 }
 
@@ -60,6 +61,24 @@ describe("AppSettings", () => {
     expect(
       screen.getByLabelText("Ambient Context opens when you log in"),
     ).toBeTruthy();
+  });
+
+  it("saves the update check toggle without dropping other fields", async () => {
+    mockInvoke(handler);
+    render(<AppSettings />);
+    const box = (await screen.findByLabelText(
+      "Check for updates automatically",
+    )) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    stored.idle_secs = 300;
+    fireEvent.click(box);
+    await waitFor(() => expect(callsOf("set_settings")).toHaveLength(1));
+    const next = callsOf("set_settings")[0].args?.next as {
+      check_updates: boolean;
+      idle_secs: number;
+    };
+    expect(next.check_updates).toBe(false);
+    expect(next.idle_secs).toBe(300);
   });
 
   it("shows the editor the settings name", async () => {

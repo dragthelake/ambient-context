@@ -59,6 +59,11 @@ pub struct Settings {
     pub write_references: bool,
     /// User redaction patterns, appended to the built-ins.
     pub extra_redaction_patterns: Vec<String>,
+    /// Whether the app asks GitHub Releases for a newer version in the
+    /// background. Off leaves the menu bar's Check for Updates as the only
+    /// path. On by default: a recorder that is months behind its own bug
+    /// fixes is the wrong default for something that runs all day.
+    pub check_updates: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +90,7 @@ impl Default for Settings {
             idle_secs: 120,
             write_references: true,
             extra_redaction_patterns: Vec::new(),
+            check_updates: true,
         }
     }
 }
@@ -164,6 +170,18 @@ mod tests {
         let path = dir.path().join("settings.json");
         std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
         assert_eq!(read_from(&path).idle_secs, 120);
+    }
+
+    #[test]
+    fn update_checks_default_on_when_missing_from_the_file() {
+        // A settings.json written by 1.0.0 has no such key. Automatic
+        // updates are what 1.0.0 users are missing, so the migration must
+        // turn them on rather than leave them off.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
+        assert!(read_from(&path).check_updates);
+        assert!(Settings::default().check_updates);
     }
 
     #[test]

@@ -96,6 +96,20 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Settings\u{2026}", true, None::<&str>)?;
     let about = MenuItem::with_id(app, "about", "About\u{2026}", true, None::<&str>)?;
+    let update = {
+        // The one item whose label the background check changes: an offer
+        // to install once a version is held, a manual check until then.
+        let pending = app
+            .try_state::<crate::update::UpdateState>()
+            .and_then(|state| state.pending_version());
+        MenuItem::with_id(
+            app,
+            "update",
+            crate::update::menu_label(pending.as_deref()),
+            true,
+            None::<&str>,
+        )?
+    };
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     Menu::with_items(
@@ -110,6 +124,7 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
             &PredefinedMenuItem::separator(app)?,
             &setup,
             &about,
+            &update,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
@@ -170,6 +185,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
                 "overview" => crate::open_main_window(app),
                 "setup" => crate::open_main_window_on_tab(app, "settings"),
                 "about" => crate::open_about_window(app),
+                "update" => crate::update::tray_action(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();
                     capture::stop(&state);
