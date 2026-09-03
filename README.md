@@ -1,13 +1,11 @@
 # Ambient Context
 
-**Your AI tools start every conversation knowing nothing about your day.
-Ambient Context writes it down for them.**
+**Ambient Context writes down what you work on during the day to give your
+AI assistant better context.**
 
 A macOS menu bar app that keeps a written record of what you work on, in
 plain markdown, in a folder you own. Point Claude Code, Cursor, Codex or
-any MCP client at that folder and they can answer "what did I work on
-Tuesday?", pick up a thread from this morning, or write your standup
-without you retyping the day.
+any MCP client at your context folder.
 
 <p align="center">
   <img src="docs/ambient-context.gif" width="720" alt="Ambient Context in use: the eye in the menu bar, the Overview window, and a processed day" />
@@ -16,7 +14,7 @@ without you retyping the day.
 ## The problem
 
 You spend the day reading, writing, replying and deciding. None of it
-reaches the assistant you open at 4pm. So you paste in the email, explain
+reaches the AI assistant you open at 4pm. So you paste in the email, explain
 the ticket, summarise the call, and the model still works from a fraction
 of what you actually saw. The context existed. It was on your screen. Nobody
 wrote it down.
