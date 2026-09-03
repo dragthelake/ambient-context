@@ -1,0 +1,1495 @@
+/* Ambient Context main window: the same Windows 98 dialog as the setup
+   card, stretched into a document window. Grey chrome, bevels, Funnel. */
+
+@import "./setup.css";
+
+/* The document behind the window is the teal desktop the setup dialog
+   floats on. The main window fills its frame, so that teal is only ever
+   revealed by an elastic overscroll at the end of a trackpad swipe.
+   `overscroll-behavior` stops the rubber band, and the grey is there so
+   nothing eye-catching sits behind the window even if one gets through.
+
+   Scoped with :has() rather than a bare `body` because App.tsx imports
+   this file for both windows, and the setup dialog keeps its teal. It
+   also outweighs setup.css's own `body` rule, which would otherwise win
+   on source order. */
+
+html:has(.main-window),
+body:has(.main-window) {
+  background: var(--chrome);
+  overscroll-behavior: none;
+}
+
+/* The shell is .window from setup.css; this only says how tall it is and
+   that the traffic lights need room. The titlebar is drawn under them, so
+   the text starts clear of where macOS puts them.
+
+   macOS masks every decorated window to a rounded rect and offers no way
+   to square it off, so the chrome curves to meet the mask rather than
+   being sliced by it. --corner is that mask's radius; the --corner-inner-*
+   pair is that same curve seen from inside the window border, which is
+   what keeps the arcs concentric instead of merely both round. */
+
+/* Two classes, not one: this element is `window main-window`, and
+   App.tsx pulls in Main (and this file) before setup.css, so at equal
+   specificity setup.css's plain `.window` would win on order alone. */
+
+.window.main-window {
+  /* macOS's window corner, and that same corner measured from inside the
+     border: concentric arcs need the inner radius stepped down by the gap
+     between them, or the inner corner reads tighter than the outer one.
+     The border is wider here than the setup dialog's 3px so the frame has
+     something to show as it wraps the curve.
+
+     16px is measured, not guessed: macOS 26 masks its windows to a corner
+     roughly twice the radius earlier versions used, and anything smaller
+     leaves the chrome to be sliced by it. Re-measure if the corner ever
+     looks cut again on a newer macOS. */
+  --border: 5px;
+  --corner: 16px;
+
+  /* Top and bottom are tuned separately. Geometry says both should be
+     `--corner minus --border`, and at the bottom that is what reads
+     correctly. The title bar needs a touch less: it meets the frame as a
+     hard saturated edge with no bevel to soften it, so the same arc that
+     looks right under the status cells looks like it bulges into the
+     corner. Trust the eye over the arithmetic here. */
+  --corner-inner-top: 10px;
+  --corner-inner-bottom: 11px;
+
+  height: 100vh;
+  padding: var(--border);
+  border-radius: var(--corner);
+  overflow: hidden;
+}
+
+.main-window .titlebar {
+  /* The bar is drawn under the overlay traffic lights, so the title starts
+     clear of them. 78px is measured for macOS 26; re-measure if the text
+     ever sits under the buttons on a newer system. Height matches the
+     reference scaled up, with room for the lights to sit in the bar. Traffic
+     light placement is tuned in window_chrome.rs. */
+  height: 28px;
+  padding-left: 78px;
+  border-radius: var(--corner-inner-top) var(--corner-inner-top) 0 0;
+}
+
+/* The outermost cells are the only ones that meet a corner. */
+.main-window .statusbar-cell:first-child {
+  border-bottom-left-radius: var(--corner-inner-bottom);
+}
+
+.main-window .statusbar-cell:last-child {
+  border-bottom-right-radius: var(--corner-inner-bottom);
+}
+
+/* Tab strip
+
+   A classic notebook tab: the current one is a touch taller, keeps the
+   bevel open along its bottom edge, and overlaps the pane below by a
+   pixel so the two read as one sheet rather than two stacked boxes. */
+
+.tabstrip {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  /* The first tab is deliberately not flush with the pane below it: the
+     strip is indented a few pixels so the tabs read as sitting on the
+     sheet rather than continuing its edge. The reference lines them up;
+     this does not, by choice.
+
+     The 6px above lets the tabs breathe under the title bar, which sits
+     hard against them as a saturated navy edge. It is deliberately more
+     than the 3px the status bar keeps below the pane: that gap is between
+     two grey surfaces and needs less. */
+  padding: 6px 4px 0 8px;
+  position: relative;
+  z-index: 1;
+}
+
+.tab {
+  min-width: 0;
+  /* Tab height tracks the type, the way the reference's 18px tab tracks
+     its 11px face: tight leading, small vertical padding. */
+  line-height: 1.15;
+  padding: 2px 13px 4px;
+  /* Flush with the pane, not over it. The pane's top highlight has to
+     survive as an unbroken line beneath every tab that is not current;
+     pulling all of them down hid that line and made all three read as
+     joined to the sheet, which is to say all three read as selected. */
+  margin-bottom: 0;
+  font-weight: 600;
+  background: var(--chrome);
+  /* Real borders rather than inset shadows, because borders follow the
+     radius and mitre against each other at the corner. As shadows the
+     white top was painted over the dark right edge and the top right
+     corner came out square while the top left curved. Three sides only:
+     the bottom is left open so the current tab can run into the pane. */
+  border: 0 solid;
+  border-width: 1px 1px 0 1px;
+  border-top-color: var(--chrome-lighter);
+  border-left-color: var(--chrome-lighter);
+  border-right-color: var(--chrome-darker);
+  /* The grey the reference puts just inside the black right edge. */
+  box-shadow: inset -1px 0 var(--chrome-dark);
+  border-radius: 3px 3px 0 0;
+}
+
+.tab.is-current {
+  /* The only tab that breaks the pane's top line: it stands 2px taller
+     and runs 2px into the sheet, which is the whole of how a notebook tab
+     says it is the one in front.
+
+     The padding is arithmetic, not taste. Horizontal is identical to an
+     unselected tab so the label cannot move sideways and the tabs after
+     it cannot shift. Vertically, the extra bottom padding is exactly the
+     negative margin, which holds the label on the same line while the tab
+     itself grows upward: text top = bottom - padding-bottom - line-height,
+     so adding 2 to both the overhang and the padding cancels out. */
+  padding: 4px 13px 6px;
+  margin-bottom: -2px;
+  z-index: 2;
+}
+
+.tab:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+/* Pane */
+
+.tabpane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Inset from the window's padding box on three sides, so the sheet reads
+     as an object laid on the dialog rather than as the dialog's own lining.
+     The status bar stays flush against the frame and carries the bottom
+     edge on its own. 4px each side puts the pane's left edge halfway
+     between the frame and the first tab, which is at 8px. */
+  margin: 0 4px 4px;
+  /* The pane is the same face grey as the tab strip, as in the reference:
+     a tabbed dialog is one sheet, and only the bevel says where it starts. */
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+  /* The frame never scrolls, and this padding is what keeps it that way.
+     overflow: hidden clips descendants to the padding box, and an inset
+     box-shadow paints beneath them, so with no padding the scroller's clip
+     edge lands exactly on the 2px the bevel occupies and scrolled content
+     rides over it. Two pixels of padding hold the scroller inside the bevel.
+     Whatever comes off here goes back on .tabpane-scroll. */
+  padding: 2px;
+  overflow: hidden;
+}
+
+/* The scrolling half of the pane. These are two elements because a scroll
+   container's padding lies inside its scrollable area and an inset
+   box-shadow paints beneath its descendants: with the bevel on the
+   scroller, content rides over the frame at the top and bottom of every
+   scroll. The frame stays put and this scrolls inside it.
+
+   Contain, not none: the pane may still bounce against its own
+   background, but the gesture never chains out to the document. */
+.tabpane-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Holds content off the bevel, as the reference's pane does. Each view
+     adds only what it needs on top of this. Two less than it reads, because
+     the frame now carries those two. */
+  padding: 5px;
+}
+
+/* Overview fills the pane so the Notes group can take leftover height
+   under the map, rather than leaving a blank strip of chrome. */
+.tabpane-overview .tabpane-scroll {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Overview */
+
+/* Display Properties layout: CRT preview on the left, controls on the
+   right. The map takes the remaining width so more days fit per row.
+   The main window's min width (820) is enough for both columns; narrower
+   than that is not in the product. */
+
+.overview {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 14px;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 12px 20px;
+  align-items: stretch;
+}
+
+.overview-preview {
+  padding-top: 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.overview-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
+  max-width: 260px;
+  width: 100%;
+  align-self: center;
+}
+
+.overview-links button {
+  width: 100%;
+}
+
+.overview-side {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-record {
+  flex: none;
+}
+
+.overview .eye-panel {
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.overview .crt {
+  max-width: 260px;
+}
+
+/* Recent notes under the map: the way back into days that already have a
+   written note. Fills leftover height so the right column does not stop
+   short under the defrag controls. */
+.overview-notes {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.overview-notes-empty {
+  padding: 4px 2px 2px;
+}
+
+.overview-notes-empty .empty-state {
+  margin: 0 0 4px;
+}
+
+.overview-notes-empty .empty-note {
+  margin: 0;
+}
+
+.overview-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+}
+
+.overview-note {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 7.5em minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overview-note:hover {
+  background: var(--chrome-light);
+}
+
+.overview-note:active {
+  background: var(--chrome-dark);
+  box-shadow: none;
+  padding: 5px 6px;
+}
+
+.overview-note:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -2px;
+}
+
+.overview-note-date {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--chrome-dark);
+  white-space: nowrap;
+}
+
+.overview-note-title {
+  font-size: 12px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Day view */
+
+
+.day-view {
+  display: flex;
+  height: 100%;
+}
+
+.day-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Day header */
+
+.day-header {
+  flex: none;
+  padding: 10px 14px 8px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--chrome-dark);
+}
+
+.day-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Win98 push buttons in the day view: 23px tall, symmetric padding,
+   bevel swap on press only. Sizes from 98.css. */
+.day-nav-step {
+  min-width: 23px;
+  width: 23px;
+  padding: 0;
+}
+
+.day-today {
+  min-width: 75px;
+}
+
+.day-date {
+  margin: 0;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  flex: 1;
+  min-width: 0;
+}
+
+.day-meta {
+  margin: 6px 0;
+}
+
+/* One line for the whole day: what was recorded, and where the summary is
+   up to. It is the only thing between the date and the controls, so it
+   carries every state rather than sitting beside a second span. */
+.day-stats {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+}
+
+.day-stats.generated {
+  color: var(--ink);
+}
+
+.day-stats.failed {
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+/* A run in flight is the one state worth reading from across the room. */
+.day-stats.queued,
+.day-stats.running {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.day-error {
+  margin: 6px 0 0;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.link-button {
+  appearance: none;
+  border: none;
+  background: none;
+  box-shadow: none;
+  min-width: 0;
+  padding: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--title-b);
+  text-decoration: underline;
+}
+
+.link-button:active {
+  box-shadow: none;
+}
+
+/* The tab strips, on their own row. A second strip appears beside the
+   first on Context and Knowledge; nothing sits to its right to be moved. */
+.day-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* The row under the content box: the tab's own action, then the two that
+   open files. Under the box so what a button acts on is what sits above it. */
+.day-actions {
+  flex: none;
+  padding: 0 14px 10px;
+}
+
+.day-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.segmented {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--chrome);
+  box-shadow: var(--bevel-in);
+}
+
+.segment {
+  min-width: 75px;
+  min-height: 23px;
+  padding: 0 12px;
+  box-shadow: none;
+  background: transparent;
+}
+
+.segment.is-current {
+  box-shadow: var(--bevel-out);
+  background: var(--chrome);
+}
+
+.segment:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+.segment.is-current:active:not(:disabled) {
+  box-shadow: var(--bevel-in);
+}
+
+.day-title {
+  margin: 6px 0 0;
+  font-weight: 600;
+  color: var(--chrome-dark);
+}
+
+/* Notes and Knowledge panes */
+
+/* Frame and scroller split, as everywhere else a bevelled box scrolls. */
+.notes-pane,
+.knowledge-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Holds the scroller inside the bevel; see the note on .tabpane. */
+  padding: 2px;
+  overflow: hidden;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  margin: 10px 12px;
+}
+
+.notes-pane-scroll,
+.knowledge-pane-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Two less on each side than it reads: the frame carries those two. */
+  padding: 12px 16px;
+}
+
+.knowledge-task::before {
+  content: "☐ ";
+}
+
+.knowledge-item::before {
+  content: "· ";
+}
+
+.knowledge-section {
+  margin-bottom: 4px;
+}
+
+/* Scoped past `.reading p`, which would otherwise win on specificity and
+   put a paragraph's margin under the line. */
+.knowledge-pane-scroll .knowledge-built {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+  margin: 0 0 14px;
+}
+
+.empty-state {
+  margin: 0;
+  color: var(--chrome-dark);
+  font-weight: 600;
+}
+
+.empty-state.is-running {
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+}
+
+/* The sentence under an empty state that says what the action will do. */
+.empty-note {
+  margin: 6px 0 0;
+  max-width: 52ch;
+  color: var(--chrome-dark);
+}
+
+.generate-now {
+  margin-top: 12px;
+}
+
+.reading h1 {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  margin: 4px 0 10px;
+}
+
+.reading h2 {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  margin: 16px 0 4px;
+  color: var(--title-a);
+}
+
+.reading p,
+.reading li {
+  margin: 0 0 7px;
+  line-height: 1.55;
+}
+
+.reading ul {
+  margin: 0 0 7px;
+  padding-left: 4px;
+  list-style: none;
+}
+
+.reading li {
+  padding-left: 14px;
+  position: relative;
+}
+
+.reading li::before {
+  content: "■";
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-size: 8px;
+  line-height: 2.2;
+  color: var(--title-b);
+}
+
+/* Raw pane: the block timeline. The headings are the day's timeline and
+   the eye lands on them first; bodies collapse past a few lines. */
+
+.raw-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  /* Holds the scroller inside the bevel; see the note on .tabpane. */
+  padding: 2px;
+  overflow: hidden;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  margin: 10px 12px;
+}
+
+/* The scrolling half of the raw pane; the frame above never moves. */
+.raw-pane-scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Two less on each side than it reads: the frame carries those two. */
+  padding: 8px 10px;
+}
+
+.websites-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 2px;
+  overflow: hidden;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  margin: 10px 12px;
+}
+
+.websites-pane-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.websites-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.websites-table th,
+.websites-table td {
+  text-align: left;
+  padding: 4px 8px;
+}
+
+.websites-table .num {
+  text-align: right;
+}
+
+.pane-empty {
+  padding: 16px;
+  opacity: 0.7;
+}
+
+.raw-block {
+  margin-bottom: 10px;
+  background: var(--chrome-lighter);
+  box-shadow: var(--bevel-out);
+  padding: 6px 10px 8px;
+}
+
+.raw-block-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.raw-block-time {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--title-a);
+  font-weight: 700;
+}
+
+.raw-block-app {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.raw-replay {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--title-b);
+  border: 1px solid var(--title-b);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.raw-block-title {
+  color: var(--chrome-dark);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.raw-ref {
+  margin: 4px 0 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--title-b);
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+
+.raw-body {
+  margin-top: 4px;
+}
+
+.raw-body p {
+  margin: 0 0 3px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
+}
+
+.raw-quiet {
+  margin: 4px 0 0;
+  color: var(--chrome-dark);
+  font-style: italic;
+}
+
+.raw-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.raw-actions button {
+  min-width: 75px;
+}
+
+/* Highlight to instruct */
+
+.highlight-pill {
+  z-index: 30;
+  display: inline-flex;
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+  padding: 2px;
+  gap: 2px;
+}
+
+.highlight-pill button {
+  min-width: 0;
+  min-height: 23px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.propose-popover {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  width: min(640px, calc(100vw - 60px));
+  max-height: calc(100vh - 60px);
+  overflow-y: auto;
+  background: var(--chrome);
+  box-shadow: var(--bevel-out), 0 6px 0 rgba(0, 0, 0, 0.25);
+  padding: 12px 14px;
+}
+
+.propose-title {
+  margin: 0 0 8px;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.propose-quote {
+  margin: 0 0 10px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+}
+
+.propose-field {
+  margin-bottom: 8px;
+}
+
+.propose-field textarea {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 6px 8px;
+  resize: vertical;
+}
+
+.propose-agent {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--chrome-dark);
+}
+
+.propose-note {
+  font-size: 11px;
+  color: var(--chrome-dark);
+  font-weight: 600;
+}
+
+.propose-failure {
+  margin: 8px 0;
+}
+
+/* The diff: added and removed lines are marked by the prefix and by
+   colour, never by colour alone. */
+
+.diff-view {
+  margin-top: 8px;
+}
+
+.diff-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.diff-reasoning {
+  margin: 0 0 8px;
+  font-style: italic;
+  color: var(--chrome-dark);
+}
+
+.diff-body {
+  margin: 0 0 10px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  max-height: 260px;
+  overflow: auto;
+  user-select: text;
+  cursor: text;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-added {
+  color: var(--led-green);
+  font-weight: 700;
+}
+
+.diff-removed {
+  color: var(--warn-ink);
+  font-weight: 700;
+}
+
+/* Settings sections */
+
+.settings-stack {
+  padding: 6px 8px;
+  display: block;
+}
+
+.settings-heading {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  margin: 14px 0 4px;
+}
+
+.settings-heading:first-of-type {
+  margin-top: 8px;
+}
+
+.settings-note {
+  color: var(--chrome-dark);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.storage-path {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.recording-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px 16px;
+  max-width: 520px;
+  margin-bottom: 4px;
+}
+
+.provider-list,
+.rules-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px;
+}
+
+/* Each provider is its own etched box, the same groove a group box uses:
+   the selected one opens up and holds its buttons and schedule, so the
+   whole of "which agent does the work" reads as one object per choice. */
+.provider {
+  border: 1px solid var(--chrome-dark);
+  box-shadow: 1px 1px 0 var(--chrome-lighter),
+    inset 1px 1px 0 var(--chrome-lighter);
+  padding: 4px 10px;
+  margin-bottom: 7px;
+}
+
+.provider.is-open {
+  padding-bottom: 10px;
+}
+
+/* A locked provider cannot be chosen until the connected one is let go:
+   its label greys with its radio so the whole row reads as unavailable. */
+.provider.is-locked .agent-label {
+  color: var(--chrome-dark);
+  text-shadow: 1px 1px 0 var(--chrome-lighter);
+}
+
+.provider-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--led-green);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* The open provider's body: path, sign-in state, buttons, schedule. Indented
+   to sit under the label rather than under the radio. */
+.provider-detail {
+  margin: 4px 0 0 24px;
+  display: grid;
+  gap: 6px;
+}
+
+.agent-row,
+.rule-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  flex-wrap: wrap;
+}
+
+.rule-card {
+  margin-bottom: 7px;
+}
+
+.rule-card.field-border,
+.rule-card.field-border-disabled {
+  margin-top: 0;
+}
+
+.rule-card.is-locked {
+  color: var(--chrome-dark);
+}
+
+.rule-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.rule-kind {
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--chrome-dark);
+}
+
+.rule-value {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rule-card-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rules-empty {
+  margin-bottom: 8px;
+}
+
+.rule-row.is-locked {
+  color: var(--chrome-dark);
+}
+
+.agent-label {
+  font-weight: 700;
+  min-width: 110px;
+}
+
+.agent-path {
+  font-family: var(--mono);
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+
+.agent-auth {
+  font-size: 11px;
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+
+.provider-field,
+.propose-field {
+  font-weight: 600;
+  display: block;
+}
+
+/* A drop-down as the reference drew it: a sunken white field with a black
+   arrow at the right, in place of the platform's rounded control. */
+.provider-field select {
+  appearance: none;
+  display: block;
+  margin-top: 2px;
+  border: none;
+  border-radius: 0;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 4px 26px 4px 6px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 220px;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%207%204%22%20shape-rendering%3D%22crispEdges%22%20fill%3D%22%23000%22%3E%3Crect%20x%3D%220%22%20y%3D%220%22%20width%3D%227%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%221%22%20width%3D%225%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%223%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 7px 4px;
+}
+
+.provider-field select:disabled {
+  background-color: var(--chrome);
+  color: var(--chrome-dark);
+}
+
+.provider-field select:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+.provider-field input {
+  display: block;
+  margin-top: 2px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  border: none;
+  padding: 4px 6px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.schedule-row {
+  display: flex;
+  /* Centred, not baseline: the row mixes a 13px checkbox and a padded time
+     field with the text, and baseline leaves both hanging low. */
+  align-items: center;
+  gap: 7px;
+  font-weight: 600;
+  margin: 6px 0;
+}
+
+/* The time field is the same sunken well as every text input; left to the
+   browser it comes out as a rounded native bezel that belongs to no era
+   this window is from. The picker arrow goes too: the hours and minutes
+   are typed or stepped with the arrow keys, as they would have been. */
+input[type="time"] {
+  appearance: none;
+  border: none;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 2px 6px;
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+input[type="time"]::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+input[type="time"]:disabled {
+  background: var(--chrome);
+  color: var(--chrome-dark);
+}
+
+input[type="time"]:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+.volume-readout {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--chrome-dark);
+  min-width: 3.5em;
+}
+
+.rule-note {
+  color: var(--chrome-dark);
+  font-size: 12px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.rule-remove {
+  min-width: 0;
+  padding: 2px 8px 3px;
+  font-size: 11px;
+}
+
+.rule-add {
+  max-width: 420px;
+  display: grid;
+  gap: 6px;
+}
+
+.rule-add .settings-heading {
+  margin-top: 0;
+}
+
+/* MCP registration */
+
+.mcp-picker .mcp-client {
+  min-width: 0;
+  padding: 4px 10px 5px;
+}
+
+.mcp-picker .mcp-client.is-current {
+  box-shadow: var(--bevel-in);
+}
+
+.mcp-block {
+  margin: 6px 0 8px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 10px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow-y: auto;
+  user-select: text;
+  cursor: text;
+}
+
+.mcp-status {
+  margin-top: 10px;
+}
+
+
+
+
+
+
+
+/* The defrag map
+   Geometry and palette are measured from the reference screenshot in
+   docs/reference, not estimated: a 7x10 fill inside a 1px outline, so the
+   pitch is 9x12. Adjacent outlines touch, which is what makes the field
+   read as one black lattice rather than a scatter of tiles. */
+
+.defrag-well {
+  position: relative;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  /* Two pixels for the bevel to paint into, the same reason .tabpane carries
+     it, and two more so the first row does not sit against it. Without the
+     second pair the field is flush along the top and bottom: the space that
+     appears at the sides is not padding at all, it is leftover width from
+     centring the grid, and there is no vertical equivalent. */
+  padding: 4px;
+  overflow: hidden;
+}
+
+.defrag-grid {
+  display: grid;
+  /* One pixel of white between cells, as the reference has. Without it the
+     outlines of adjacent cells meet and a run of summarised days reads as
+     one navy slab rather than a row of separate days. */
+  gap: 1px;
+  justify-content: center;
+}
+
+.defrag-cell {
+  appearance: none;
+  /* 6x9 of fill inside a 1px outline. With the grid's 1px gap that makes
+     the pitch 9x12, which is what the reference measures. min-height
+     resets the Win98 button floor so these stay 11px tall. */
+  width: 8px;
+  height: 11px;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  margin: 0;
+  border: 1px solid #0a0a0a;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.defrag-cell.is-raw {
+  background: #8be2f8;
+}
+
+.defrag-cell.is-summarised {
+  background: #0308a3;
+}
+
+.defrag-cell.is-failed {
+  background: #d84a3a;
+}
+
+.defrag-cell:active:not(:disabled) {
+  /* The tile fills with its own outline colour for as long as it is held.
+     Nothing about the box changes: the lattice is one pixel wide and the
+     cells sit a pixel apart, so a border width or padding change on press
+     would nudge every cell after it along the row.
+
+     Filling rather than inverting the outline, which was the first attempt
+     and does not work: the well behind is white, so a white border does not
+     read as inverted, it vanishes, and the cell appears to swell into its
+     own gap. A solid tile reads against all four fills and against the
+     well. */
+  background: #0a0a0a;
+}
+
+.defrag-cell:focus-visible {
+  /* A ring in both poles of the palette, drawn outside the tile and over
+     the lattice, so one of the two contrasts whatever the cell and its
+     neighbours are filled with. The global button outline sits at -5px,
+     which on a 9x12 box collapses to nothing at all. */
+  outline: none;
+  box-shadow:
+    0 0 0 1px #ffffff,
+    0 0 0 2px #0a0a0a;
+  /* Grid items honour z-index without positioning, and the ring is drawn
+     outside the cell: without this it is painted over by the cells that
+     come after it in the row. */
+  z-index: 1;
+}
+
+/* Centred over the empty rectangle, saying why it is empty. The panel
+   holds its shape from the first run, so without this it is twenty rows of
+   white with nothing to explain them. */
+.defrag-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink);
+  text-shadow: 1px 1px 0 #ffffff;
+  pointer-events: none;
+}
+
+.defrag-cell:disabled {
+  /* Still drawn, just not a target. The default disabled treatment would
+     grey the fill and lose the colour the map exists to show. */
+  color: inherit;
+}
+
+/* The period's own info box, not a native title attribute: those arrive
+   after a delay, are styled by macOS, and cannot hold four lines. */
+.defrag-info {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  display: flex;
+  flex-direction: column;
+  background: #ffffe1;
+  border: 1px solid var(--chrome-darker);
+  padding: 3px 6px;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.defrag-info-hint {
+  color: var(--chrome-dark);
+}
+
+.defrag-controls {
+  margin-top: 6px;
+}
+
+.defrag-status,
+.defrag-percent {
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The trough is sunken and the fill is the reference's navy. It carries
+   the same 2px padding the panes do, for the same reason: an inset shadow
+   paints beneath its descendants, so without it the fill covers the bevel. */
+.defrag-bar {
+  height: 20px;
+  background: var(--chrome);
+  box-shadow: var(--bevel-in);
+  padding: 2px;
+  overflow: hidden;
+}
+
+.defrag-bar-fill {
+  height: 100%;
+  /* Blocks with gaps, not a solid bar: repeating-linear-gradient gives the
+     period's segmented fill without an element per segment. */
+  background: repeating-linear-gradient(
+    90deg,
+    #00007b 0 10px,
+    transparent 10px 12px
+  );
+  transition: width 120ms linear;
+}
+
+.defrag-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.defrag-legend li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.defrag-swatch {
+  width: 8px;
+  height: 11px;
+  border: 1px solid #0a0a0a;
+  background: #ffffff;
+}
+
+.defrag-swatch.is-raw {
+  background: #8be2f8;
+}
+
+.defrag-swatch.is-summarised {
+  background: #0308a3;
+}
+
+.defrag-swatch.is-failed {
+  background: #d84a3a;
+}
+
+.defrag-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.defrag-spacer {
+  flex: 1;
+}
+
+/* Agent callout on the Overview when summarising is unavailable. */
+.agent-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+}
+
+/* The reference blinks the block being worked on, and it is the only
+   movement on the field: the cell being summarised alternates between its
+   raw fill and the summarised navy it is about to become. Steps, not a
+   fade, because nothing in this window has ever crossfaded. */
+.defrag-cell.is-working {
+  animation: defrag-working 0.7s steps(1, end) infinite;
+}
+
+@keyframes defrag-working {
+  0%,
+  100% {
+    background: #8be2f8;
+  }
+  50% {
+    background: #0308a3;
+  }
+}
+
+/* Marching dots after the status line while the batch runs. The agent run
+   is minutes long and the bar only moves per finished day, so this is the
+   only sign between segments that anything is happening. */
+.working-dots::after {
+  content: "";
+  animation: working-dots 1.2s steps(1, end) infinite;
+}
+
+@keyframes working-dots {
+  0% {
+    content: "";
+  }
+  25% {
+    content: ".";
+  }
+  50% {
+    content: "..";
+  }
+  75% {
+    content: "...";
+  }
+}

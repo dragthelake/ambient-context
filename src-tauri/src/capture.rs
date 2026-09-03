@@ -1,24 +1,66 @@
 use crate::{
     prune,
     reader::{self, Snapshot, WindowReader},
-    redact,
+    redact, rules,
     segment::Segmenter,
     settings::{self, Settings},
     writer,
 };
-use chrono::{Local, NaiveDate};
+use chrono::Local;
+use regex::Regex;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::Duration;
 use tauri::AppHandle;
 
-/// The capture target must never include the capture output: reading
-/// today's file re-captures the previous blocks, and the dwell segmenter
-/// then emits a session whose content is the earlier sessions. Matched at
-/// emit time against the configured folder and today's filename.
-fn is_own_output(snapshot: &Snapshot, folder: &Path, today: NaiveDate) -> bool {
+/// Loads the rules for a poll, reporting a broken file to stderr once per
+/// distinct error rather than on every poll. Returns the rules in force
+/// and whether this call was the one that reported.
+fn load_rules_for_capture(
+    config_dir: &Path,
+    reported: &mut Option<String>,
+) -> (rules::Rules, bool) {
+    match rules::load_result(config_dir) {
+        Ok(set) => {
+            *reported = None;
+            (set, false)
+        }
+        Err(error) => {
+            let message = error.to_string();
+            let fresh = reported.as_deref() != Some(message.as_str());
+            if fresh {
+                eprintln!(
+                    "[capture] rules.json cannot be read, so no user rules are in force: {message}"
+                );
+                *reported = Some(message);
+            }
+            (rules::Rules::default(), fresh)
+        }
+    }
+}
+
+fn rules_mtime(config_dir: &Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(crate::rules::rules_path(config_dir))
+        .and_then(|m| m.modified())
+        .ok()
+}
+
+/// Whether this poll falls in a stretch with no keyboard or mouse input.
+/// `idle_secs` of 0 turns the check off, and a platform that cannot report
+/// idle time is never idle rather than always idle. Pure, so the poll loop
+/// itself needs no test harness.
+fn is_idle(idle_secs: u64, since: Option<f64>) -> bool {
+    idle_secs > 0 && since.is_some_and(|seconds| seconds >= idle_secs as f64)
+}
+
+/// The app must not record itself reading its own record. Matched by the
+/// document or URL path first (editors expose AXDocument), then by a
+/// window title carrying a date: on its own as a file name, which is how
+/// a summary or ledger entry shows in an app that exposes no path, or
+/// together with the folder name or one of the record's file names.
+fn is_own_output(snapshot: &Snapshot, folder: &Path) -> bool {
     let folder_str = folder.to_string_lossy();
     if snapshot
         .document
@@ -34,25 +76,66 @@ fn is_own_output(snapshot: &Snapshot, folder: &Path, today: NaiveDate) -> bool {
     {
         return true;
     }
-    if let Some(title) = &snapshot.window_title {
-        let stem = today.format("%Y-%m-%d").to_string();
-        if title.contains(&format!("{stem}.md")) {
-            return true;
-        }
-        if let Some(name) = folder.file_name() {
-            let name = name.to_string_lossy();
-            if title.contains(&stem) && title.contains(name.as_ref()) {
-                return true;
-            }
-        }
+    let Some(title) = &snapshot.window_title else {
+        return false;
+    };
+    static DATE: OnceLock<Regex> = OnceLock::new();
+    let date = DATE.get_or_init(|| Regex::new(r"\d{4}-\d{2}-\d{2}(\.md)?").unwrap());
+    let mut dates = date.find_iter(title).peekable();
+    if dates.peek().is_none() {
+        return false;
     }
-    false
+    if dates.any(|found| found.as_str().ends_with(".md")) {
+        return true;
+    }
+    let folder_name = folder
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    const OWN_FILES: &[&str] = &["apps.md", "websites.md", "messages.md", "manifest.md"];
+    (!folder_name.is_empty() && title.contains(folder_name.as_str()))
+        || OWN_FILES.iter().any(|f| title.contains(f))
 }
+
+/// How long `stop` will wait for the poll thread to leave. The thread
+/// checks the flag every 100ms, except while it is inside an accessibility
+/// read, and the reader's own messaging timeout bounds that. Waiting
+/// longer than this would mean the read is wedged, and starting a second
+/// thread beside a wedged one is the failure worth avoiding.
+pub const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Default)]
 pub struct CaptureState {
     running: Arc<AtomicBool>,
     blocks_today: Arc<AtomicUsize>,
+    /// How many poll threads are alive. `stop` waits on this rather than on
+    /// a sleep, because the flag going false says only that the thread has
+    /// been asked to leave, not that it has.
+    live: Arc<(Mutex<usize>, Condvar)>,
+    /// Bumped on every start. A poll thread keeps going only while the
+    /// generation it was started with is still current, so a thread that
+    /// outlived a timed-out stop cannot be revived by the next start
+    /// flipping `running` back on.
+    generation: Arc<AtomicU64>,
+    /// The app the last read found in front, for `capture_status` over
+    /// MCP. Read here it costs nothing; walked again from a socket thread,
+    /// beside the poll thread's own walk, it hit the focused app twice.
+    /// None while capture is off.
+    focused_app: Arc<Mutex<Option<String>>>,
+}
+
+/// What a poll thread checks between reads: still asked to run, and still
+/// the current generation.
+pub struct Alive {
+    running: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
+    mine: u64,
+}
+
+impl Alive {
+    pub fn is_current(&self) -> bool {
+        self.running.load(Ordering::SeqCst) && self.generation.load(Ordering::SeqCst) == self.mine
+    }
 }
 
 impl CaptureState {
@@ -67,36 +150,50 @@ impl CaptureState {
     pub fn blocks_today(&self) -> usize {
         self.blocks_today.load(Ordering::SeqCst)
     }
+
+    pub fn focused_app(&self) -> Option<String> {
+        self.focused_app.lock().ok().and_then(|slot| slot.clone())
+    }
+}
+
+fn set_focused_app(slot: &Mutex<Option<String>>, app: Option<String>) {
+    if let Ok(mut current) = slot.lock() {
+        *current = app;
+    }
 }
 
 /// Spawns the poll thread. Returns immediately. Calling this while already
 /// running is a no-op rather than a second thread.
 pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
-    if state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return;
-    }
-
     let Some(mut folder) = settings.folder.clone() else {
-        state.running.store(false, Ordering::SeqCst);
         eprintln!("[capture] refusing to start with no folder set");
         return;
     };
 
-    let running = state.running.clone();
     let counter = state.blocks_today.clone();
+    let focused = state.focused_app.clone();
 
-    thread::spawn(move || {
+    let spawned = spawn_tracked(state, move |alive| {
         let mut segmenter = Segmenter::new(settings.min_dwell_secs, settings.similarity_threshold);
         let mut dedup = writer::DayDedup::new();
         let interval = Duration::from_secs(settings.interval_secs.max(1));
         let mut failed_reads: u32 = 0;
+        let mut idle = false;
         let mut counter_day = Local::now().date_naive();
+        let config_dir = settings::config_dir(&app);
+        let mut rules_error: Option<String> = None;
+        let (mut rules, _) = load_rules_for_capture(&config_dir, &mut rules_error);
+        let mut rules_stamp = rules_mtime(&config_dir);
+        let mut extra = redact::compile_extra(&settings.extra_redaction_patterns);
+        let mut extra_source = settings.extra_redaction_patterns.clone();
+        // The two output knobs the settings page exposes; rebuilt whenever
+        // the settings they come from change.
+        let mut shape = writer::Shape {
+            max_block_chars: settings.max_block_chars,
+            write_references: settings.write_references,
+        };
 
-        while running.load(Ordering::SeqCst) {
+        while alive.is_current() {
             // "47 blocks today" must mean today. Reset the count when the
             // date rolls over rather than letting it accumulate forever.
             let today = Local::now().date_naive();
@@ -112,49 +209,100 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             if let Some(new_folder) = settings::load(&app).folder {
                 if new_folder != folder {
                     if let Some(block) = segmenter.flush(Local::now()) {
-                        let _ = writer::append_block(&folder, &block, &mut dedup);
+                        let _ = writer::append_block(&folder, &block, &mut dedup, shape, &rules);
                     }
                     folder = new_folder;
                     dedup.reset();
                 }
             }
 
-            match reader::PlatformReader.snapshot() {
-                Some(raw) => {
-                    failed_reads = 0;
-                    if let Some(clean) = redact::redact_snapshot(raw) {
-                        if is_own_output(&clean, &folder, today) {
-                            // Looking at the capture file is not work worth
-                            // recording, and recording it recurses.
-                        } else {
-                            let clean = Snapshot {
-                                text: clean
-                                    .text
-                                    .iter()
-                                    .filter_map(|line| prune::normalise_line(line))
-                                    .collect(),
-                                ..clean
-                            };
-                            if let Some(block) = segmenter.push(clean, Local::now()) {
-                                match writer::append_block(&folder, &block, &mut dedup) {
-                                    Ok(()) => {
-                                        counter.fetch_add(1, Ordering::SeqCst);
+            // Rules edited in Settings, by an agent over MCP, or in a text
+            // editor take effect on the next poll rather than the next
+            // launch. Compared by modification time so an unchanged file
+            // costs one stat call per poll.
+            let stamp = rules_mtime(&config_dir);
+            if stamp != rules_stamp {
+                rules_stamp = stamp;
+                (rules, _) = load_rules_for_capture(&config_dir, &mut rules_error);
+            }
+            let current = settings::load(&app);
+            if current.extra_redaction_patterns != extra_source {
+                extra = redact::compile_extra(&current.extra_redaction_patterns);
+                extra_source = current.extra_redaction_patterns.clone();
+            }
+            let next_shape = writer::Shape {
+                max_block_chars: current.max_block_chars,
+                write_references: current.write_references,
+            };
+            if next_shape != shape {
+                shape = next_shape;
+            }
+
+            // An unattended machine is not work. Closing the open block at
+            // the point input stopped keeps the afternoon's first block from
+            // starting at lunchtime, and nothing is recorded until the user
+            // comes back.
+            let since_input = reader::PlatformReader.seconds_since_input();
+            if is_idle(current.idle_secs, since_input) {
+                if !idle {
+                    idle = true;
+                    let seconds = since_input.unwrap_or_default();
+                    eprintln!("[capture] idle after {seconds:.0}s, block closed");
+                    if let Some(block) = segmenter.flush(Local::now()) {
+                        if writer::append_block(&folder, &block, &mut dedup, shape, &rules).is_ok()
+                        {
+                            counter.fetch_add(1, Ordering::SeqCst);
+                        }
+                    }
+                }
+            } else {
+                if idle {
+                    idle = false;
+                    eprintln!("[capture] input resumed, recording again");
+                }
+                match reader::PlatformReader.snapshot() {
+                    Some(raw) => {
+                        failed_reads = 0;
+                        set_focused_app(&focused, Some(raw.app.clone()));
+                        if let Some(clean) = redact::redact_snapshot(raw, &rules, &extra) {
+                            if is_own_output(&clean, &folder) {
+                                // Looking at the capture file is not work worth
+                                // recording, and recording it recurses.
+                            } else {
+                                let clean = Snapshot {
+                                    text: clean
+                                        .text
+                                        .iter()
+                                        .filter_map(|line| prune::normalise_line(line))
+                                        .collect(),
+                                    ..clean
+                                };
+                                if let Some(block) = segmenter.push(clean, Local::now()) {
+                                    match writer::append_block(
+                                        &folder, &block, &mut dedup, shape, &rules,
+                                    ) {
+                                        Ok(()) => {
+                                            counter.fetch_add(1, Ordering::SeqCst);
+                                        }
+                                        Err(e) => eprintln!("[capture] write failed: {e}"),
                                     }
-                                    Err(e) => eprintln!("[capture] write failed: {e}"),
                                 }
                             }
                         }
                     }
-                }
-                None => {
-                    // A locked screen, a hung target or a dropped read.
-                    // Three misses in a row closes the open block, so a
-                    // block ends at the lock rather than spanning lunch.
-                    failed_reads += 1;
-                    if failed_reads == 3 {
-                        if let Some(block) = segmenter.flush(Local::now()) {
-                            if writer::append_block(&folder, &block, &mut dedup).is_ok() {
-                                counter.fetch_add(1, Ordering::SeqCst);
+                    None => {
+                        // A locked screen, a hung target or a dropped read.
+                        // Three misses in a row closes the open block, so a
+                        // block ends at the lock rather than spanning lunch.
+                        set_focused_app(&focused, None);
+                        failed_reads += 1;
+                        if failed_reads == 3 {
+                            if let Some(block) = segmenter.flush(Local::now()) {
+                                if writer::append_block(&folder, &block, &mut dedup, shape, &rules)
+                                    .is_ok()
+                                {
+                                    counter.fetch_add(1, Ordering::SeqCst);
+                                }
                             }
                         }
                     }
@@ -167,7 +315,7 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
             // silently loses the open block.
             let mut slept = Duration::ZERO;
             let slice = Duration::from_millis(100);
-            while slept < interval && running.load(Ordering::SeqCst) {
+            while slept < interval && alive.is_current() {
                 thread::sleep(slice);
                 slept += slice;
             }
@@ -176,21 +324,131 @@ pub fn start(app: AppHandle, state: &CaptureState, settings: Settings) {
         // Closing the open block on stop means the last stretch of work is
         // not silently lost when capture is switched off.
         if let Some(block) = segmenter.flush(Local::now()) {
-            if writer::append_block(&folder, &block, &mut dedup).is_ok() {
+            if writer::append_block(&folder, &block, &mut dedup, shape, &rules).is_ok() {
                 counter.fetch_add(1, Ordering::SeqCst);
             }
         }
+        set_focused_app(&focused, None);
         crate::tray::refresh(&app, false);
     });
+    if !spawned {
+        eprintln!("[capture] a poll thread is already running");
+    }
 }
 
-pub fn stop(state: &CaptureState) {
+/// Marks the state running and puts `body` on its own thread, counting it
+/// in and out so `stop` can wait for it. Returns false when a thread is
+/// already live, whether it is one that is running or one that a timed-out
+/// stop left behind: either way a second thread would append to the same
+/// day file, so the start is refused rather than doubled.
+fn spawn_tracked<F>(state: &CaptureState, body: F) -> bool
+where
+    F: FnOnce(Alive) + Send + 'static,
+{
+    let (count, _) = &*state.live;
+    let mut live_count = count.lock().expect("capture thread count");
+    if *live_count > 0 {
+        return false;
+    }
+    if state
+        .running
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return false;
+    }
+    let mine = state.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    *live_count += 1;
+    drop(live_count);
+    let alive = Alive {
+        running: state.running.clone(),
+        generation: state.generation.clone(),
+        mine,
+    };
+    let live = state.live.clone();
+    thread::spawn(move || {
+        body(alive);
+        let (count, exited) = &*live;
+        *count.lock().expect("capture thread count") -= 1;
+        exited.notify_all();
+    });
+    true
+}
+
+/// Asks the poll thread to leave and returns only once it has, or once
+/// `STOP_TIMEOUT` expires. False means it is still running, and the caller
+/// must not start another: two threads with their own segmenters append to
+/// the same day file.
+pub fn stop(state: &CaptureState) -> bool {
     state.running.store(false, Ordering::SeqCst);
+    wait_until_stopped(state, STOP_TIMEOUT)
+}
+
+fn wait_until_stopped(state: &CaptureState, timeout: Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    let (count, exited) = &*state.live;
+    let mut live = count.lock().expect("capture thread count");
+    while *live > 0 {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            eprintln!("[capture] the poll thread did not exit within {timeout:?}");
+            return false;
+        }
+        let (guard, result) = exited
+            .wait_timeout(live, remaining)
+            .expect("capture thread count");
+        live = guard;
+        if result.timed_out() && *live > 0 {
+            eprintln!("[capture] the poll thread did not exit within {timeout:?}");
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_broken_rules_file_is_reported_once_and_leaves_capture_running() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(crate::rules::rules_path(dir.path()), "{ not json").unwrap();
+        let mut reported = None;
+
+        let (set, fresh) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(set.rules.is_empty());
+        assert!(fresh, "the first poll reports it");
+
+        let (_, again) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(!again, "the same error is not reported on every poll");
+
+        crate::rules::save(dir.path(), &crate::rules::Rules::default()).unwrap();
+        let (_, after_fix) = load_rules_for_capture(dir.path(), &mut reported);
+        assert!(!after_fix);
+        assert!(reported.is_none(), "a fixed file clears the reported error");
+    }
+
+    #[test]
+    fn zero_idle_secs_turns_the_check_off() {
+        assert!(!is_idle(0, Some(3600.0)));
+    }
+
+    #[test]
+    fn a_platform_with_no_idle_reading_is_never_idle() {
+        assert!(!is_idle(120, None));
+    }
+
+    #[test]
+    fn input_just_under_the_threshold_is_not_idle() {
+        assert!(!is_idle(120, Some(119.9)));
+    }
+
+    #[test]
+    fn input_at_the_threshold_is_idle() {
+        assert!(is_idle(120, Some(120.0)));
+        assert!(is_idle(120, Some(600.0)));
+    }
 
     #[test]
     fn a_new_state_is_not_running_and_has_no_blocks() {
@@ -202,9 +460,103 @@ mod tests {
     #[test]
     fn stop_is_idempotent() {
         let state = CaptureState::new();
-        stop(&state);
-        stop(&state);
+        assert!(stop(&state));
+        assert!(stop(&state));
         assert!(!state.is_running());
+    }
+
+    #[test]
+    fn stop_returns_only_once_a_slow_poll_thread_has_left() {
+        // The real reader can park the poll thread inside one snapshot;
+        // this one parks it for 300ms before it looks at the flag again. A
+        // restart on a 150ms timer would start a second thread inside that
+        // window.
+        let state = CaptureState::new();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        assert!(spawn_tracked(&state, move |alive| loop {
+            thread::sleep(Duration::from_millis(300));
+            counter.fetch_add(1, Ordering::SeqCst);
+            if !alive.is_current() {
+                break;
+            }
+        }));
+
+        let started = std::time::Instant::now();
+        assert!(stop(&state), "the thread left within the timeout");
+        assert!(
+            started.elapsed() >= Duration::from_millis(250),
+            "stop waited for the blocked read, not a fixed sleep; it took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
+        assert!(!state.is_running());
+
+        // And having waited, a start is safe. Two starts still run one
+        // thread: the second is refused rather than doubling the writer.
+        let bodies = Arc::new(AtomicUsize::new(0));
+        let first = bodies.clone();
+        let second = bodies.clone();
+        assert!(spawn_tracked(&state, move |_| {
+            first.fetch_add(1, Ordering::SeqCst);
+        }));
+        assert!(
+            !spawn_tracked(&state, move |_| {
+                second.fetch_add(1, Ordering::SeqCst);
+            }),
+            "a second start while one is live is refused"
+        );
+        assert!(stop(&state));
+        assert_eq!(bodies.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_stop_that_times_out_says_so_rather_than_pretending() {
+        let state = CaptureState::new();
+        assert!(spawn_tracked(&state, |alive| {
+            // Ignores the flag, the way a wedged accessibility read does.
+            let _ = alive;
+            thread::sleep(Duration::from_millis(600));
+        }));
+        state.running.store(false, Ordering::SeqCst);
+        assert!(!wait_until_stopped(&state, Duration::from_millis(50)));
+        assert!(wait_until_stopped(&state, Duration::from_secs(5)));
+    }
+
+    #[test]
+    fn a_thread_left_behind_by_a_timed_out_stop_blocks_the_next_start_and_then_exits() {
+        // The failure this guards: stop times out, the caller starts again,
+        // the new start flips `running` back to true, and the old thread's
+        // loop carries on beside the new one. Two writers, one day file.
+        let state = CaptureState::new();
+        let old_iterations = Arc::new(AtomicUsize::new(0));
+        let counter = old_iterations.clone();
+        assert!(spawn_tracked(&state, move |alive| loop {
+            thread::sleep(Duration::from_millis(300));
+            counter.fetch_add(1, Ordering::SeqCst);
+            if !alive.is_current() {
+                break;
+            }
+        }));
+
+        state.running.store(false, Ordering::SeqCst);
+        assert!(!wait_until_stopped(&state, Duration::from_millis(20)));
+
+        // While the old thread is alive a new start is refused outright.
+        assert!(!spawn_tracked(&state, |_| {}));
+        assert!(!state.is_running(), "a refused start must not set running");
+
+        // Even if something forced `running` back on, the old thread's
+        // generation is stale the moment a new one is issued.
+        state.running.store(true, Ordering::SeqCst);
+        state.generation.fetch_add(1, Ordering::SeqCst);
+        assert!(wait_until_stopped(&state, Duration::from_secs(5)));
+        assert_eq!(old_iterations.load(Ordering::SeqCst), 1);
+        state.running.store(false, Ordering::SeqCst);
+
+        // And once it has gone, a start is admitted again.
+        assert!(spawn_tracked(&state, |_| {}));
+        assert!(stop(&state));
     }
 
     #[test]
@@ -215,36 +567,81 @@ mod tests {
         assert!(clone.is_running());
     }
 
-    fn day() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 8, 25).unwrap()
+    #[test]
+    fn a_kb_file_under_the_capture_folder_is_own_output() {
+        let snap = Snapshot {
+            app: "Zed".into(),
+            document: Some("/Users/x/Ambient Context/KB/2026-09-02/threads.md".into()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context")));
+    }
+
+    #[test]
+    fn a_title_with_a_date_and_a_record_file_name_is_own_output() {
+        let snap = Snapshot {
+            app: "Obsidian".into(),
+            window_title: Some("2026-09-02/messages.md".into()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context")));
+        let other = Snapshot {
+            app: "Obsidian".into(),
+            window_title: Some("messages.md".into()),
+            ..Default::default()
+        };
+        assert!(
+            !is_own_output(&other, Path::new("/Users/x/Ambient Context")),
+            "no date, not ours"
+        );
     }
 
     #[test]
     fn own_output_is_recognised_by_document_path() {
         let snap = Snapshot {
             app: "Obsidian".to_string(),
-            document: Some("/Users/x/Ambient Context/2026-08-25.md".to_string()),
+            document: Some("/Users/x/Ambient Context/Days/2026-08-25/apps.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
     fn own_output_is_recognised_by_todays_filename_in_the_title() {
         let snap = Snapshot {
             app: "TextEdit".to_string(),
+            window_title: Some("2026-08-25/apps.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_file_named_for_its_day_is_own_output_without_a_path() {
+        // Summaries/ and Ledger/ files are named for their day, and an app
+        // with no AXDocument shows only that name.
+        let snap = Snapshot {
+            app: "Preview".to_string(),
             window_title: Some("2026-08-25.md".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+        let later = Snapshot {
+            app: "Preview".to_string(),
+            window_title: Some("Notes - 2026-08-25.md - edited".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&later, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_focused_app_is_reported_only_while_a_read_has_seen_one() {
+        let state = CaptureState::new();
+        assert_eq!(state.focused_app(), None);
+        set_focused_app(&state.focused_app, Some("Xcode".to_string()));
+        assert_eq!(state.clone().focused_app(), Some("Xcode".to_string()));
+        set_focused_app(&state.focused_app, None);
+        assert_eq!(state.focused_app(), None);
     }
 
     #[test]
@@ -254,11 +651,7 @@ mod tests {
             window_title: Some("2026-08-25 - Ambient Context - Obsidian".to_string()),
             ..Default::default()
         };
-        assert!(is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -268,11 +661,7 @@ mod tests {
             window_title: Some("2026-08-23 - Audio Capture Spike Findings".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 
     #[test]
@@ -283,10 +672,26 @@ mod tests {
             url: Some("https://v2.tauri.app/".to_string()),
             ..Default::default()
         };
-        assert!(!is_own_output(
-            &snap,
-            Path::new("/Users/x/Ambient Context"),
-            day()
-        ));
+        assert!(!is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_summary_the_app_wrote_is_own_output() {
+        let snap = Snapshot {
+            app: "Obsidian".to_string(),
+            document: Some("/Users/x/Ambient Context/Summaries/2026-08-25.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
+    }
+
+    #[test]
+    fn a_ledger_entry_the_app_wrote_is_own_output() {
+        let snap = Snapshot {
+            app: "TextEdit".to_string(),
+            document: Some("/Users/x/Ambient Context/Ledger/2026-08-25.md".to_string()),
+            ..Default::default()
+        };
+        assert!(is_own_output(&snap, Path::new("/Users/x/Ambient Context"),));
     }
 }

@@ -26,3 +26,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Playwright MCP scratch output
+.playwright-mcp/
+
+# Local agent plans, specs, reviews and scratch (not for the public tree)
+.superpowers/

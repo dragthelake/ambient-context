@@ -21,7 +21,9 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          # Kept in step with the volta pin in package.json, so a release is
+          # built on the runtime the app is developed against.
+          node-version: 24
           cache: npm
 
       - name: Install frontend dependencies

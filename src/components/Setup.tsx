@@ -1,66 +1,19 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { AsciiEye } from "./AsciiEye";
-
-type Permission = "granted" | "notGranted";
-
-type CaptureStatus = {
-  running: boolean;
-  blocks_today: number;
-};
-
-function looksSynced(folder: string): boolean {
-  return (
-    folder.includes("Mobile Documents") ||
-    folder.includes("com~apple~CloudDocs") ||
-    folder.includes("iCloud Drive")
-  );
-}
+import { EyePanel } from "./EyePanel";
+import { useAppStatus, type CaptureStatus } from "../lib/status";
+import { looksSynced } from "./StorageSettings";
 
 function closeWindow() {
   void getCurrentWindow().close();
 }
 
 export function Setup() {
-  const [permission, setPermission] = useState<Permission>("notGranted");
   const [asked, setAsked] = useState(false);
-  const [folder, setFolder] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
-  const [capture, setCapture] = useState<CaptureStatus>({
-    running: false,
-    blocks_today: 0,
-  });
-
-  // The toggle lives in the menu bar, so this page only ever observes
-  // capture state; a 1s poll keeps it honest without any event plumbing.
-  useEffect(() => {
-    let cancelled = false;
-    const read = async () => {
-      const next = await invoke<CaptureStatus>("capture_status");
-      if (!cancelled) setCapture(next);
-    };
-    void read();
-    const id = setInterval(read, 1000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  useEffect(() => {
-    invoke<string | null>("current_folder").then((next) => setFolder(next ?? null));
-    invoke<Permission>("permission_status").then(setPermission);
-  }, []);
-
-  useEffect(() => {
-    if (permission === "granted") return;
-    const id = setInterval(async () => {
-      const next = await invoke<Permission>("permission_status");
-      setPermission(next);
-    }, 700);
-    return () => clearInterval(id);
-  }, [permission]);
+  const { capture, setCapture, permission, folder, setFolder, ready } =
+    useAppStatus();
 
   // Escape closes the window, as it would any dialog.
   useEffect(() => {
@@ -82,8 +35,6 @@ export function Setup() {
     }
   };
 
-  const ready = permission === "granted" && folder !== null;
-
   // Becoming ready mid-session (the grant arriving from System Settings)
   // starts recording the same way a ready launch would.
   useEffect(() => {
@@ -97,52 +48,34 @@ export function Setup() {
         <span className="titlebar-text" data-tauri-drag-region>
           AMBIENT_CONTEXT
         </span>
-        <button
-          type="button"
-          className="titlebar-button"
-          aria-label="Close settings"
-          onClick={closeWindow}
-        >
-          ×
-        </button>
+        <div className="titlebar-controls">
+          <button type="button" aria-label="Close settings" onClick={closeWindow} />
+        </div>
       </div>
 
       <div className="window-body">
-        <div className="eye-panel">
-          <AsciiEye watching={capture.running} />
-          <p className="eye-caption">
-            {capture.running
-              ? "RECORDING"
-              : ready
-                ? "EYE CLOSED. NOTHING IS BEING RECORDED."
-                : "SETUP REQUIRED. NOTHING IS BEING RECORDED."}
-          </p>
-          <button
-            type="button"
-            className="record-toggle"
-            disabled={!ready && !capture.running}
-            onClick={async () =>
-              setCapture(await invoke<CaptureStatus>("toggle_capture"))
-            }
-          >
-            {capture.running ? "Stop recording" : "Start recording"}
-          </button>
-        </div>
+        <EyePanel capture={capture} ready={ready} onCapture={setCapture} />
 
         <fieldset>
           <legend>What it does</legend>
           <p>
             Ambient Context reads the text of whichever window you have
-            focused and writes it to a markdown file on your computer. One
-            file per day, in a folder you choose.
+            focused and writes it to markdown files on your computer. One
+            day folder at a time, in a folder you choose.
           </p>
           <ul>
             <li>It never takes screenshots or records your screen.</li>
             <li>It only reads the window you are actually looking at.</li>
-            <li>Nothing is sent anywhere. There is no account and no server.</li>
             <li>
-              It skips password fields, password managers and private browsing
-              windows.
+              The app does not upload your record. There is no account and
+              no Ambient Context server. An optional update check talks to
+              GitHub; a synced folder or agent CLI is a boundary you choose.
+            </li>
+            <li>
+              It skips secure password fields at the source, and drops
+              snapshots that match its known password-manager and private
+              browsing rules before writing. Pattern redaction covers common
+              secrets; it is not a complete filter.
             </li>
             <li>
               Stop it any time from the menu bar; it stays stopped until you
@@ -189,9 +122,10 @@ export function Setup() {
         <fieldset>
           <legend>2. Choose where to save</legend>
           <p>
-            Your files are plain markdown. The default folder sits outside
-            Documents so iCloud will not upload them. You can move or delete
-            them at any time.
+            Your files are plain markdown; you can move or delete them at any
+            time. Ambient Context opens when you log in so the record does
+            not have a hole in it after a restart; you can turn that off in
+            Settings.
           </p>
           {folder ? (
             <p className="status-line done">
@@ -213,7 +147,7 @@ export function Setup() {
                 disabled={picking}
                 onClick={() => void pickFolder("use_default_folder")}
               >
-                Save to ~/Ambient Context
+                Save to Documents/Ambient Context
               </button>
             )}
             <button
@@ -234,9 +168,9 @@ export function Setup() {
           <fieldset>
             <legend>You are set up</legend>
             <p>
-              Click the menu bar icon to start and stop capturing, or
-              right-click it and choose Start Capturing. The right-click menu
-              also opens today's file and these settings.
+              Click the menu bar icon to open the main window, or right-click
+              it to start and stop capturing, reveal the folder and reach
+              these settings.
             </p>
           </fieldset>
         ) : null}

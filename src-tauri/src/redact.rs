@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 /// Applications whose contents are never read at all. Matched
 /// case-insensitively against the application's localised name, as a
 /// substring, so that "1Password 8" and "1Password" both match.
-const EXCLUDED_APPS: &[&str] = &[
+pub const EXCLUDED_APPS: &[&str] = &[
     "1password",
     "bitwarden",
     "dashlane",
@@ -25,12 +25,20 @@ pub fn is_excluded_app(app: &str) -> bool {
         .any(|excluded| lower.contains(excluded))
 }
 
+/// The app's own process. Its window shows settings text and the
+/// summaries it wrote, which recorded 165 KB in one measured day and fed
+/// the summary back into itself.
+pub fn is_own_app(app: &str) -> bool {
+    let lower = app.to_lowercase();
+    lower == "ambient-context" || lower == "ambient context"
+}
+
 /// Window-title markers for private browsing in the major browsers. The
 /// browser is the redaction layer's largest blind spot: banking and health
 /// happen inside Safari and Chrome, which can never be on the app exclusion
 /// list, and the title is the only per-site signal available. A private
 /// window is the user saying "not this", so the whole snapshot is dropped.
-const PRIVATE_WINDOW_MARKERS: &[&str] = &["private browsing", "incognito", "inprivate"];
+pub const PRIVATE_WINDOW_MARKERS: &[&str] = &["private browsing", "incognito", "inprivate"];
 
 pub fn is_private_window(title: &str) -> bool {
     let lower = title.to_lowercase();
@@ -58,18 +66,58 @@ fn patterns() -> &'static [Regex] {
     })
 }
 
+#[cfg(test)]
 pub fn redact_line(line: &str) -> String {
+    redact_line_with(line, &[])
+}
+
+/// The built-in patterns, then the user's own. A user pattern is a plain
+/// regex; anything that does not compile is dropped, because a typo in
+/// settings must never stop capture.
+pub fn redact_line_with(line: &str, extra: &[Regex]) -> String {
     let mut out = line.to_string();
-    for pattern in patterns() {
+    for pattern in patterns().iter().chain(extra.iter()) {
         out = pattern.replace_all(&out, "[redacted]").into_owned();
     }
     out
 }
 
+/// The same patterns, checked rather than compiled: the index of each
+/// entry that is not a regex, with the error it produced. Capture stays
+/// lenient (a typo must never stop recording), so the save is where the
+/// user is told, while they are still looking at what they typed.
+pub fn validate_extra(patterns: &[String]) -> Vec<(usize, String)> {
+    patterns
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| !p.trim().is_empty())
+        .filter_map(|(index, p)| Regex::new(p).err().map(|e| (index, e.to_string())))
+        .collect()
+}
+
+pub fn compile_extra(patterns: &[String]) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter(|p| !p.trim().is_empty())
+        .filter_map(|p| match Regex::new(p) {
+            Ok(compiled) => Some(compiled),
+            Err(e) => {
+                eprintln!("[redact] ignoring invalid pattern {p:?}: {e}");
+                None
+            }
+        })
+        .collect()
+}
+
 /// Returns `None` when the whole snapshot is dropped: its application is
-/// excluded, or its window is a private browsing window. Otherwise returns
-/// the snapshot with every line redacted.
-pub fn redact_snapshot(snapshot: Snapshot) -> Option<Snapshot> {
+/// excluded, its window is a private browsing window, or a user rule says
+/// exclude. Otherwise returns the snapshot with every line redacted, and
+/// `headings_only` set when a rule says record the heading only.
+pub fn redact_snapshot(
+    snapshot: Snapshot,
+    rules: &crate::rules::Rules,
+    extra: &[Regex],
+) -> Option<Snapshot> {
     if is_excluded_app(&snapshot.app) {
         return None;
     }
@@ -80,12 +128,27 @@ pub fn redact_snapshot(snapshot: Snapshot) -> Option<Snapshot> {
     {
         return None;
     }
+    let decision = crate::rules::decide(
+        rules,
+        &snapshot.app,
+        snapshot.window_title.as_deref(),
+        snapshot.url.as_deref(),
+    );
+    if decision == crate::rules::Decision::Exclude {
+        return None;
+    }
+    let own_app = is_own_app(&snapshot.app);
     Some(Snapshot {
         app: snapshot.app,
-        window_title: snapshot.window_title.map(|t| redact_line(&t)),
-        document: snapshot.document.map(|d| redact_line(&d)),
-        url: snapshot.url.map(|u| redact_line(&u)),
-        text: snapshot.text.iter().map(|l| redact_line(l)).collect(),
+        window_title: snapshot.window_title.map(|t| redact_line_with(&t, extra)),
+        document: snapshot.document.map(|d| redact_line_with(&d, extra)),
+        url: snapshot.url.map(|u| redact_line_with(&u, extra)),
+        text: snapshot
+            .text
+            .iter()
+            .map(|l| redact_line_with(l, extra))
+            .collect(),
+        headings_only: decision == crate::rules::Decision::HeadingsOnly || own_app,
     })
 }
 
@@ -106,6 +169,18 @@ mod tests {
         assert!(!is_excluded_app("Linear"));
         assert!(!is_excluded_app("Slack"));
         assert!(!is_excluded_app("Safari"));
+    }
+
+    #[test]
+    fn the_apps_own_window_is_headings_only() {
+        use crate::reader::Snapshot;
+        let snap = Snapshot {
+            app: "Ambient Context".into(),
+            text: vec!["Volume 55 %".into()],
+            ..Default::default()
+        };
+        let out = redact_snapshot(snap, &crate::rules::Rules::default(), &[]).unwrap();
+        assert!(out.headings_only);
     }
 
     #[test]
@@ -160,7 +235,7 @@ mod tests {
             text: vec!["account balance".to_string()],
             ..Default::default()
         };
-        assert!(redact_snapshot(snapshot).is_none());
+        assert!(redact_snapshot(snapshot, &Rules::default(), &[]).is_none());
     }
 
     #[test]
@@ -171,7 +246,7 @@ mod tests {
             text: vec!["secret".to_string()],
             ..Default::default()
         };
-        assert!(redact_snapshot(snapshot).is_none());
+        assert!(redact_snapshot(snapshot, &Rules::default(), &[]).is_none());
     }
 
     #[test]
@@ -182,7 +257,7 @@ mod tests {
             text: vec![],
             ..Default::default()
         };
-        let out = redact_snapshot(snapshot).unwrap();
+        let out = redact_snapshot(snapshot, &Rules::default(), &[]).unwrap();
         assert!(!out.window_title.unwrap().contains("abcdefghijklmnopqrst"));
     }
 
@@ -194,7 +269,91 @@ mod tests {
             url: Some("https://example.com/cb?token=abcdefghijklmnopqrst".to_string()),
             ..Default::default()
         };
-        let out = redact_snapshot(snapshot).unwrap();
+        let out = redact_snapshot(snapshot, &Rules::default(), &[]).unwrap();
         assert!(!out.url.unwrap().contains("abcdefghijklmnopqrst"));
+    }
+
+    use crate::rules::{Action, Rule, Rules, Target};
+
+    fn with(rule: Rule) -> Rules {
+        let mut set = Rules::default();
+        set.add(rule).unwrap();
+        set
+    }
+
+    #[test]
+    fn an_exclusion_rule_drops_the_snapshot() {
+        let rules = with(Rule {
+            id: "r1".to_string(),
+            target: Target::App("Slack".to_string()),
+            action: Action::Exclude,
+            note: None,
+        });
+        let snapshot = Snapshot {
+            app: "Slack".to_string(),
+            window_title: Some("#empty-build".to_string()),
+            text: vec!["standup notes".to_string()],
+            ..Default::default()
+        };
+        assert!(redact_snapshot(snapshot, &rules, &[]).is_none());
+    }
+
+    #[test]
+    fn a_headings_only_rule_marks_the_snapshot_and_keeps_its_text() {
+        let rules = with(Rule {
+            id: "r1".to_string(),
+            target: Target::Website("news.ycombinator.com".to_string()),
+            action: Action::HeadingsOnly,
+            note: None,
+        });
+        let snapshot = Snapshot {
+            app: "Safari".to_string(),
+            window_title: Some("Hacker News".to_string()),
+            url: Some("https://news.ycombinator.com/".to_string()),
+            text: vec!["a story title".to_string()],
+            ..Default::default()
+        };
+        let out = redact_snapshot(snapshot, &rules, &[]).unwrap();
+        assert!(out.headings_only);
+        assert_eq!(out.text, vec!["a story title".to_string()]);
+    }
+
+    #[test]
+    fn an_unmatched_snapshot_is_not_headings_only() {
+        let snapshot = Snapshot {
+            app: "Linear".to_string(),
+            window_title: Some("YN-102".to_string()),
+            text: vec!["one".to_string()],
+            ..Default::default()
+        };
+        let out = redact_snapshot(snapshot, &Rules::default(), &[]).unwrap();
+        assert!(!out.headings_only);
+    }
+
+    #[test]
+    fn user_patterns_redact_alongside_the_built_ins() {
+        let extra = compile_extra(&["Project Kestrel".to_string()]);
+        let out = redact_line_with("we shipped Project Kestrel today", &extra);
+        assert_eq!(out, "we shipped [redacted] today");
+    }
+
+    #[test]
+    fn validate_extra_names_the_bad_pattern() {
+        let bad = validate_extra(&["Kestrel".to_string(), "([unclosed".to_string()]);
+        assert_eq!(bad.len(), 1, "only the second pattern is invalid");
+        assert_eq!(bad[0].0, 1, "reports the index of the bad pattern");
+        assert!(!bad[0].1.is_empty(), "carries the regex error");
+    }
+
+    #[test]
+    fn validate_extra_ignores_blank_lines() {
+        assert!(validate_extra(&["".to_string(), "   ".to_string()]).is_empty());
+    }
+
+    #[test]
+    fn an_invalid_user_pattern_is_skipped_rather_than_breaking_capture() {
+        let extra = compile_extra(&["([unclosed".to_string(), "Kestrel".to_string()]);
+        assert_eq!(extra.len(), 1);
+        assert_eq!(redact_line_with("Kestrel", &extra), "[redacted]");
     }
 }

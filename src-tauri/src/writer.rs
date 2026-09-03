@@ -1,3 +1,5 @@
+use crate::route::{self, Kind};
+use crate::rules::Rules;
 use crate::segment::Block;
 use chrono::{Datelike, NaiveDate};
 use std::collections::HashSet;
@@ -43,14 +45,19 @@ impl DayDedup {
         self.date = Some(date);
         self.seen.clear();
         self.skeletons.clear();
-        if let Ok(existing) = fs::read_to_string(file_path(folder, date)) {
+        for file in [DayFile::Apps, DayFile::Messages] {
+            let Ok(existing) = fs::read_to_string(file.path(folder, date)) else {
+                continue;
+            };
             for line in existing.lines() {
                 if line.is_empty()
                     || line == "---"
                     || line.starts_with("## ")
                     || line.starts_with("file: ")
                     || line.starts_with("url: ")
+                    || line.starts_with("routed: ")
                     || line.starts_with("date: ")
+                    || line.starts_with("kind: ")
                     || line.starts_with("captured_by: ")
                 {
                     continue;
@@ -68,9 +75,9 @@ impl DayDedup {
     fn novel_lines(&mut self, folder: &Path, block: &Block) -> Vec<String> {
         let date = block.start.date_naive();
         self.roll_to(folder, date);
-        // A deleted day file means the user wants a fresh start; remembering
+        // A deleted day folder means the user wants a fresh start; remembering
         // its lines would recreate it as bare headings.
-        if !self.seen.is_empty() && !file_path(folder, date).exists() {
+        if !self.seen.is_empty() && !day_dir(folder, date).exists() {
             self.seen.clear();
             self.skeletons.clear();
         }
@@ -101,22 +108,144 @@ impl DayDedup {
     }
 }
 
-pub fn file_path(folder: &Path, date: NaiveDate) -> PathBuf {
-    folder.join(format!(
-        "{:04}-{:02}-{:02}.md",
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayFile {
+    Apps,
+    Websites,
+    Messages,
+}
+
+impl DayFile {
+    pub fn all() -> [DayFile; 3] {
+        [DayFile::Apps, DayFile::Websites, DayFile::Messages]
+    }
+    pub fn file_name(self) -> &'static str {
+        match self {
+            DayFile::Apps => "apps.md",
+            DayFile::Websites => "websites.md",
+            DayFile::Messages => "messages.md",
+        }
+    }
+    pub fn kind_name(self) -> &'static str {
+        match self {
+            DayFile::Apps => "apps",
+            DayFile::Websites => "websites",
+            DayFile::Messages => "messages",
+        }
+    }
+    pub fn from_name(name: &str) -> Option<DayFile> {
+        match name {
+            "apps" | "apps.md" => Some(DayFile::Apps),
+            "websites" | "websites.md" => Some(DayFile::Websites),
+            "messages" | "messages.md" => Some(DayFile::Messages),
+            _ => None,
+        }
+    }
+    pub fn path(self, folder: &Path, date: NaiveDate) -> PathBuf {
+        day_dir(folder, date).join(self.file_name())
+    }
+}
+
+pub fn days_dir(folder: &Path) -> PathBuf {
+    folder.join("Days")
+}
+
+pub fn day_dir(folder: &Path, date: NaiveDate) -> PathBuf {
+    days_dir(folder).join(format!(
+        "{:04}-{:02}-{:02}",
         date.year(),
         date.month(),
         date.day()
     ))
 }
 
-fn frontmatter(date: NaiveDate) -> String {
-    format!(
-        "---\ndate: {:04}-{:02}-{:02}\ncaptured_by: Ambient Context {}\n---\n",
+fn frontmatter(date: NaiveDate, file: DayFile) -> String {
+    let mut out = format!(
+        "---\ndate: {:04}-{:02}-{:02}\nkind: {}\ncaptured_by: Ambient Context {}\n---\n",
         date.year(),
         date.month(),
         date.day(),
+        file.kind_name(),
         env!("CARGO_PKG_VERSION")
+    );
+    if file == DayFile::Websites {
+        out.push_str("\n| start | end | app | domain | title | url |\n| --- | --- | --- | --- | --- | --- |\n");
+    }
+    out
+}
+
+/// The two output knobs the settings page exposes. `max_block_chars` of 0
+/// is unlimited, which is what the default must be for this release to
+/// change nothing until it is touched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Shape {
+    pub max_block_chars: usize,
+    pub write_references: bool,
+}
+
+impl Default for Shape {
+    fn default() -> Self {
+        Shape {
+            max_block_chars: 0,
+            write_references: true,
+        }
+    }
+}
+
+/// A pipe inside a cell would split the row.
+pub fn escape_cell(text: &str) -> String {
+    text.replace('|', "\\|")
+}
+
+/// Query parameters that say where a link was clicked from, not which
+/// page it points at. Two visits to the same page through different
+/// campaigns are one page, and the totals should say so.
+const TRACKING_PARAMS: &[&str] = &["fbclid", "gclid", "ref", "ref_src", "igshid"];
+
+fn is_tracking(name: &str) -> bool {
+    name.starts_with("utm_") || TRACKING_PARAMS.contains(&name)
+}
+
+/// The URL without its tracking parameters. The fragment is kept, because
+/// it is often the section of the page that was actually read, and the
+/// `?` goes when nothing is left in front of it.
+pub fn strip_tracking(url: &str) -> String {
+    let (head, fragment) = match url.split_once('#') {
+        Some((head, fragment)) => (head, Some(fragment)),
+        None => (url, None),
+    };
+    let Some((base, query)) = head.split_once('?') else {
+        return url.to_string();
+    };
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| !is_tracking(pair.split_once('=').map_or(*pair, |(name, _)| name)))
+        .collect();
+    let mut out = base.to_string();
+    if !kept.is_empty() {
+        out.push('?');
+        out.push_str(&kept.join("&"));
+    }
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(fragment);
+    }
+    out
+}
+
+pub fn render_website_row(block: &Block) -> String {
+    let url = strip_tracking(&block.url.clone().unwrap_or_default());
+    let domain = crate::rules::domain_of(&url).unwrap_or_default();
+    format!(
+        "| {} | {} | {} | {} | {} | {} |\n",
+        block.start.format("%H:%M"),
+        block.end.format("%H:%M"),
+        escape_cell(&block.app),
+        escape_cell(&domain),
+        escape_cell(block.title.as_deref().unwrap_or("")),
+        escape_cell(&url),
     )
 }
 
@@ -124,7 +253,12 @@ fn frontmatter(date: NaiveDate) -> String {
 /// the caller decides which lines are worth writing (usually the novel
 /// ones). A block with no novel lines still renders, because the heading
 /// is the day's timeline even when the content was all seen before.
-pub fn render_block(block: &Block, lines: &[String]) -> String {
+pub fn render_block(
+    block: &Block,
+    lines: &[String],
+    shape: Shape,
+    replay: Option<NaiveDate>,
+) -> String {
     let mut out = String::new();
     out.push_str("\n## ");
     out.push_str(&block.start.format("%H:%M").to_string());
@@ -138,68 +272,273 @@ pub fn render_block(block: &Block, lines: &[String]) -> String {
             out.push_str(title);
         }
     }
+    // Last on the line, so a title carrying middle dots of its own still
+    // parses and the marker is found by trimming the end.
+    if let Some(date) = replay {
+        out.push_str(&format!(" [replay: {}]", date.format("%Y-%m-%d")));
+    }
     out.push_str("\n\n");
     // The reference outranks the scraped text: it points at the real
     // document, which the consuming LLM can open in full.
-    if let Some(document) = &block.document {
-        out.push_str("file: ");
-        out.push_str(document);
-        out.push('\n');
+    if shape.write_references {
+        if let Some(document) = &block.document {
+            out.push_str("file: ");
+            out.push_str(document);
+            out.push('\n');
+        }
+        if let Some(url) = &block.url {
+            out.push_str("url: ");
+            out.push_str(url);
+            out.push('\n');
+        }
+        if block.document.is_some() || block.url.is_some() {
+            out.push('\n');
+        }
     }
-    if let Some(url) = &block.url {
-        out.push_str("url: ");
-        out.push_str(url);
-        out.push('\n');
+    // A headings-only block keeps its place in the timeline and its
+    // reference, and gives up its text. So does a replayed one: its text
+    // is an earlier day's, already recorded on that day.
+    if block.headings_only || replay.is_some() {
+        return out;
     }
-    if block.document.is_some() || block.url.is_some() {
-        out.push('\n');
-    }
+    let mut written = 0usize;
     for line in lines {
+        if shape.max_block_chars > 0 && written >= shape.max_block_chars {
+            out.push_str("[truncated]\n");
+            break;
+        }
         out.push_str(line);
+        out.push('\n');
+        written += line.chars().count() + 1;
+    }
+    out
+}
+
+/// The heading alone, then where the body went. References are left off:
+/// the website row or the messages block carries them.
+fn render_routed(block: &Block, kind: Kind) -> String {
+    let mut out = render_block(
+        block,
+        &[],
+        Shape {
+            max_block_chars: 0,
+            write_references: false,
+        },
+        None,
+    );
+    if let Some(name) = kind.routed_name() {
+        out.push_str("routed: ");
+        out.push_str(name);
         out.push('\n');
     }
     out
 }
 
-/// Appends one block to the file for the block's own start date, creating the
-/// folder and the file with frontmatter if they do not exist yet. Only lines
-/// the day has not already recorded are written.
-pub fn append_block(folder: &Path, block: &Block, dedup: &mut DayDedup) -> std::io::Result<()> {
-    fs::create_dir_all(folder)?;
-    let date = block.start.date_naive();
-    let path = file_path(folder, date);
+fn append_to(path: &Path, date: NaiveDate, file: DayFile, text: &str) -> std::io::Result<()> {
     let is_new = !path.exists();
-    let novel = dedup.novel_lines(folder, block);
-
-    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
+    let mut handle = OpenOptions::new().create(true).append(true).open(path)?;
     if is_new {
-        file.write_all(frontmatter(date).as_bytes())?;
+        handle.write_all(frontmatter(date, file).as_bytes())?;
     }
-    file.write_all(render_block(block, &novel).as_bytes())?;
-    ensure_agents_file(folder)?;
-    Ok(())
+    handle.write_all(text.as_bytes())
 }
 
-/// Writes AGENTS.md into the capture folder if it is not already there, so
-/// the folder explains itself to whatever LLM reads it. Never overwrites:
-/// the user may have edited it.
+/// Appends one block to the files for the block's own start date. The
+/// heading always goes to apps.md; the body goes where the kind says.
+pub fn append_block(
+    folder: &Path,
+    block: &Block,
+    dedup: &mut DayDedup,
+    shape: Shape,
+    rules: &Rules,
+) -> std::io::Result<()> {
+    let date = block.start.date_naive();
+    // A block that is a record of an earlier day: its lines are that day's
+    // and must not be counted as today's work or spend today's dedup set.
+    let replay = crate::replay::detect(folder, block);
+    let kind = route::kind(
+        rules,
+        &block.app,
+        block.title.as_deref(),
+        block.url.as_deref(),
+    );
+    let apps = DayFile::Apps.path(folder, date);
+
+    match kind {
+        Kind::App => {
+            let novel = if block.headings_only || replay.is_some() {
+                Vec::new()
+            } else {
+                dedup.novel_lines(folder, block)
+            };
+            fs::create_dir_all(day_dir(folder, date))?;
+            append_to(
+                &apps,
+                date,
+                DayFile::Apps,
+                &render_block(block, &novel, shape, replay),
+            )?;
+        }
+        Kind::Website => {
+            fs::create_dir_all(day_dir(folder, date))?;
+            append_to(&apps, date, DayFile::Apps, &render_routed(block, kind))?;
+            append_to(
+                &DayFile::Websites.path(folder, date),
+                date,
+                DayFile::Websites,
+                &render_website_row(block),
+            )?;
+        }
+        Kind::Message => {
+            let cleaned = Block {
+                lines: crate::prune::for_kind(kind, block.lines.clone()),
+                ..block.clone()
+            };
+            let novel = if cleaned.headings_only || replay.is_some() {
+                Vec::new()
+            } else {
+                dedup.novel_lines(folder, &cleaned)
+            };
+            fs::create_dir_all(day_dir(folder, date))?;
+            append_to(&apps, date, DayFile::Apps, &render_routed(block, kind))?;
+            append_to(
+                &DayFile::Messages.path(folder, date),
+                date,
+                DayFile::Messages,
+                &render_block(&cleaned, &novel, shape, replay),
+            )?;
+        }
+    }
+    ensure_agents_file(folder)
+}
+
+/// Content hashes of `AGENTS.md` as earlier versions of the app shipped
+/// it. A file matching one of these is the app's own copy, untouched, and
+/// can be replaced with the current version. Anything else belongs to the
+/// user.
+const PREVIOUS_BUNDLED_AGENTS: &[&str] = &[
+    "3102846b796ab65642806000543c289e49131d53001b53cada23b0f88467f0af",
+    "5302950a122a3433f6a4dbbb0a285f83397d516bf9b7a1ba17619384637dd2ae",
+    "3e2ba105d4490c78b7a998c1b048215e385806d41e40733211f694e313aa6dba",
+    "e832325a4b8ae2884822de3e48a86a2bf8ae636f33900025c24bb10e1a116db8",
+];
+
+fn is_bundled_agents_file(text: &str, current: &str) -> bool {
+    text == current
+        || PREVIOUS_BUNDLED_AGENTS.contains(&crate::ledger::sha256_of(text.as_bytes()).as_str())
+}
+
+/// Writes AGENTS.md into the capture folder so the folder explains itself
+/// to whatever LLM reads it. A file the user has edited is never
+/// overwritten: only a copy this app wrote, byte for byte, is replaced.
+/// Everything else gets the new version beside it as `AGENTS.md.new`, once,
+/// with a line on stderr saying so.
 pub fn ensure_agents_file(folder: &Path) -> std::io::Result<()> {
     let path = folder.join("AGENTS.md");
-    if path.exists() {
+    let current = include_str!("../assets/AGENTS.md");
+    let Ok(existing) = fs::read_to_string(&path) else {
+        return fs::write(&path, current);
+    };
+    if existing == current {
         return Ok(());
     }
-    fs::write(path, include_str!("../assets/AGENTS.md"))
+    if is_bundled_agents_file(&existing, current) {
+        return fs::write(&path, current);
+    }
+    let beside = folder.join("AGENTS.md.new");
+    if fs::read_to_string(&beside).ok().as_deref() != Some(current) {
+        fs::write(&beside, current)?;
+        eprintln!(
+            "[writer] AGENTS.md has been edited, so this version was written to {} instead.",
+            beside.display()
+        );
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::rules::Rules;
     use chrono::{Local, TimeZone};
+    use std::path::Path;
     use tempfile::tempdir;
+
+    fn date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 8, 25).unwrap()
+    }
+
+    fn block(
+        app: &str,
+        title: &str,
+        url: Option<&str>,
+        document: Option<&str>,
+        minute: u32,
+        end_minute: u32,
+        lines: &[&str],
+    ) -> Block {
+        Block {
+            app: app.to_string(),
+            title: Some(title.to_string()),
+            document: document.map(str::to_string),
+            url: url.map(str::to_string),
+            start: Local.with_ymd_and_hms(2026, 8, 25, 9, minute, 0).unwrap(),
+            end: Local
+                .with_ymd_and_hms(2026, 8, 25, 9, end_minute, 0)
+                .unwrap(),
+            lines: lines.iter().map(|s| s.to_string()).collect(),
+            headings_only: false,
+        }
+    }
+
+    fn zed() -> Block {
+        block(
+            "Zed",
+            "writer.rs",
+            None,
+            Some("/Users/x/writer.rs"),
+            14,
+            41,
+            &["fn append_block"],
+        )
+    }
+    fn arc() -> Block {
+        block(
+            "Arc",
+            "Tauri | system tray",
+            Some("https://v2.tauri.app/learn/system-tray/"),
+            None,
+            41,
+            48,
+            &["Tray icons on macOS"],
+        )
+    }
+    fn slack() -> Block {
+        block(
+            "Slack",
+            "#empty-build",
+            None,
+            None,
+            48,
+            59,
+            &["dan: shipping the notch state thursday"],
+        )
+    }
+
+    fn write_all(dir: &Path) {
+        let mut dedup = DayDedup::new();
+        for b in [zed(), arc(), slack()] {
+            append_block(dir, &b, &mut dedup, Shape::default(), &Rules::default()).unwrap();
+        }
+    }
+
+    fn read(dir: &Path, file: DayFile) -> String {
+        fs::read_to_string(file.path(dir, date())).unwrap()
+    }
 
     fn block_at(hour: u32, minute: u32, end_minute: u32) -> Block {
         Block {
-            app: "Linear".to_string(),
+            app: "Zed".to_string(),
             title: Some("YN-102".to_string()),
             document: None,
             url: None,
@@ -210,7 +549,303 @@ mod tests {
                 .with_ymd_and_hms(2026, 8, 25, hour, end_minute, 0)
                 .unwrap(),
             lines: vec!["read the issue".to_string()],
+            headings_only: false,
         }
+    }
+
+    #[test]
+    fn message_bodies_are_pruned_of_mail_chrome_before_writing() {
+        let dir = tempdir().unwrap();
+        let mail = block(
+            "Mail",
+            "All Inboxes",
+            None,
+            None,
+            10,
+            12,
+            &[
+                "7:09 am",
+                "Reply-To: \u{fffc}",
+                "Patient letter regarding Mr Smith",
+            ],
+        );
+        append_block(
+            dir.path(),
+            &mail,
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let messages = read(dir.path(), DayFile::Messages);
+        assert!(messages.contains("Patient letter regarding Mr Smith"));
+        assert!(!messages.contains("7:09 am"));
+        assert!(!messages.contains("Reply-To"));
+    }
+
+    #[test]
+    fn day_dir_is_days_slash_date() {
+        assert_eq!(
+            day_dir(Path::new("/tmp/x"), date()),
+            PathBuf::from("/tmp/x/Days/2026-08-25")
+        );
+        assert_eq!(
+            DayFile::Apps.path(Path::new("/tmp/x"), date()),
+            PathBuf::from("/tmp/x/Days/2026-08-25/apps.md")
+        );
+    }
+
+    #[test]
+    fn three_blocks_land_in_three_files() {
+        let dir = tempdir().unwrap();
+        write_all(dir.path());
+
+        let apps = read(dir.path(), DayFile::Apps);
+        assert!(
+            apps.starts_with("---\ndate: 2026-08-25\nkind: apps\ncaptured_by: Ambient Context ")
+        );
+        assert!(apps.contains("## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs\n\nfile: /Users/x/writer.rs\n\nfn append_block\n"));
+        assert!(apps.contains(
+            "## 09:41\u{2013}09:48 \u{00b7} Arc \u{00b7} Tauri | system tray\n\nrouted: websites\n"
+        ));
+        assert!(apps.contains(
+            "## 09:48\u{2013}09:59 \u{00b7} Slack \u{00b7} #empty-build\n\nrouted: messages\n"
+        ));
+        assert!(!apps.contains("Tray icons on macOS"));
+        assert!(!apps.contains("dan: shipping"));
+
+        let websites = read(dir.path(), DayFile::Websites);
+        assert!(websites.contains("kind: websites\n"));
+        assert!(websites.contains(
+            "| start | end | app | domain | title | url |\n| --- | --- | --- | --- | --- | --- |\n"
+        ));
+        assert!(websites.contains("| 09:41 | 09:48 | Arc | v2.tauri.app | Tauri \\| system tray | https://v2.tauri.app/learn/system-tray/ |\n"));
+
+        let messages = read(dir.path(), DayFile::Messages);
+        assert!(messages.contains("kind: messages\n"));
+        assert!(messages.contains("## 09:48\u{2013}09:59 \u{00b7} Slack \u{00b7} #empty-build\n\ndan: shipping the notch state thursday\n"));
+    }
+
+    #[test]
+    fn a_website_block_does_not_enter_the_dedup_set() {
+        let dir = tempdir().unwrap();
+        let mut dedup = DayDedup::new();
+        let mut page = arc();
+        page.lines = vec!["shared sentence here".to_string()];
+        append_block(
+            dir.path(),
+            &page,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let mut editor = zed();
+        editor.lines = vec!["shared sentence here".to_string()];
+        append_block(
+            dir.path(),
+            &editor,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Apps).contains("shared sentence here"));
+    }
+
+    #[test]
+    fn a_restart_reseeds_from_apps_and_messages_together() {
+        let dir = tempdir().unwrap();
+        write_all(dir.path());
+        let mut fresh = DayDedup::new();
+        let mut again = zed();
+        again.lines = vec![
+            "fn append_block".into(),
+            "dan: shipping the notch state thursday".into(),
+            "new line".into(),
+        ];
+        append_block(
+            dir.path(),
+            &again,
+            &mut fresh,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let apps = read(dir.path(), DayFile::Apps);
+        assert_eq!(apps.matches("fn append_block").count(), 1);
+        assert!(
+            !apps.contains("dan: shipping"),
+            "seen in messages.md already"
+        );
+        assert!(apps.contains("new line"));
+    }
+
+    #[test]
+    fn a_headings_only_message_block_writes_headings_to_both_files() {
+        let dir = tempdir().unwrap();
+        let mut quiet = slack();
+        quiet.headings_only = true;
+        append_block(
+            dir.path(),
+            &quiet,
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Apps).contains("routed: messages"));
+        let messages = read(dir.path(), DayFile::Messages);
+        assert!(messages.contains("## 09:48"));
+        assert!(!messages.contains("dan: shipping"));
+    }
+
+    #[test]
+    fn a_website_block_with_no_url_has_empty_cells() {
+        let dir = tempdir().unwrap();
+        let mut page = arc();
+        page.url = None;
+        append_block(
+            dir.path(),
+            &page,
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Websites)
+            .contains("| 09:41 | 09:48 | Arc |  | Tauri \\| system tray |  |\n"));
+    }
+
+    #[test]
+    fn a_deleted_day_folder_means_a_fresh_start() {
+        let dir = tempdir().unwrap();
+        let mut dedup = DayDedup::new();
+        append_block(
+            dir.path(),
+            &zed(),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        fs::remove_dir_all(day_dir(dir.path(), date())).unwrap();
+        append_block(
+            dir.path(),
+            &zed(),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Apps).contains("fn append_block"));
+    }
+
+    #[test]
+    fn a_replayed_block_is_marked_in_the_heading_and_keeps_no_body() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(crate::summarise::summaries_dir(dir.path())).unwrap();
+        fs::write(
+            crate::summarise::summary_path(
+                dir.path(),
+                NaiveDate::from_ymd_opt(2026, 8, 24).unwrap(),
+            ),
+            "# A day\n\nShipped the writer.\nFixed the segmenter.\nRead the Tauri docs.\n",
+        )
+        .unwrap();
+        let lines = [
+            "Shipped the writer.",
+            "Fixed the segmenter.",
+            "Read the Tauri docs.",
+        ];
+        let replayed = block("Zed", "2026-08-24.md", None, None, 14, 41, &lines);
+        let mut dedup = DayDedup::new();
+        append_block(
+            dir.path(),
+            &replayed,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let apps = read(dir.path(), DayFile::Apps);
+        assert!(
+            apps.contains("\u{00b7} 2026-08-24.md [replay: 2026-08-24]\n"),
+            "the marker ends the heading line: {apps}"
+        );
+        assert!(!apps.contains("Shipped the writer."), "the body is dropped");
+
+        // The replayed lines never entered the dedup set, so writing them
+        // again as real work still records them.
+        let real = block(
+            "Zed",
+            "notes.md",
+            None,
+            None,
+            45,
+            50,
+            &[
+                "Shipped the writer.",
+                "Fixed the segmenter.",
+                "Read the Tauri docs.",
+                "fn append_block",
+                "fn render_block",
+                "fn strip_tracking",
+                "fn render_routed",
+            ],
+        );
+        append_block(
+            dir.path(),
+            &real,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(read(dir.path(), DayFile::Apps).contains("Shipped the writer."));
+    }
+
+    #[test]
+    fn strip_tracking_removes_campaign_parameters_and_keeps_the_rest() {
+        assert_eq!(
+            strip_tracking("https://v2.tauri.app/learn/?utm_source=x&page=2&fbclid=abc"),
+            "https://v2.tauri.app/learn/?page=2"
+        );
+    }
+
+    #[test]
+    fn strip_tracking_drops_the_question_mark_when_nothing_is_left() {
+        assert_eq!(
+            strip_tracking("https://example.com/a?utm_medium=email&gclid=1&ref=news"),
+            "https://example.com/a"
+        );
+    }
+
+    #[test]
+    fn strip_tracking_keeps_the_fragment_and_leaves_a_clean_url_alone() {
+        assert_eq!(
+            strip_tracking("https://example.com/a?igshid=9&id=7#section-2"),
+            "https://example.com/a?id=7#section-2"
+        );
+        assert_eq!(
+            strip_tracking("https://example.com/a#top"),
+            "https://example.com/a#top"
+        );
+    }
+
+    #[test]
+    fn a_visit_row_is_written_without_tracking_parameters() {
+        let mut visit = arc();
+        visit.url = Some("https://v2.tauri.app/learn/system-tray/?utm_source=news".to_string());
+        let row = render_website_row(&visit);
+        assert!(row.contains("| https://v2.tauri.app/learn/system-tray/ |"));
+        assert!(!row.contains("utm_source"));
+    }
+
+    #[test]
+    fn renders_a_heading_with_time_range_app_and_title() {
+        let out = render_block(&zed(), &zed().lines, Shape::default(), None);
+        assert!(out.contains("## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs"));
     }
 
     #[test]
@@ -218,7 +853,7 @@ mod tests {
         let mut block = block_at(9, 14, 41);
         block.document = Some("/Users/x/report.pdf".to_string());
         block.url = Some("https://v2.tauri.app/".to_string());
-        let out = render_block(&block, &block.lines.clone());
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
         assert!(out.contains("file: /Users/x/report.pdf\n"));
         assert!(out.contains("url: https://v2.tauri.app/\n"));
         assert!(
@@ -228,62 +863,50 @@ mod tests {
     }
 
     #[test]
-    fn file_path_is_the_iso_date() {
-        let path = file_path(
-            Path::new("/tmp/x"),
-            NaiveDate::from_ymd_opt(2026, 8, 5).unwrap(),
-        );
-        assert_eq!(path, PathBuf::from("/tmp/x/2026-08-05.md"));
-    }
-
-    #[test]
-    fn renders_a_heading_with_time_range_app_and_title() {
-        let block = block_at(9, 14, 41);
-        let out = render_block(&block, &block.lines.clone());
-        assert!(out.contains("## 09:14\u{2013}09:41 \u{00b7} Linear \u{00b7} YN-102"));
-        assert!(out.contains("read the issue"));
-    }
-
-    #[test]
     fn renders_without_a_title_when_there_is_none() {
         let mut block = block_at(9, 14, 41);
         block.title = None;
-        let out = render_block(&block, &block.lines.clone());
-        assert!(out.contains("\u{00b7} Linear\n"));
-    }
-
-    #[test]
-    fn creates_the_file_with_frontmatter_once() {
-        let dir = tempdir().unwrap();
-        let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
-
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
-
-        assert_eq!(contents.matches("captured_by:").count(), 1);
-        assert!(contents.starts_with("---\ndate: 2026-08-25\n"));
-        assert_eq!(contents.matches("## ").count(), 2);
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
+        assert!(out.contains("\u{00b7} Zed\n"));
     }
 
     #[test]
     fn creates_the_folder_if_it_is_missing() {
         let dir = tempdir().unwrap();
         let nested = dir.path().join("a").join("b");
-        append_block(&nested, &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
-        assert!(nested.exists());
+        append_block(
+            &nested,
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        assert!(day_dir(&nested, date()).exists());
     }
 
     #[test]
     fn a_line_is_written_once_per_day_but_headings_always_appear() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
+        let contents = read(dir.path(), DayFile::Apps);
 
         assert_eq!(contents.matches("read the issue").count(), 1);
         assert_eq!(contents.matches("## ").count(), 2, "both headings kept");
@@ -292,12 +915,24 @@ mod tests {
     #[test]
     fn a_fresh_dedup_is_seeded_from_the_existing_day_file() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
-        // Simulates a restart: new dedup, same folder, same day.
-        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new()).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        append_block(
+            dir.path(),
+            &block_at(10, 0, 20),
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
+        let contents = read(dir.path(), DayFile::Apps);
         assert_eq!(contents.matches("read the issue").count(), 1);
     }
 
@@ -305,36 +940,31 @@ mod tests {
     fn novel_lines_still_write_alongside_repeated_ones() {
         let dir = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
         let mut second = block_at(10, 0, 20);
         second.lines = vec![
             "read the issue".to_string(),
             "drafted the reply".to_string(),
         ];
-        append_block(dir.path(), &second, &mut dedup).unwrap();
+        append_block(
+            dir.path(),
+            &second,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
+        let contents = read(dir.path(), DayFile::Apps);
         assert_eq!(contents.matches("read the issue").count(), 1);
         assert_eq!(contents.matches("drafted the reply").count(), 1);
-    }
-
-    #[test]
-    fn deleting_the_day_file_resets_the_dedup() {
-        let dir = tempdir().unwrap();
-        let mut dedup = DayDedup::new();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
-
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        fs::remove_file(&path).unwrap();
-
-        append_block(dir.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
-        let contents = fs::read_to_string(&path).unwrap();
-        assert!(
-            contents.contains("read the issue"),
-            "a fresh file gets the lines again, not bare headings"
-        );
-        assert!(contents.starts_with("---\ndate: 2026-08-25\n"));
     }
 
     #[test]
@@ -342,12 +972,25 @@ mod tests {
         let dir_a = tempdir().unwrap();
         let dir_b = tempdir().unwrap();
         let mut dedup = DayDedup::new();
-        append_block(dir_a.path(), &block_at(9, 14, 41), &mut dedup).unwrap();
+        append_block(
+            dir_a.path(),
+            &block_at(9, 14, 41),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
         dedup.reset();
-        append_block(dir_b.path(), &block_at(10, 0, 20), &mut dedup).unwrap();
+        append_block(
+            dir_b.path(),
+            &block_at(10, 0, 20),
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
-        let path = file_path(dir_b.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
+        let contents = read(dir_b.path(), DayFile::Apps);
         assert!(contents.contains("read the issue"));
     }
 
@@ -360,14 +1003,27 @@ mod tests {
 
         let mut first = block_at(9, 14, 41);
         first.lines = vec![tweet_v1.clone()];
-        append_block(dir.path(), &first, &mut dedup).unwrap();
+        append_block(
+            dir.path(),
+            &first,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
         let mut second = block_at(10, 0, 20);
         second.lines = vec![tweet_v2];
-        append_block(dir.path(), &second, &mut dedup).unwrap();
+        append_block(
+            dir.path(),
+            &second,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
 
-        let path = file_path(dir.path(), NaiveDate::from_ymd_opt(2026, 8, 25).unwrap());
-        let contents = fs::read_to_string(path).unwrap();
+        let contents = read(dir.path(), DayFile::Apps);
         assert!(contents.contains(&tweet_v1));
         assert!(
             !contents.contains("6 hours ago"),
@@ -376,14 +1032,161 @@ mod tests {
     }
 
     #[test]
-    fn writes_agents_md_into_the_folder_once() {
+    fn a_previous_bundled_agents_hash_is_replaced_on_upgrade() {
         let dir = tempdir().unwrap();
-        append_block(dir.path(), &block_at(9, 14, 41), &mut DayDedup::new()).unwrap();
-        let agents = dir.path().join("AGENTS.md");
-        assert!(agents.exists());
+        let path = dir.path().join("AGENTS.md");
+        let previous = fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agents-v0.1.md"),
+        )
+        .unwrap();
+        assert!(
+            is_bundled_agents_file(&previous, include_str!("../assets/AGENTS.md")),
+            "fixture should hash as a previous bundled copy"
+        );
+        fs::write(&path, previous).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            include_str!("../assets/AGENTS.md")
+        );
+    }
 
-        fs::write(&agents, "user edited").unwrap();
-        append_block(dir.path(), &block_at(10, 0, 20), &mut DayDedup::new()).unwrap();
-        assert_eq!(fs::read_to_string(&agents).unwrap(), "user edited");
+    #[test]
+    fn writes_agents_md_into_the_folder() {
+        let dir = tempdir().unwrap();
+        append_block(
+            dir.path(),
+            &block_at(9, 14, 41),
+            &mut DayDedup::new(),
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let text = fs::read_to_string(dir.path().join("AGENTS.md")).unwrap();
+        assert!(text.contains("## Summaries"));
+        assert!(text.contains("## Ledger"));
+        assert!(text.contains("KB/YYYY-MM-DD"));
+    }
+
+    #[test]
+    fn an_edited_agents_file_is_kept_and_the_new_version_lands_beside_it() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        let theirs = "# Reading this folder\n\nMy own notes about this record.\n";
+        fs::write(&path, theirs).unwrap();
+
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            theirs,
+            "their file stands"
+        );
+        let beside = fs::read_to_string(dir.path().join("AGENTS.md.new")).unwrap();
+        assert!(beside.contains("## Ledger"));
+
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), theirs);
+        assert_eq!(
+            fs::read_to_string(dir.path().join("AGENTS.md.new")).unwrap(),
+            beside
+        );
+    }
+
+    #[test]
+    fn only_a_copy_this_app_wrote_counts_as_its_own() {
+        let current = include_str!("../assets/AGENTS.md");
+        assert!(is_bundled_agents_file(current, current));
+        assert!(!is_bundled_agents_file("# Reading this folder\n", current));
+    }
+
+    #[test]
+    fn a_current_agents_file_keeps_the_users_edits() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("AGENTS.md");
+        ensure_agents_file(dir.path()).unwrap();
+        let edited = format!("{}\n\nMy own note.\n", fs::read_to_string(&path).unwrap());
+        fs::write(&path, &edited).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), edited);
+    }
+
+    #[test]
+    fn an_untouched_agents_file_is_left_exactly_as_it_is() {
+        let dir = tempdir().unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        ensure_agents_file(dir.path()).unwrap();
+        assert!(
+            !dir.path().join("AGENTS.md.new").exists(),
+            "nothing to write beside it"
+        );
+    }
+
+    #[test]
+    fn a_headings_only_block_writes_its_heading_and_references_and_no_body() {
+        let mut block = block_at(9, 14, 41);
+        block.headings_only = true;
+        block.url = Some("https://news.ycombinator.com/".to_string());
+        let out = render_block(&block, &block.lines.clone(), Shape::default(), None);
+        assert!(out.contains("09:14"));
+        assert!(out.contains("url: https://news.ycombinator.com/"));
+        assert!(!out.contains("read the issue"));
+    }
+
+    #[test]
+    fn a_headings_only_block_does_not_consume_its_lines_from_the_day_dedup() {
+        let dir = tempdir().unwrap();
+        let mut dedup = DayDedup::new();
+        let mut quiet = block_at(9, 0, 30);
+        quiet.headings_only = true;
+        append_block(
+            dir.path(),
+            &quiet,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let loud = block_at(10, 0, 30);
+        append_block(
+            dir.path(),
+            &loud,
+            &mut dedup,
+            Shape::default(),
+            &Rules::default(),
+        )
+        .unwrap();
+        let written = read(dir.path(), DayFile::Apps);
+        assert_eq!(written.matches("read the issue").count(), 1);
+    }
+
+    #[test]
+    fn a_body_over_the_limit_is_truncated() {
+        let mut block = block_at(9, 14, 41);
+        block.lines = (0..10)
+            .map(|i| format!("line {i} of a fairly long body"))
+            .collect();
+        let shape = Shape {
+            max_block_chars: 20,
+            write_references: true,
+        };
+        let out = render_block(&block, &block.lines.clone(), shape, None);
+        assert!(out.ends_with("[truncated]\n"));
+        assert!(out.contains("line 0"));
+        assert!(!out.contains("line 9"));
+    }
+
+    #[test]
+    fn write_references_false_drops_the_reference_lines() {
+        let mut block = block_at(9, 14, 41);
+        block.document = Some("/Users/x/report.pdf".to_string());
+        block.url = Some("https://v2.tauri.app/".to_string());
+        let shape = Shape {
+            max_block_chars: 0,
+            write_references: false,
+        };
+        let out = render_block(&block, &block.lines.clone(), shape, None);
+        assert!(!out.contains("file:"));
+        assert!(!out.contains("url:"));
+        assert!(out.contains("read the issue"));
     }
 }

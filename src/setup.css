@@ -32,26 +32,48 @@
 }
 
 :root {
-  --desktop: #0e7c7b;
-  --chrome: #c6c3bd;
-  --chrome-light: #e8e5df;
-  --chrome-lighter: #fdfcfa;
-  --chrome-dark: #838078;
-  --chrome-darker: #1b1a17;
-  --title-a: #101078;
-  --title-b: #1c74c8;
-  --ink: #1b1a17;
-  --well: #fdfcfa;
-  --led-green: #1f7a2d;
-  --warn-ink: #7a1c1c;
-  --warn-bg: #efdad5;
+  /* The VGA system palette, sampled from the reference rather than
+     invented: face, highlight, shadow and dark shadow are the four
+     Windows 3D colours, and every bevel in this stylesheet is built out
+     of them. Warmed-up approximations read as a pastiche; these do not. */
+  --desktop: #008080;
+  --chrome: #c0c0c0;
+  --chrome-light: #dfdfdf;
+  --chrome-lighter: #ffffff;
+  --chrome-dark: #808080;
+  --chrome-darker: #000000;
+  /* Windows 98's own title gradient. The reference has it switched off and
+     shows flat #000080, which is the first stop here. */
+  --title-a: #000080;
+  --title-b: #1084d0;
+  --ink: #000000;
+  --well: #ffffff;
+  --led-green: #008000;
+  /* The monitor is a lighter object than the dialog it sits on, lit from
+     the top left. Idle, its tube is the reference's near-black; recording
+     lights the glass to paper grey and the ink goes dark on it, the way a
+     terminal reads when it is actually on. */
+  --crt-case: #d4d4d4;
+  --crt-lit: #ffffff;
+  --crt-shade: #9a9a9a;
+  --crt-dark: #3a3a3a;
+  --crt-screen-on: #dcdcdc;
+  --crt-screen-off: #181818;
+  --crt-ink: #141414;
+  --crt-ink-dim: #5f5f5f;
+  --warn-ink: #800000;
+  --warn-bg: #dfdfdf;
   --mono: "Fira Code", "SF Mono", Menlo, Monaco, monospace;
 
   /* raised bevel, the load-bearing trick of the whole look */
   --bevel-out: inset -1px -1px var(--chrome-darker), inset 1px 1px var(--chrome-lighter),
     inset -2px -2px var(--chrome-dark), inset 2px 2px var(--chrome-light);
-  --bevel-in: inset 1px 1px var(--chrome-darker), inset -1px -1px var(--chrome-lighter),
-    inset 2px 2px var(--chrome-dark), inset -2px -2px var(--chrome-light);
+  /* Sunken. The two dark tones were the wrong way round: Windows puts the
+     mid grey on the outside and the black on the inside, which is what the
+     reference's checkbox and wells show. Inverted, a sunken edge reads as
+     drawn on rather than cut in. */
+  --bevel-in: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-lighter),
+    inset 2px 2px var(--chrome-darker), inset -2px -2px var(--chrome);
 }
 
 * {
@@ -92,9 +114,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: linear-gradient(90deg, var(--title-a), var(--title-b));
+  /* Flat, as the reference: that dialog's palette contains no second blue
+     at all. --title-b stays the accent used by links elsewhere, and
+     putting it back in a linear-gradient here restores Windows 98's own
+     gradient title bar if that is ever wanted. */
+  background: var(--title-a);
   color: var(--chrome-lighter);
-  padding: 3px 4px 3px 8px;
+  /* 2px more than the reference on each side. Its buttons sit hard against
+     the frame; the round ones here need the navy to carry on past them, or
+     they read as clipped by the window edge rather than sitting in the bar. */
+  padding: 2px 4px 2px 8px;
 }
 
 .titlebar-text {
@@ -104,28 +133,47 @@ body {
   letter-spacing: 0.08em;
 }
 
-.titlebar-button {
-  appearance: none;
-  border: none;
-  width: 22px;
-  height: 18px;
-  min-width: 0;
-  padding: 0 0 1px;
-  display: grid;
-  place-items: center;
-  background: var(--chrome);
-  color: var(--ink);
-  font-family: var(--mono);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  box-shadow: var(--bevel-out);
+/* The 98.css title bar close control: 16x14, bevelled, with the period
+   bitmap X. Shared by every window that draws its own title bar, so setup
+   and About close the same way and there is one control to keep in step.
+
+   Both minimums are reset, not only the width. The generic button rule
+   sets a 75px min-width and a 23px min-height, and a minimum outranks a
+   height, so leaving min-height alone stretches the control and the X
+   stops landing on whole pixels. */
+.titlebar-controls {
+  display: flex;
 }
 
-.titlebar-button:active {
-  box-shadow: var(--bevel-in);
-  padding: 1px 0 0 1px;
+.titlebar-controls button {
+  appearance: none;
+  display: block;
+  width: 16px;
+  height: 14px;
+  min-width: 16px;
+  min-height: 14px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  color: transparent;
+  background-color: var(--chrome);
+  box-shadow: var(--bevel-out);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg width='8' height='7' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath fill-rule='evenodd' clip-rule='evenodd' d='M0 0h2v1h1v1h2V1h1V0h2v1H7v1H6v1H5v1h1v1h1v1h1v1H6V6H5V5H3v1H2v1H0V6h1V5h1V4h1V3H2V2H1V1H0V0z' fill='%23000'/%3E%3C/svg%3E");
+  background-position: top 3px left 4px;
+  background-repeat: no-repeat;
 }
+
+/* Named rather than left to the generic press rule, so the control keeps
+   its sink whatever that rule's exclusion list does later. */
+.titlebar-controls button:active {
+  box-shadow: var(--bevel-in);
+}
+
+.titlebar-controls button:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
 
 /* Body */
 
@@ -135,63 +183,108 @@ body {
   padding: 10px 10px 4px;
 }
 
-.window-body::-webkit-scrollbar {
-  width: 14px;
-}
-.window-body::-webkit-scrollbar-track {
-  background: repeating-conic-gradient(
-      var(--chrome-light) 0% 25%,
-      var(--chrome-lighter) 0% 50%
-    )
-    0 0 / 4px 4px;
-}
-.window-body::-webkit-scrollbar-thumb {
-  background: var(--chrome);
-  box-shadow: var(--bevel-out);
-}
+/* The eye, in its monitor
 
-/* The eye */
+   The monitor sits on the dialog's face rather than in a sunken well: it
+   is a drawing of an object, and objects do not need a frame. */
 
 .eye-panel {
-  background: var(--well);
-  box-shadow: var(--bevel-in);
-  padding: 12px 8px 10px;
+  padding: 4px 0 10px;
   margin-bottom: 12px;
   text-align: center;
+}
+
+.crt {
+  display: block;
+  width: 100%;
+  max-width: 300px;
+  margin: 0 auto;
+}
+
+/* Nothing in the drawing carries a stroke. Every shape is a flat fill,
+   and the light comes from the offsets between them: white where a shape
+   steps back from the one beneath it toward the top left, dark where it
+   steps back toward the bottom right. It is the same construction as the
+   window bevels, so the object and the chrome share one idiom. */
+.crt-body {
+  fill: var(--crt-case);
+}
+
+.crt-lit {
+  fill: var(--crt-lit);
+}
+
+.crt-shade {
+  fill: var(--crt-shade);
+}
+
+.crt-dark {
+  fill: var(--crt-dark);
+}
+
+/* Idle the tube is dark glass; powered it lights to paper grey, and the
+   ink swaps from a pale murmur to dark-on-light with it. */
+.crt-screen-fill {
+  fill: var(--crt-screen-off);
+  transition: fill 140ms linear;
+}
+
+.crt-screen-fill[data-on="true"] {
+  fill: var(--crt-screen-on);
+}
+
+/* The switch on the pedestal, and the power light beside it. */
+.crt-button {
+  fill: var(--crt-lit);
+  stroke: var(--crt-dark);
+  stroke-width: 1;
+}
+
+.crt-led {
+  fill: var(--crt-dark);
+  transition: fill 140ms linear;
+}
+
+.crt-led.is-on {
+  fill: var(--led-green);
+}
+
+.crt-screen {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
 }
 
 .eye {
   margin: 0;
   font-family: var(--mono);
-  font-size: 9px;
+  font-size: 7px;
   line-height: 1.05;
   letter-spacing: 0;
-  color: var(--ink);
+  color: var(--crt-ink-dim);
+  transition: color 140ms linear;
   display: inline-block;
   text-align: left;
 }
 
-.eye-caption {
-  margin: 10px 0 0;
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  color: var(--chrome-dark);
-}
-
-.record-toggle {
-  margin-top: 10px;
-  min-width: 180px;
+/* A powered screen; the dim state is the same art, unlit. */
+.crt-screen.is-on .eye {
+  color: var(--crt-ink);
 }
 
 /* Group boxes */
 
+/* A group box is an etched groove, not a bevel: one grey rectangle with a
+   white one a pixel down and to the right of it. The grey therefore shows
+   above and left, the white below and right, and the two together read as
+   a line scored into the dialog face. */
 fieldset {
   margin: 0 0 12px;
   padding: 8px 10px 10px;
-  border: none;
-  box-shadow: inset 1px 1px var(--chrome-dark), inset -1px -1px var(--chrome-dark),
-    inset 2px 2px var(--chrome-lighter), inset -2px -2px var(--chrome-lighter);
+  border: 1px solid var(--chrome-dark);
+  box-shadow: 1px 1px 0 var(--chrome-lighter),
+    inset 1px 1px 0 var(--chrome-lighter);
 }
 
 legend {
@@ -214,13 +307,16 @@ ul {
   list-style: none;
 }
 
-li {
+/* Prose lists only. Control lists (the agent radios, the rules rows) carry a
+   class and are laid out by main-window.css; a bullet beside a radio is not
+   something the reference dialogs ever do. */
+ul:not([class]) > li {
   padding-left: 14px;
   position: relative;
   margin-bottom: 3px;
 }
 
-li::before {
+ul:not([class]) > li::before {
   content: "■";
   position: absolute;
   left: 0;
@@ -241,14 +337,24 @@ button {
   font-family: "Funnel Sans", sans-serif;
   font-weight: 600;
   font-size: 13px;
-  padding: 5px 16px 6px;
-  min-width: 120px;
+  box-sizing: border-box;
+  min-width: 75px;
+  min-height: 23px;
+  padding: 0 12px;
   cursor: default; /* win98 buttons never showed a pointer */
 }
 
-button:active:not(:disabled):not(.titlebar-button) {
+/* The reference sinks the bevel on press and nudges the label with
+   text-shadow. It never repads: padding shifts change the box size and
+   move every neighbour, which is wrong for tabs, map cells, and the
+   compact controls in the day view. */
+button:active:not(:disabled):not(.tab):not(.defrag-cell):not(.link-button):not(.overview-note) {
   box-shadow: var(--bevel-in);
-  padding: 6px 15px 5px 17px;
+  text-shadow: 1px 1px 0 var(--ink);
+}
+
+button:disabled:active {
+  text-shadow: 1px 1px 0 var(--chrome-lighter);
 }
 
 button:focus-visible {
@@ -337,7 +443,10 @@ button:disabled {
   font-size: 10px;
   letter-spacing: 0.08em;
   font-weight: 600;
-  color: var(--title-b);
+  /* The title bar's navy, not the lighter accent: on a #c0c0c0 face the
+     bright blue reads as a modern web link, and the navy keeps the link
+     tied to the one other blue in the window. */
+  color: var(--title-a);
   text-decoration: underline;
 }
 
@@ -358,6 +467,496 @@ button:disabled {
   overflow-wrap: anywhere;
   user-select: text;
   cursor: text;
+}
+
+/* About */
+
+
+.about-window .window-body {
+  flex: 1;
+  text-align: center;
+  padding: 14px 22px 10px;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* Pixel art, so it must not be smoothed on the way down from 2048px:
+   the bevel is one pixel wide at source and interpolation turns it to
+   mush. Nearest-neighbour keeps the edges hard. */
+.about-icon {
+  display: block;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 10px;
+  image-rendering: pixelated;
+}
+
+.about-name {
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.about-version {
+  margin: 2px 0 14px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--chrome-dark);
+  min-height: 1em;
+}
+
+.about-line {
+  margin: 0 0 10px;
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.about-github {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--chrome-dark);
+  box-shadow: 0 -1px 0 var(--chrome-lighter);
+  text-align: left;
+}
+
+.about-github .about-line {
+  margin-bottom: 10px;
+}
+
+.about-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.about-actions button {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Colophon under a raised hairline, separate from the product copy so the
+   name reads as a signature rather than another paragraph. */
+.about-credit {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--chrome-lighter);
+  box-shadow: inset 0 1px 0 var(--chrome-dark);
+}
+
+.about-credit-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--chrome-dark);
+}
+
+.about-credit-name {
+  appearance: none;
+  border: none;
+  background: none;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+  padding: 2px 4px;
+  font-family: "Funnel Display", "Funnel Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--title-a);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.about-credit-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.about-credit-name:active {
+  box-shadow: none;
+  padding: 2px 4px;
+  transform: scale(0.96);
+}
+
+.about-credit-name:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
+}
+
+
+/* Checkboxes and radios
+
+   These were native macOS controls, which is the one place the illusion
+   broke completely: a blue rounded tick in a Windows 98 dialog. Both are
+   rebuilt from the reference, 13px square for the box and 12px round for
+   the radio, over the sunken bevel the rest of the app uses. */
+
+input[type="checkbox"],
+input[type="radio"] {
+  appearance: none;
+  flex: none;
+  margin: 0;
+}
+
+/* The checkbox is a bevelled well; the radio below is drawn instead, so it
+   deliberately takes none of this. */
+input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+}
+
+/* The radio is drawn rather than bevelled. A sunken box-shadow on a circle
+   offsets the interior instead of producing concentric rings, so it comes
+   out lopsided; two half-arcs split on the 45 degree diagonal give the
+   ring its shadow above-left and its highlight below-right, which is what
+   the reference does. */
+input[type="radio"] {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2012%2012%22%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%225%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%201%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23808080%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%200%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%201%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23000000%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%200%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23c0c0c0%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-size: 12px 12px;
+}
+
+input[type="radio"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2012%2012%22%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%225%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%201%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23808080%22%2F%3E%3Cpath%20d%3D%22M2.11%209.89%20A5.5%205.5%200%200%200%209.89%202.11%22%20fill%3D%22none%22%20stroke%3D%22%23ffffff%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%201%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23000000%22%2F%3E%3Cpath%20d%3D%22M2.82%209.18%20A4.5%204.5%200%200%200%209.18%202.82%22%20fill%3D%22none%22%20stroke%3D%22%23c0c0c0%22%2F%3E%3Ccircle%20cx%3D%226%22%20cy%3D%226%22%20r%3D%222%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E");
+}
+
+/* The tick is the reference's own bitmap, 9x7, drawn at one image pixel
+   per CSS pixel so it stays hard-edged. */
+input[type="checkbox"]:checked {
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%209%207%22%20shape-rendering%3D%22crispEdges%22%20fill%3D%22%23000%22%3E%3Crect%20x%3D%227%22%20y%3D%220%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%221%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%221%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%227%22%20y%3D%222%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%226%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%225%22%20y%3D%224%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%224%22%20y%3D%225%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%226%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: 2px 3px;
+  background-size: 9px 7px;
+}
+
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
+  background-color: var(--chrome);
+}
+
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
+}
+
+/* Field rows
+
+   98.css groups controls in field-row (label beside control) or
+   field-row-stacked (label above). Checkboxes and radios go in field-row
+   with the input before its label. */
+
+.field-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.field-row > * + * {
+  margin-left: 6px;
+}
+
+/* Sunken fields: text boxes, number boxes and drop-downs. The arrow on
+   select matches provider-field in main-window.css, which Agent still uses. */
+
+select,
+.field-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked select {
+  appearance: none;
+  border: none;
+  border-radius: 0;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  font-family: "Funnel Sans", sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+select,
+.field-row-stacked select {
+  display: block;
+  padding: 4px 26px 4px 6px;
+  min-width: 160px;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%207%204%22%20shape-rendering%3D%22crispEdges%22%20fill%3D%22%23000%22%3E%3Crect%20x%3D%220%22%20y%3D%220%22%20width%3D%227%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%221%22%20y%3D%221%22%20width%3D%225%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%223%22%20height%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%221%22%20height%3D%221%22%2F%3E%3C%2Fsvg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 7px 4px;
+}
+
+.field-row-stacked select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.field-row input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  padding: 4px 6px;
+}
+
+.field-row input[type="number"] {
+  font-variant-numeric: tabular-nums;
+}
+
+.field-row-stacked input:not([type="checkbox"]):not([type="radio"]):not([type="range"]) {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+select:disabled,
+.field-row input:disabled,
+.field-row-stacked input:disabled,
+.field-row-stacked select:disabled {
+  background-color: var(--chrome);
+  color: var(--chrome-dark);
+}
+
+select:focus-visible,
+.field-row input:focus-visible,
+.field-row-stacked input:focus-visible,
+.field-row-stacked select:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+/* 98.css field-border: a sunken work area inside a group box. */
+.field-border {
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.field-border-disabled {
+  background: var(--chrome);
+  box-shadow: var(--bevel-in);
+  padding: 8px 10px;
+  margin: 8px 0;
+  color: var(--chrome-dark);
+}
+
+/* Stacked fields and multiline inputs
+
+   The reference's field-row-stacked puts a label over a sunken textarea,
+   full width of the group box. Scrollbars are global, as in 98.css. */
+
+.field-row-stacked {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.field-row-stacked * + * {
+  margin-top: 6px;
+}
+
+.field-row-stacked label {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 600;
+}
+
+.field-row-stacked textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 3px 4px;
+  border: none;
+  border-radius: 0;
+  appearance: none;
+  background: var(--well);
+  box-shadow: var(--bevel-in);
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-y: auto;
+  resize: vertical;
+  user-select: text;
+  cursor: text;
+}
+
+.field-row-stacked textarea:focus {
+  outline: none;
+}
+
+.field-row-stacked textarea:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: -4px;
+}
+
+.field-row-stacked .settings-note {
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
+/* Trackbar (range input)
+
+   Native macOS sliders break the illusion the same way native checkboxes
+   did. Rebuilt from the Windows 98 trackbar: a 2px sunken groove and an
+   11x21 grip indicator, measured from the reference and recoloured to the
+   VGA palette this stylesheet already uses. */
+
+input[type="range"] {
+  appearance: none;
+  flex: none;
+  width: 180px;
+  height: 21px;
+  margin: 0;
+  background: transparent;
+  cursor: default;
+}
+
+input[type="range"]:focus {
+  outline: none;
+}
+
+input[type="range"]:focus-visible {
+  outline: 1px dotted var(--ink);
+  outline-offset: 2px;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  box-sizing: border-box;
+  background: var(--ink);
+  border-right: 1px solid var(--chrome-dark);
+  border-bottom: 1px solid var(--chrome-dark);
+  box-shadow:
+    1px 0 0 var(--chrome-lighter),
+    1px 1px 0 var(--chrome-lighter),
+    0 1px 0 var(--chrome-lighter),
+    -1px 0 0 var(--chrome-dark),
+    -1px -1px 0 var(--chrome-dark),
+    0 -1px 0 var(--chrome-dark),
+    -1px 1px 0 var(--chrome-lighter),
+    1px -1px 0 var(--chrome-dark);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 11px;
+  height: 21px;
+  margin-top: -10px;
+  border: none;
+  box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2211%22%20height%3D%2221%22%20viewBox%3D%220%200%2011%2021%22%20fill%3D%22none%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M0%200V16H2V18H4V20H5V19H3V17H1V1H10V0Z%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%201V16H2V17H3V18H4V19H6V18H7V17H8V16H9V1Z%22%20fill%3D%22%23c0c0c0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%201H10V16H8V18H6V20H5V19H7V17H9Z%22%20fill%3D%22%23808080%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10%200H11V16H9V18H7V20H5V21H6V19H8V17H10Z%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E")
+    no-repeat;
+}
+
+input[type="range"]::-moz-range-track {
+  height: 2px;
+  box-sizing: border-box;
+  background: var(--ink);
+  border-right: 1px solid var(--chrome-dark);
+  border-bottom: 1px solid var(--chrome-dark);
+  box-shadow:
+    1px 0 0 var(--chrome-lighter),
+    1px 1px 0 var(--chrome-lighter),
+    0 1px 0 var(--chrome-lighter),
+    -1px 0 0 var(--chrome-dark),
+    -1px -1px 0 var(--chrome-dark),
+    0 -1px 0 var(--chrome-dark),
+    -1px 1px 0 var(--chrome-lighter),
+    1px -1px 0 var(--chrome-dark);
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 21px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%2211%22%20height%3D%2221%22%20viewBox%3D%220%200%2011%2021%22%20fill%3D%22none%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M0%200V16H2V18H4V20H5V19H3V17H1V1H10V0Z%22%20fill%3D%22%23ffffff%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%201V16H2V17H3V18H4V19H6V18H7V17H8V16H9V1Z%22%20fill%3D%22%23c0c0c0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%201H10V16H8V18H6V20H5V19H7V17H9Z%22%20fill%3D%22%23808080%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M10%200H11V16H9V18H7V20H5V21H6V19H8V17H10Z%22%20fill%3D%22%23000000%22%2F%3E%3C%2Fsvg%3E")
+    no-repeat;
+  transform: translateY(2px);
+}
+
+input[type="range"]:disabled {
+  opacity: 0.55;
+}
+
+input[type="range"]:disabled::-webkit-slider-runnable-track {
+  background: var(--chrome-dark);
+}
+
+input[type="range"]:disabled::-moz-range-track {
+  background: var(--chrome-dark);
+}
+
+/* Scrollbars
+
+   Global, as in 98.css: every scroller in the dialog, including a
+   textarea's own, gets the checkerboard trough, raised thumb, and arrow
+   buttons. Pane-specific overrides hid that on the prompt field. */
+
+::-webkit-scrollbar {
+  width: 16px;
+}
+
+::-webkit-scrollbar:horizontal {
+  height: 17px;
+}
+
+::-webkit-scrollbar-corner {
+  background: var(--chrome);
+}
+
+::-webkit-scrollbar-track {
+  background-image: url("data:image/svg+xml,%3Csvg%20width%3D%222%22%20height%3D%222%22%20viewBox%3D%220%200%202%202%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M1%200H0V1H1V2H2V1H1V0Z%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%200H1V1H0V2H1V1H2V0Z%22%20fill%3D%22white%22%2F%3E%3C%2Fsvg%3E");
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--chrome);
+  box-shadow: var(--bevel-out);
+}
+
+::-webkit-scrollbar-button:horizontal:start:decrement,
+::-webkit-scrollbar-button:horizontal:end:increment,
+::-webkit-scrollbar-button:vertical:start:decrement,
+::-webkit-scrollbar-button:vertical:end:increment {
+  display: block;
+}
+
+::-webkit-scrollbar-button:vertical:start {
+  height: 17px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M8%206H7V7H6V8H5V9H4V10H11V9H10V8H9V7H8V6Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:vertical:end {
+  height: 17px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M11%206H4V7H5V8H6V9H7V10H8V9H9V8H10V7H11V6Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:horizontal:start {
+  width: 16px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M9%204H8V5H7V6H6V7H5V8H6V9H7V10H8V11H9V4Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
+}
+
+::-webkit-scrollbar-button:horizontal:end {
+  width: 16px;
+  background: url("data:image/svg+xml,%3Csvg%20width%3D%2216%22%20height%3D%2217%22%20viewBox%3D%220%200%2016%2017%22%20fill%3D%22none%22%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%200H0V1V16H1V1H15V0Z%22%20fill%3D%22%23DFDFDF%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M2%201H1V15H2V2H14V1H2Z%22%20fill%3D%22white%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M16%2017H15H0V16H15V0H16V17Z%22%20fill%3D%22black%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M15%201H14V15H1V16H14H15V1Z%22%20fill%3D%22%23808080%22%2F%3E%3Crect%20x%3D%222%22%20y%3D%222%22%20width%3D%2212%22%20height%3D%2213%22%20fill%3D%22%23C0C0C0%22%2F%3E%3Cpath%20fill-rule%3D%22evenodd%22%20clip-rule%3D%22evenodd%22%20d%3D%22M7%204H6V11H7V10H8V9H9V8H10V7H9V6H8V5H7V4Z%22%20fill%3D%22black%22%2F%3E%3C%2Fsvg%3E") no-repeat;
 }
 
 /* Status bar */

@@ -4,5 +4,11 @@
 <dict>
     <key>LSUIElement</key>
     <true/>
+    <!-- App Nap throttles the process when no window is visible. Under it
+         WebKit's audio render is fed in bursts and a cue played on the
+         first click back can wait a second for the pipeline to catch up.
+         The recorder also polls in the background and wants steady timers. -->
+    <key>NSAppSleepDisabled</key>
+    <true/>
 </dict>
 </plist>

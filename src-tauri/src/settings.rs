@@ -2,6 +2,19 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager, Runtime};
 
+/// A connected LLM, as a command the app can run. Never a key, never a
+/// hosted runtime: the user's own agent CLI, invoked one shot per job.
+/// `command` is an absolute path resolved at detection time, because the
+/// PATH an app inherits from the Dock is not the PATH the user has in a
+/// terminal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Agent {
+    pub label: String,
+    pub command: String,
+    pub args: Vec<String>,
+    pub timeout_secs: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct Settings {
@@ -13,6 +26,39 @@ pub struct Settings {
     pub interval_secs: u64,
     pub min_dwell_secs: i64,
     pub similarity_threshold: f64,
+    /// None means no agent connected, which is the shipped state and leaves
+    /// the app a pure recorder.
+    ///
+    /// The alias is a migration. This field was called "engine", and Settings
+    /// carries serde(default), so without it an existing settings.json would
+    /// parse to None and silently drop the user's agent. Deserialisation
+    /// takes either key, serialisation writes this one, and the file
+    /// normalises on the next save.
+    #[serde(alias = "engine")]
+    pub agent: Option<Agent>,
+    /// Runs the three ingest calls. None means the summary agent runs them.
+    pub ingest_agent: Option<Agent>,
+    /// Cap on the input of one ingest call, in characters. Over it, the
+    /// longest block bodies are trimmed first.
+    pub ingest_max_chars: usize,
+    /// Local time of day as "HH:MM". None means manual runs only.
+    pub schedule_hhmm: Option<String>,
+    /// Absolute path to an application to open markdown with. None uses
+    /// the system handler.
+    pub editor: Option<String>,
+    /// Whether macOS starts the app at login. On by default: a record with
+    /// a hole in it where a reboot was is worth less than no record.
+    pub launch_at_login: bool,
+    /// The longest a single block's body can be, in characters. 0 is
+    /// unlimited.
+    pub max_block_chars: usize,
+    /// How long input must be quiet before the open block is closed and
+    /// polling stops recording, in seconds. 0 turns the check off.
+    pub idle_secs: u64,
+    /// Whether `file:` and `url:` reference lines are written.
+    pub write_references: bool,
+    /// User redaction patterns, appended to the built-ins.
+    pub extra_redaction_patterns: Vec<String>,
 }
 
 impl Default for Settings {
@@ -26,6 +72,19 @@ impl Default for Settings {
             // blocks to a heading.
             min_dwell_secs: 10,
             similarity_threshold: 0.5,
+            agent: None,
+            ingest_agent: None,
+            ingest_max_chars: 400_000,
+            schedule_hhmm: None,
+            editor: None,
+            launch_at_login: true,
+            // A block that runs for hours because the machine was left
+            // unattended is worth less than several bounded ones, and the
+            // summariser reads the tail of a long block poorly.
+            max_block_chars: 4000,
+            idle_secs: 120,
+            write_references: true,
+            extra_redaction_patterns: Vec::new(),
         }
     }
 }
@@ -46,15 +105,23 @@ pub fn write_to(path: &Path, settings: &Settings) -> std::io::Result<()> {
     std::fs::write(path, json)
 }
 
+pub fn config_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    app.path().app_config_dir().expect("app config dir")
+}
+
 fn settings_path<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
-    app.path()
-        .app_config_dir()
-        .expect("app config dir")
-        .join("settings.json")
+    config_dir(app).join("settings.json")
 }
 
 pub fn load<R: Runtime>(app: &AppHandle<R>) -> Settings {
-    read_from(&settings_path(app))
+    let mut settings = read_from(&settings_path(app));
+    if let Some(agent) = &mut settings.agent {
+        crate::agent::normalize_claude_agent(agent);
+    }
+    if let Some(agent) = &mut settings.ingest_agent {
+        crate::agent::normalize_claude_agent(agent);
+    }
+    settings
 }
 
 pub fn save<R: Runtime>(app: &AppHandle<R>, settings: &Settings) -> std::io::Result<()> {
@@ -67,11 +134,36 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn ingest_fields_default_when_missing_from_the_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.ingest_agent, None);
+        assert_eq!(settings.ingest_max_chars, 400_000);
+    }
+
+    #[test]
     fn defaults_are_five_seconds_and_no_folder() {
         let settings = Settings::default();
         assert_eq!(settings.interval_secs, 5);
         assert_eq!(settings.min_dwell_secs, 10);
         assert_eq!(settings.folder, None);
+    }
+
+    #[test]
+    fn idle_defaults_to_two_minutes_and_blocks_are_capped() {
+        let settings = Settings::default();
+        assert_eq!(settings.idle_secs, 120);
+        assert_eq!(settings.max_block_chars, 4000);
+    }
+
+    #[test]
+    fn idle_secs_defaults_when_missing_from_the_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(&path, r#"{"interval_secs": 5}"#).unwrap();
+        assert_eq!(read_from(&path).idle_secs, 120);
     }
 
     #[test]
@@ -87,6 +179,23 @@ mod tests {
         let path = dir.path().join("settings.json");
         std::fs::write(&path, "{ not json").unwrap();
         assert_eq!(read_from(&path), Settings::default());
+    }
+
+    #[test]
+    fn a_settings_file_from_an_older_version_still_loads() {
+        // day_prompt was a 0.2.0 field that nothing reads any more. An
+        // existing file that still carries it must not fall back to
+        // defaults and quietly lose the user's folder.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"folder":"/tmp/ambient","interval_secs":20,"day_prompt":"/x"}"#,
+        )
+        .unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.folder, Some(PathBuf::from("/tmp/ambient")));
+        assert_eq!(settings.interval_secs, 20);
     }
 
     #[test]
@@ -111,5 +220,87 @@ mod tests {
         let settings = read_from(&path);
         assert_eq!(settings.interval_secs, 20);
         assert_eq!(settings.min_dwell_secs, 10);
+    }
+
+    #[test]
+    fn agent_and_schedule_default_to_off_and_login_launch_defaults_to_on() {
+        let settings = Settings::default();
+        assert_eq!(settings.agent, None);
+        assert_eq!(settings.schedule_hhmm, None);
+        assert_eq!(settings.editor, None);
+        // An app whose value is a complete record cannot depend on being
+        // opened by hand after a reboot.
+        assert!(settings.launch_at_login);
+    }
+
+    #[test]
+    fn a_zero_one_settings_file_still_loads_and_keeps_its_values() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        std::fs::write(
+            &path,
+            r#"{"folder":"/tmp/ambient","enabled":true,"interval_secs":5,"min_dwell_secs":10,"similarity_threshold":0.5}"#,
+        )
+        .unwrap();
+        let settings = read_from(&path);
+        assert_eq!(settings.folder, Some(PathBuf::from("/tmp/ambient")));
+        assert_eq!(settings.interval_secs, 5);
+        assert_eq!(settings.agent, None);
+        assert_eq!(settings.schedule_hhmm, None);
+        assert!(settings.launch_at_login);
+    }
+
+    #[test]
+    fn agent_and_launch_at_login_round_trip() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let settings = Settings {
+            agent: Some(Agent {
+                label: "Claude Code".to_string(),
+                command: "/opt/homebrew/bin/claude".to_string(),
+                args: vec!["-p".to_string()],
+                timeout_secs: 600,
+            }),
+            schedule_hhmm: Some("06:00".to_string()),
+            launch_at_login: false,
+            ..Settings::default()
+        };
+        write_to(&path, &settings).unwrap();
+        assert_eq!(read_from(&path), settings);
+    }
+
+    #[test]
+    fn settings_written_with_the_old_engine_key_still_load() {
+        // Settings carries serde(default), so an unknown key is ignored and a
+        // missing one takes its default. Without the alias this parses to
+        // agent: None and the user silently loses their configuration.
+        let raw = r#"{
+            "engine": {
+                "label": "Claude Code",
+                "command": "/usr/local/bin/claude",
+                "args": ["--print"],
+                "timeout_secs": 300
+            }
+        }"#;
+        let loaded: Settings = serde_json::from_str(raw).expect("parses");
+        let agent = loaded.agent.expect("the old key populates the new field");
+        assert_eq!(agent.label, "Claude Code");
+        assert_eq!(agent.command, "/usr/local/bin/claude");
+    }
+
+    #[test]
+    fn settings_are_written_with_the_new_key() {
+        let settings = Settings {
+            agent: Some(Agent {
+                label: "Codex".to_string(),
+                command: "/usr/bin/codex".to_string(),
+                args: vec![],
+                timeout_secs: 300,
+            }),
+            ..Settings::default()
+        };
+        let json = serde_json::to_string(&settings).expect("serialises");
+        assert!(json.contains("\"agent\""), "writes the new key");
+        assert!(!json.contains("\"engine\""), "does not write the old one");
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CoreGraphics
 import SwiftRs
 
 // Status codes crossing the C boundary: 0 = not granted, 1 = granted.
@@ -22,6 +23,16 @@ public func ambientAxRequestPermission() -> Int32 {
     let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
     let options = [key: true] as CFDictionary
     return AXIsProcessTrustedWithOptions(options) ? 1 : 0
+}
+
+/// Seconds since the last keyboard or mouse event anywhere in the session,
+/// so a machine left alone stops extending the open block. Returns -1 when
+/// the "any input" event type cannot be formed, which the caller reads as
+/// "no idle reading on this platform" rather than as zero seconds idle.
+@_cdecl("ambient_ax_seconds_since_input")
+public func ambientAxSecondsSinceInput() -> Double {
+    guard let anyInput = CGEventType(rawValue: ~0) else { return -1 }
+    return CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: anyInput)
 }
 
 // Content in browsers and Electron apps nests 15 to 30 levels deep, so the
@@ -185,4 +196,108 @@ public func ambientAxSnapshot() -> SRString {
         return SRString("ERROR: could not serialise snapshot")
     }
     return SRString(json)
+}
+
+// MARK: - Window chrome
+
+/// Hides the three traffic light buttons on one window, leaving the rest of
+/// the native title bar in place. The window keeps its system corner mask
+/// and its edge resizing, which going borderless would both give up; only
+/// the buttons go, because the page draws its own.
+///
+/// Identified by the NSWindow pointer Tauri already holds rather than by
+/// title, which would pick the wrong window the moment two of them matched.
+/// AppKit is main-thread only, so the caller marshals.
+@_cdecl("ambient_hide_window_buttons")
+public func ambientHideWindowButtons(_ windowPointer: Int64) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    var hidden: Int32 = 0
+    for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+        if let button = window.standardWindowButton(kind) {
+            button.isHidden = true
+            hidden += 1
+        }
+    }
+    return hidden
+}
+
+/// Lightens the traffic lights on an unfocused window. Since macOS 26 the
+/// inactive buttons are not a fixed grey but a translucent tint over
+/// whatever sits behind them, so on this app's navy title bar the light
+/// appearance renders them darker than the bar itself (measured #000058 on
+/// #000080) and they read as three black holes. The dark appearance tints
+/// the other way and they come out lighter than the bar. The focused red,
+/// amber and green are opaque and unchanged either way.
+///
+/// The appearance goes on the window, which is what the title bar's theme
+/// frame draws the buttons from. The content view is then pinned back to
+/// light. That second half is belt and braces rather than load bearing:
+/// WebKit takes prefers-color-scheme from the page's own `color-scheme`,
+/// which this one never declares, so the content renders light either way,
+/// and captures of the Settings tab with and without it are identical. It
+/// stays because the day someone writes `color-scheme: light dark` the
+/// window's appearance becomes the thing that decides, and a page with no
+/// dark palette would turn dark with no obvious cause.
+///
+/// Returns the number of layers set, so a missing content view is visible
+/// to the caller rather than passing silently. AppKit is main-thread only,
+/// so the caller marshals.
+@_cdecl("ambient_lighten_inactive_traffic_lights")
+public func ambientLightenInactiveTrafficLights(_ windowPointer: Int64) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    window.appearance = NSAppearance(named: .darkAqua)
+    guard let content = window.contentView else { return 1 }
+    content.appearance = NSAppearance(named: .aqua)
+    return 2
+}
+
+/// Moves the traffic-light cluster without touching the title bar container,
+/// which keeps the window layout intact. `x` is the close button's leading
+/// edge in window coordinates; `yFromTop` is the distance from the window's
+/// top edge to the top of the buttons. AppKit is main-thread only.
+@_cdecl("ambient_position_traffic_lights")
+public func ambientPositionTrafficLights(
+    _ windowPointer: Int64,
+    x: Double,
+    yFromTop: Double
+) -> Int32 {
+    guard windowPointer != 0,
+          let raw = UnsafeRawPointer(bitPattern: Int(windowPointer)) else {
+        return 0
+    }
+    let window = Unmanaged<NSWindow>.fromOpaque(raw).takeUnretainedValue()
+    guard let close = window.standardWindowButton(.closeButton),
+          let mini = window.standardWindowButton(.miniaturizeButton),
+          let zoom = window.standardWindowButton(.zoomButton) else {
+        return 0
+    }
+
+    let windowHeight = window.frame.size.height
+    let spaceBetween = mini.frame.origin.x - close.frame.origin.x
+    let buttons = [close, mini, zoom]
+
+    func place() {
+        for (index, button) in buttons.enumerated() {
+            guard let superview = button.superview else { continue }
+            button.isHidden = false
+            let originInWindow = NSPoint(
+                x: x + Double(index) * spaceBetween,
+                y: windowHeight - yFromTop - button.frame.size.height
+            )
+            button.setFrameOrigin(superview.convert(originInWindow, from: nil))
+        }
+    }
+
+    // One layout pass after show, so standardWindowButton frames are real.
+    DispatchQueue.main.async(execute: place)
+
+    return Int32(buttons.count)
 }

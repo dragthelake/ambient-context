@@ -12,10 +12,18 @@ pub struct Snapshot {
     /// Page URL of the window's main web area, for browsers.
     pub url: Option<String>,
     pub text: Vec<String>,
+    /// Set by redaction when a rule says record the heading and drop the
+    /// body. Carried this far because only the writer can act on it.
+    pub headings_only: bool,
 }
 
 pub trait WindowReader {
     fn snapshot(&self) -> Option<Snapshot>;
+
+    /// Seconds since the last keyboard or mouse input. None where the
+    /// platform cannot report it, which the idle check reads as "not idle"
+    /// rather than guessing.
+    fn seconds_since_input(&self) -> Option<f64>;
 }
 
 pub struct PlatformReader;
@@ -29,6 +37,21 @@ impl WindowReader for PlatformReader {
         #[cfg(target_os = "windows")]
         {
             windows::snapshot()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        {
+            None
+        }
+    }
+
+    fn seconds_since_input(&self) -> Option<f64> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::seconds_since_input()
+        }
+        #[cfg(target_os = "windows")]
+        {
+            windows::seconds_since_input()
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
@@ -78,6 +101,8 @@ pub fn parse_snapshot_json(raw: &str) -> Result<Snapshot, String> {
         document: parsed.document,
         url: parsed.url,
         text: parsed.text,
+        // Snapshots arrive from the accessibility walk with no rule applied.
+        headings_only: false,
     })
 }
 

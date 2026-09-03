@@ -84,9 +84,18 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
         true,
         None::<&str>,
     )?;
-    let open_today = MenuItem::with_id(app, "open_today", "Open Today's File", true, None::<&str>)?;
+    let last_run = {
+        let text = app
+            .try_state::<crate::jobs::JobState>()
+            .and_then(|state| state.last_outcome())
+            .map(|outcome| outcome.message)
+            .unwrap_or_else(|| "No summaries yet".to_string());
+        MenuItem::with_id(app, "last_run", text, false, None::<&str>)?
+    };
+    let overview = MenuItem::with_id(app, "overview", "Open Overview\u{2026}", true, None::<&str>)?;
     let reveal = MenuItem::with_id(app, "reveal", "Reveal Folder", true, None::<&str>)?;
     let setup = MenuItem::with_id(app, "setup", "Settings\u{2026}", true, None::<&str>)?;
+    let about = MenuItem::with_id(app, "about", "About\u{2026}", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
 
     Menu::with_items(
@@ -94,21 +103,23 @@ fn build_menu(app: &AppHandle, capturing: bool) -> tauri::Result<Menu<tauri::Wry
         &[
             &version,
             &toggle,
+            &last_run,
             &PredefinedMenuItem::separator(app)?,
-            &open_today,
+            &overview,
             &reveal,
             &PredefinedMenuItem::separator(app)?,
             &setup,
+            &about,
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
     )
 }
 
-/// Starts or stops capture. Shared by the left click on the icon, the
-/// Start/Stop Capturing menu item, and the settings page's switch, so they
-/// can never drift apart. Permission missing or no folder chosen: open
-/// setup rather than failing silently.
+/// Starts or stops capture. Shared by the Start/Stop Capturing menu item
+/// and the settings page's switch, so the two can never drift apart.
+/// Permission missing or no folder chosen: open setup rather than failing
+/// silently.
 pub fn toggle_capture(app: &AppHandle) {
     if reader::macos::permission_status() == reader::Permission::NotGranted {
         crate::open_setup_window(app);
@@ -127,13 +138,13 @@ pub fn toggle_capture(app: &AppHandle) {
         // An explicit stop is remembered: the app will not auto-start
         // capture again until the user starts it.
         config.enabled = false;
-        let _ = settings::save(app, &config);
+        record_toggle(app, &config);
         // The thread notices within ~100ms and flushes on its way
         // out, but the icon must empty now, not when it does.
         refresh(app, false);
     } else {
         config.enabled = true;
-        let _ = settings::save(app, &config);
+        record_toggle(app, &config);
         capture::start(app.clone(), &state, config);
         refresh(app, true);
     }
@@ -150,20 +161,15 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .on_menu_event(|app, event| {
             let config = settings::load(app);
             match event.id().as_ref() {
-                "open_today" => {
-                    if let Some(folder) = &config.folder {
-                        let path =
-                            crate::writer::file_path(folder, chrono::Local::now().date_naive());
-                        let _ = std::process::Command::new("open").arg(path).spawn();
-                    }
-                }
                 "reveal" => {
                     if let Some(folder) = &config.folder {
                         let _ = std::process::Command::new("open").arg(folder).spawn();
                     }
                 }
                 "toggle" => toggle_capture(app),
-                "setup" => crate::open_setup_window(app),
+                "overview" => crate::open_main_window(app),
+                "setup" => crate::open_main_window_on_tab(app, "settings"),
+                "about" => crate::open_about_window(app),
                 "quit" => {
                     let state = app.state::<capture::CaptureState>();
                     capture::stop(&state);
@@ -182,9 +188,23 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
             else {
                 return;
             };
-            toggle_capture(tray.app_handle());
+            crate::open_main_window(tray.app_handle());
         })
         .build(app)?;
 
     Ok(())
+}
+
+/// The capture toggle writes `enabled` to settings.json, and a settings
+/// write is a settings write whichever surface made it: it goes through the
+/// same recorded save as the Settings page and MCP.
+fn record_toggle(app: &tauri::AppHandle, config: &settings::Settings) {
+    if let Err(error) = crate::save_settings_recorded(
+        &settings::config_dir(app),
+        config.folder.as_deref(),
+        "toggle_capture",
+        config,
+    ) {
+        eprintln!("[settings] could not record the capture toggle: {error}");
+    }
 }

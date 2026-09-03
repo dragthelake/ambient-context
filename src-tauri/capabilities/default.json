@@ -1,14 +1,16 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the setup window",
-  "windows": ["setup"],
+  "description": "Capability for the setup and main windows",
+  "windows": ["setup", "main"],
   "permissions": [
     "core:default",
     "core:window:allow-close",
     "core:window:allow-start-dragging",
     "dialog:default",
     "updater:default",
-    "process:default"
+    "process:default",
+    "clipboard-manager:allow-write-text",
+    "notification:default"
   ]
 }

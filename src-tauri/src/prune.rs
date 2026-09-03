@@ -1,3 +1,4 @@
+use crate::route::Kind;
 use regex::Regex;
 use std::sync::OnceLock;
 
@@ -104,12 +105,137 @@ pub fn normalise_line(line: &str) -> Option<String> {
     if collapsed.split_whitespace().count() < 4 && !is_high_value(&collapsed) {
         return None;
     }
-    Some(collapsed)
+    Some(escape_heading(collapsed))
+}
+
+/// A captured line that begins like a markdown heading would be read back
+/// as a block boundary: a day file viewed in an editor, or a plan quoting
+/// one, writes `## 09:14–09:41 · Zed` into a body and every reader from
+/// `parse_blocks` to the citation check then sees a block that never
+/// happened. A leading backslash keeps it a body line and still renders as
+/// the same text.
+fn escape_heading(line: String) -> String {
+    static HEADING: OnceLock<Regex> = OnceLock::new();
+    let heading = HEADING.get_or_init(|| Regex::new(r"^#{1,6}\s").unwrap());
+    if heading.is_match(&line) {
+        format!("\\{line}")
+    } else {
+        line
+    }
+}
+
+/// Newsletter bodies arrive as one enormous line. Past this many
+/// characters the rest is cut: the first sentences carry the subject and
+/// the sender, and the rest is the newsletter.
+pub const MAX_MESSAGE_LINE_CHARS: usize = 600;
+
+fn is_message_chrome(line: &str) -> bool {
+    static PATTERNS: OnceLock<Vec<Regex>> = OnceLock::new();
+    let patterns = PATTERNS.get_or_init(|| {
+        vec![
+            // Mail header rows whose value was an attachment glyph.
+            Regex::new(r"^(To|Cc|Bcc|From|Reply-To):\s*$").unwrap(),
+            // Mailbox labels and the mailbox window title echoed as text.
+            Regex::new(r"^(All Inboxes|Inbox|Sent|Drafts|Archive|Junk|Trash|Flagged)(\s*[-\x{2013}]\s*.*)?$").unwrap(),
+            // Bare timestamps as Mail lists them.
+            Regex::new(r"(?i)^\d{1,2}:\d{2} (am|pm)$").unwrap(),
+            Regex::new(r"(?i)^(yesterday|today) at \d{1,2}:\d{2} (am|pm)$").unwrap(),
+            Regex::new(r"^[A-Z]{3} \d{1,2}$").unwrap(),
+        ]
+    });
+    patterns.iter().any(|p| p.is_match(line))
+}
+
+fn clean_message_line(line: &str) -> Option<String> {
+    let stripped: String = line
+        .chars()
+        .filter(|c| *c != '\u{fffc}' && *c != '\u{ad}')
+        .collect();
+    let collapsed = stripped.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() || is_message_chrome(&collapsed) {
+        return None;
+    }
+    if collapsed.chars().count() > MAX_MESSAGE_LINE_CHARS {
+        let head: String = collapsed.chars().take(MAX_MESSAGE_LINE_CHARS).collect();
+        return Some(escape_heading(format!("{} [cut]", head.trim_end())));
+    }
+    // Stripping the glyphs can expose a heading marker the snapshot-time
+    // pass could not see.
+    Some(escape_heading(collapsed))
+}
+
+/// A second pass at block close, once the block's kind is known. App and
+/// Website lines pass through; Message lines lose the mail chrome the
+/// snapshot-time filter cannot see without knowing the kind.
+pub fn for_kind(kind: Kind, lines: Vec<String>) -> Vec<String> {
+    match kind {
+        Kind::Message => lines.iter().filter_map(|l| clean_message_line(l)).collect(),
+        Kind::App | Kind::Website => lines,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::route::Kind;
+
+    #[test]
+    fn message_filters_drop_mail_chrome() {
+        let input: Vec<String> = [
+            "\u{fffc}",
+            "To: \u{fffc}\u{fffc}",
+            "Reply-To: \u{fffc}",
+            "\u{fffc}Inbox - cameron@empty.io email",
+            "All Inboxes \u{2013} 23 messages, 5 unread",
+            "Inbox - cameron@standardretail.co",
+            "7:09 am",
+            "Yesterday at 11:15 pm",
+            "Today at 9:41 am",
+            "SEP 1",
+            "Hi Lucy and Cameron I had a really positive phone call today",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let out = for_kind(Kind::Message, input);
+        assert_eq!(
+            out,
+            vec!["Hi Lucy and Cameron I had a really positive phone call today".to_string()]
+        );
+    }
+
+    #[test]
+    fn message_filters_strip_soft_hyphen_padding_and_cut_long_lines() {
+        let padded = format!(
+            "Get access to Delta today {} You signed up for early access",
+            "\u{ad} ".repeat(60)
+        );
+        let long = "word ".repeat(200);
+        let out = for_kind(Kind::Message, vec![padded, long]);
+        assert_eq!(
+            out[0],
+            "Get access to Delta today You signed up for early access"
+        );
+        assert!(out[1].chars().count() <= MAX_MESSAGE_LINE_CHARS + " [cut]".len());
+        assert!(out[1].ends_with(" [cut]"));
+    }
+
+    #[test]
+    fn a_heading_hidden_behind_a_glyph_is_still_escaped_for_messages() {
+        use crate::route::Kind;
+        let out = for_kind(
+            Kind::Message,
+            vec!["\u{fffc}## Owed to me 09:00-09:10".to_string()],
+        );
+        assert_eq!(out, vec!["\\## Owed to me 09:00-09:10".to_string()]);
+    }
+
+    #[test]
+    fn app_and_website_kinds_are_left_alone() {
+        let lines = vec!["7:09 am".to_string(), "\u{fffc}".to_string()];
+        assert_eq!(for_kind(Kind::App, lines.clone()), lines);
+        assert_eq!(for_kind(Kind::Website, lines.clone()), lines);
+    }
 
     #[test]
     fn strips_zero_width_only_lines() {
@@ -135,6 +261,22 @@ mod tests {
         assert_eq!(normalise_line("Shell"), None);
         assert_eq!(normalise_line("Open File"), None);
         assert_eq!(normalise_line("Reply All Forward"), None);
+    }
+
+    #[test]
+    fn a_body_line_that_looks_like_a_heading_is_escaped() {
+        assert_eq!(
+            normalise_line("## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs").as_deref(),
+            Some("\\## 09:14\u{2013}09:41 \u{00b7} Zed \u{00b7} writer.rs")
+        );
+        assert_eq!(
+            normalise_line("## Owed to me").as_deref(),
+            Some("\\## Owed to me")
+        );
+        assert_eq!(
+            normalise_line("#hashtag is not a heading here").as_deref(),
+            Some("#hashtag is not a heading here")
+        );
     }
 
     #[test]
