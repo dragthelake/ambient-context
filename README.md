@@ -8,6 +8,12 @@ plain markdown, in a folder you own. Point Claude Code, Cursor, Codex or
 any MCP client at your context folder.
 
 <p align="center">
+  <a href="https://github.com/dragthelake/ambient-context/releases/latest"><img src="https://img.shields.io/badge/Download_for_macOS-navy?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" height="36" /></a>
+  <br />
+  <sub>Signed and notarised DMG. macOS 14 or later, Apple Silicon. Free and open source.</sub>
+</p>
+
+<p align="center">
   <img src="docs/ambient-context.gif" width="720" alt="Ambient Context in use: the eye in the menu bar, the Overview window, and a processed day" />
 </p>
 
