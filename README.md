@@ -1,17 +1,15 @@
 # Ambient Context
 
-**Ambient Context writes it down what you work on during the day to give your AI assistant better context**
+**Ambient Context writes down what you work on during the day to give your
+AI assistant better context.**
 
 A macOS menu bar app that keeps a written record of what you work on, in
 plain markdown, in a folder you own. Point Claude Code, Cursor, Codex or
-any MCP client at your context folder. 
+any MCP client at your context folder.
 
 <p align="center">
-  <img src="docs/ambient-context.gif" width="520" alt="Ambient Context settings window, with the ASCII eye open while recording" />
+  <img src="docs/ambient-context.gif" width="720" alt="Ambient Context in use: the eye in the menu bar, the Overview window, and a processed day" />
 </p>
-
-<!-- SCREENSHOT: Overview window, 2 columns, CRT + controls on the left, Record map on the right, a few days marked Processed -->
-<!-- ![Overview](docs/screenshots/overview.png) -->
 
 ## The problem
 
@@ -30,6 +28,10 @@ choose, or when you press the button, an agent you already have turns that
 record into two more things: a small cited knowledge base and a written
 summary of the day.
 
+<p align="center">
+  <img src="docs/screenshots/overview.png" width="720" alt="Overview: the eye on a CRT, a Record map of days marked Recorded or Processed, and a Notes list linking into processed days" />
+</p>
+
 Three files per day, each one useful on its own:
 
 | | What it is | Who it is for |
@@ -38,8 +40,13 @@ Three files per day, each one useful on its own:
 | **Knowledge** | Six cited pages built from the record: People, Commitments, Threads, Products, Issues, Reading. Every claim points back to a block in the record. | Agents building memory about your projects and the people in them. |
 | **Notes** | The day written up from the knowledge base, with citations checked against the record before it is saved. | You, at the end of the day. Your standup. The model you open tomorrow morning. |
 
-<!-- SCREENSHOT: Day view on the Knowledge tab, People section visible with citations -->
-<!-- ![Day view, Knowledge tab](docs/screenshots/day-knowledge.png) -->
+<p align="center">
+  <img src="docs/screenshots/notes.png" width="720" alt="Notes tab: a written summary of the day with sessions, work and outcomes, each carrying its time range" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/websites.png" width="720" alt="Context tab, Websites: a table of the day's visits with domain, title, dwell time, visit count and first and last seen" />
+</p>
 
 ## How it works
 
@@ -55,8 +62,13 @@ Three files per day, each one useful on its own:
    tools cover reading days, searching the record, reading the knowledge
    and notes, and controlling capture.
 
-<!-- SCREENSHOT: Claude Code terminal answering "what did I work on Tuesday?" via the MCP server -->
-<!-- ![Claude Code reading the record](docs/screenshots/claude-code-mcp.png) -->
+<p align="center">
+  <img src="docs/screenshots/agent.png" width="720" alt="Agent tab: Claude Code connected, with separate Context and Notes model pickers and a daily schedule" />
+</p>
+
+With Claude Code you can send the long input (the day's record) to a
+cheaper Context model and reserve a stronger Notes model for the page you
+will actually read.
 
 ## Why the record is worth reading
 
@@ -74,7 +86,7 @@ cheaply.
 - **Mail and chat go to their own file.** Messages are routed to
   `messages.md` so the timeline stays readable and message bodies are easy
   to exclude from a prompt.
-- **A `AGENTS.md` in the folder** explains the format to whatever reads it.
+- **An `AGENTS.md` in the folder** explains the format to whatever reads it.
 
 ## Privacy
 
@@ -92,9 +104,17 @@ The record is yours and it stays on your computer.
   recorded. Credential, API-key and card-shaped strings are scrubbed to
   `[redacted]`. These are heuristics, not a guarantee, so treat the folder
   as sensitive.
+- **Rules you set from the record itself.** Every block in the Context tab
+  offers Never record this app, Headings only for this site, and Redact
+  text like this, so you can tighten capture the moment you see something
+  you would rather not keep.
 - **Boundaries you choose are named as such.** An agent CLI you connect and
   a synced folder (iCloud, Dropbox) are separate trust decisions. The app
   warns if the folder you pick is inside iCloud Drive.
+
+<p align="center">
+  <img src="docs/screenshots/messages.png" width="720" alt="Context tab, Messages: captured blocks with their time, app, URL and body, each with Never record this app, Headings only for this site and Redact text like this buttons" />
+</p>
 
 The trust boundary, data inventory, claims matrix and known gaps are in
 [Privacy and security](docs/privacy-and-security.md).
@@ -103,9 +123,9 @@ The trust boundary, data inventory, claims matrix and known gaps are in
 
 Requires macOS 14 or later on Apple Silicon.
 
-Download the latest signed, notarised build from
-[Releases](https://github.com/dragthelake/ambient-context/releases), drag
-`Ambient Context.app` to Applications and open it.
+Download the signed, notarised DMG from
+[Releases](https://github.com/dragthelake/ambient-context/releases/latest),
+drag `Ambient Context.app` to Applications and open it.
 
 To build it yourself you need [Node](https://nodejs.org),
 [Rust](https://rustup.rs) and the Xcode Command Line Tools:
@@ -128,12 +148,9 @@ The app lands in `src-tauri/target/release/bundle/macos/`. For development,
    the files to stay on this computer only.
 3. Recording starts. Open eye: recording. Closed eye: not. Right-click the
    icon for the folder and settings.
-4. To get Knowledge and Notes, open Settings, pick an agent CLI, and set
-   the time you want each day processed. Or open any recorded day and press
-   Process day.
-
-<!-- SCREENSHOT: Settings, Agent tab, Claude Code selected with Context model and Notes model pickers -->
-<!-- ![Agent settings](docs/screenshots/settings-agent.png) -->
+4. To get Knowledge and Notes, open the Agent tab, pick an agent CLI, and
+   set the time you want each day processed. Or open any recorded day and
+   press Process day.
 
 ## Connect your tools
 
