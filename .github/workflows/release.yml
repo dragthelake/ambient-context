@@ -10,6 +10,13 @@ jobs:
     permissions:
       contents: write
     runs-on: macos-14
+    # A healthy run compiles in about four minutes and notarises in a few more.
+    # Anything past this is Apple's notary queue, not a slow build: on
+    # 2026-09-03 two runs sat at "Notarizing" for 1h50m each while their
+    # submissions stayed In Progress on Apple's side. Cap it so a stalled queue
+    # fails fast with a readable log instead of running down the six-hour
+    # default.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
