@@ -20,6 +20,29 @@ fn is_high_value(line: &str) -> bool {
         || email.is_match(line)
 }
 
+/// Han ideographs, hiragana and katakana.
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{3040}'..='\u{30ff}'     // hiragana, katakana
+        | '\u{31f0}'..='\u{31ff}'   // katakana phonetic extensions
+        | '\u{3400}'..='\u{4dbf}'   // CJK extension A
+        | '\u{4e00}'..='\u{9fff}'   // CJK unified ideographs
+        | '\u{f900}'..='\u{faff}'   // CJK compatibility ideographs
+        | '\u{ff66}'..='\u{ff9f}'   // halfwidth katakana
+        | '\u{20000}'..='\u{3134f}' // CJK extensions B to G
+    )
+}
+
+/// Chinese and Japanese put no spaces between words, so a whole sentence
+/// is a single whitespace token and the word count reads it as a label.
+/// Six ideographs or kana is past the length of a button or menu item
+/// ("保存", "打开文件", "キャンセル" stay under it) and already a phrase.
+const MIN_CJK_CHARS: usize = 6;
+
+fn is_cjk_text(line: &str) -> bool {
+    line.chars().filter(|c| is_cjk(*c)).count() >= MIN_CJK_CHARS
+}
+
 /// Bare counters and social chrome: view counts, vote counts, "n minutes
 /// ago", media player positions. These change on every read, so they defeat
 /// the day dedup while carrying nothing, and they were 22% of all captured
@@ -102,7 +125,10 @@ pub fn normalise_line(line: &str) -> Option<String> {
     if is_metric(&collapsed) || is_pipe_menu(&collapsed) {
         return None;
     }
-    if collapsed.split_whitespace().count() < 4 && !is_high_value(&collapsed) {
+    if collapsed.split_whitespace().count() < 4
+        && !is_high_value(&collapsed)
+        && !is_cjk_text(&collapsed)
+    {
         return None;
     }
     Some(escape_heading(collapsed))
@@ -261,6 +287,35 @@ mod tests {
         assert_eq!(normalise_line("Shell"), None);
         assert_eq!(normalise_line("Open File"), None);
         assert_eq!(normalise_line("Reply All Forward"), None);
+    }
+
+    #[test]
+    fn keeps_chinese_and_japanese_sentences_without_spaces() {
+        let lines = [
+            "我们决定周四发布新版本的通知栏",
+            "这个函数在空输入时会直接崩溃，需要先判断长度",
+            "明日の会議は午後三時からに変更になりました",
+            "ログインできない問題を調査しています",
+            "把 README 里的安装步骤更新一下",
+        ];
+        for line in lines {
+            assert_eq!(normalise_line(line).as_deref(), Some(line), "{line}");
+        }
+    }
+
+    #[test]
+    fn drops_short_chinese_and_japanese_ui_labels() {
+        for label in [
+            "保存",
+            "取消",
+            "打开文件",
+            "全部回复",
+            "新建标签页",
+            "キャンセル",
+            "设置 通用",
+        ] {
+            assert_eq!(normalise_line(label), None, "{label}");
+        }
     }
 
     #[test]

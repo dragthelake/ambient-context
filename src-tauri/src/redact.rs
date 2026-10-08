@@ -14,7 +14,9 @@ pub const EXCLUDED_APPS: &[&str] = &[
     "keychain access",
     "lastpass",
     "nordpass",
+    "passwords",
     "proton pass",
+    "securityagent",
     "strongbox",
 ];
 
@@ -162,6 +164,14 @@ mod tests {
         assert!(is_excluded_app("1Password 8"));
         assert!(is_excluded_app("BITWARDEN"));
         assert!(is_excluded_app("Keychain Access"));
+    }
+
+    #[test]
+    fn excludes_apple_passwords_and_the_system_password_prompt() {
+        // Apple's Passwords app (macOS 15+) and the SecurityAgent process
+        // that draws the system's authentication and keychain prompts.
+        assert!(is_excluded_app("Passwords"));
+        assert!(is_excluded_app("SecurityAgent"));
     }
 
     #[test]
