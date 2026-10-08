@@ -28,12 +28,6 @@ precision and honesty matter more than completeness.
 **Produce exactly this structure:**
 
 ```markdown
----
-date: <date from the file>
-type: day-context
-generated_by: <your model name>
----
-
 # <One-line title for the day>
 
 <One paragraph, 3-5 sentences: the narrative of the day. What the user was

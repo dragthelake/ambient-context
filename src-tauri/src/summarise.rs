@@ -9,7 +9,6 @@ pub const MAX_SUMMARY_LINES: usize = 200;
 #[derive(Debug, PartialEq)]
 pub enum Invalid {
     Empty,
-    NoFrontmatter,
     MissingField(&'static str),
     NoSections,
     /// The summary makes claims with no time ranges pointing back at the
@@ -32,7 +31,6 @@ impl std::fmt::Display for Invalid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Invalid::Empty => write!(f, "the agent returned nothing"),
-            Invalid::NoFrontmatter => write!(f, "the summary has no frontmatter block"),
             Invalid::MissingField(field) => write!(f, "the summary is missing '{field}'"),
             Invalid::NoSections => write!(f, "the summary has no sections"),
             Invalid::NoCitations => {
@@ -127,12 +125,14 @@ pub fn validate(
     spans: &[(u32, u32)],
     evidence: &str,
 ) -> Result<(), Invalid> {
-    let body = unfence(text);
-    if body.trim().is_empty() {
+    if unfence(text).trim().is_empty() {
         return Err(Invalid::Empty);
     }
 
-    let lines: Vec<&str> = body.lines().collect();
+    // The body only: the app writes the frontmatter, so whatever the model
+    // put there is neither checked nor kept. Its `date:` line must not count
+    // as a citation either.
+    let lines: Vec<&str> = body_of(text).lines().collect();
     if lines.len() > max_lines {
         return Err(Invalid::TooLong {
             lines: lines.len(),
@@ -140,36 +140,14 @@ pub fn validate(
         });
     }
 
-    if lines.first().map(|l| l.trim()) != Some("---") {
-        return Err(Invalid::NoFrontmatter);
-    }
-    let close = lines
-        .iter()
-        .skip(1)
-        .position(|l| l.trim() == "---")
-        .ok_or(Invalid::NoFrontmatter)?
-        + 1;
-
-    let frontmatter = lines[1..close].join("\n");
-    for field in ["date", "type"] {
-        if !frontmatter
-            .lines()
-            .any(|line| line.trim_start().starts_with(&format!("{field}:")))
-        {
-            return Err(Invalid::MissingField(field));
-        }
-    }
-
-    if !lines[close..].iter().any(|l| l.starts_with("## ")) {
+    if !lines.iter().any(|l| l.starts_with("## ")) {
         return Err(Invalid::NoSections);
     }
-    if !lines[close..].iter().any(|l| l.trim() == "## Reasoning") {
+    if !lines.iter().any(|l| l.trim() == "## Reasoning") {
         return Err(Invalid::MissingField("Reasoning"));
     }
 
-    // The body only: the frontmatter's `date:` line must not count as a
-    // citation, and neither must anything above the closing fence.
-    let body = lines[close..].join("\n");
+    let body = lines.join("\n");
     if !crate::cite::has_citation(&body) {
         return Err(Invalid::NoCitations);
     }
@@ -199,14 +177,49 @@ pub fn build_prompt(template: &str, date: NaiveDate, timeline: &str, kb: &str) -
         .replace("{{KB}}", kb)
 }
 
-pub fn write_summary(folder: &Path, date: NaiveDate, body: &str) -> std::io::Result<()> {
-    let dir = summaries_dir(folder);
-    std::fs::create_dir_all(&dir)?;
-    let mut text = unfence(body).to_string();
-    if !text.ends_with('\n') {
-        text.push('\n');
+/// The model's output without a code fence or any frontmatter it wrote.
+/// Models drop the closing `---` often enough that an unclosed block is
+/// taken to run up to the first heading.
+pub fn body_of(text: &str) -> &str {
+    let text = unfence(text);
+    let mut lines = text.split_inclusive('\n');
+    let Some(first) = lines.next().filter(|l| l.trim() == "---") else {
+        return text;
+    };
+    let mut end = first.len();
+    for line in lines {
+        if line.starts_with('#') {
+            break;
+        }
+        end += line.len();
+        if line.trim() == "---" {
+            break;
+        }
     }
-    std::fs::write(summary_path(folder, date), text)
+    text[end..].trim_start()
+}
+
+/// What the app already knows about a summary before the model runs, so
+/// the model is never trusted to write it.
+pub struct Frontmatter<'a> {
+    pub date: NaiveDate,
+    pub generated_by: &'a str,
+    pub prompt_sha256: &'a str,
+}
+
+fn render_summary(fm: &Frontmatter, output: &str) -> String {
+    format!(
+        "---\ndate: {}\ntype: day-context\ngenerated_by: {}\nprompt_sha256: {}\n---\n\n{}\n",
+        fm.date.format("%Y-%m-%d"),
+        fm.generated_by,
+        fm.prompt_sha256,
+        body_of(output).trim_end()
+    )
+}
+
+pub fn write_summary(folder: &Path, fm: &Frontmatter, output: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(summaries_dir(folder))?;
+    std::fs::write(summary_path(folder, fm.date), render_summary(fm, output))
 }
 
 fn dates_in(dir: &Path) -> Vec<NaiveDate> {
@@ -323,21 +336,17 @@ mod tests {
     }
 
     #[test]
-    fn rejects_output_with_no_frontmatter() {
-        let text = "# A day\n\nSome prose.\n\n## Sessions\n09:00-11:00 things";
-        assert!(matches!(check(text), Err(Invalid::NoFrontmatter)));
+    fn accepts_a_summary_with_no_frontmatter() {
+        let body = good().split_once("---\n\n").unwrap().1.to_string();
+        assert!(body.starts_with("# A day"));
+        assert!(check(&body).is_ok());
     }
 
     #[test]
-    fn rejects_frontmatter_missing_the_type_field() {
-        let text = good().replace("type: day-context\n", "");
-        assert!(matches!(check(&text), Err(Invalid::MissingField("type"))));
-    }
-
-    #[test]
-    fn rejects_frontmatter_missing_the_date_field() {
-        let text = good().replace("date: 2026-08-28\n", "");
-        assert!(matches!(check(&text), Err(Invalid::MissingField("date"))));
+    fn accepts_frontmatter_the_model_never_closed() {
+        let text = good().replacen("---\n\n#", "\n#", 1);
+        assert!(check(&text).is_ok());
+        assert!(body_of(&text).starts_with("# A day of plumbing"));
     }
 
     #[test]
@@ -545,16 +554,24 @@ mod tests {
     }
 
     #[test]
-    fn writing_a_summary_creates_the_folder_and_strips_any_code_fence() {
+    fn writing_a_summary_replaces_the_models_frontmatter_with_the_apps() {
         let dir = tempdir().unwrap();
+        let fm = Frontmatter {
+            date: date(2026, 8, 28),
+            generated_by: "stub",
+            prompt_sha256: "abc",
+        };
         write_summary(
             dir.path(),
-            date(2026, 8, 28),
-            "```markdown\n---\nx\n---\n```",
+            &fm,
+            "```markdown\n---\ndate: 1999-01-01\ngenerated_by: GPT\n# A day\n```",
         )
         .unwrap();
         let written = std::fs::read_to_string(summary_path(dir.path(), date(2026, 8, 28))).unwrap();
-        assert_eq!(written, "---\nx\n---\n");
+        assert_eq!(
+            written,
+            "---\ndate: 2026-08-28\ntype: day-context\ngenerated_by: stub\nprompt_sha256: abc\n---\n\n# A day\n"
+        );
     }
 
     #[test]

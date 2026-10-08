@@ -279,12 +279,13 @@ pub fn summarise_day(
         }
     }
     let template = &p.prompts.day_context;
+    let prompt_sha256 = ledger::sha256_of(template.as_bytes());
     let mut entry = ledger::Entry {
         at: Local::now(),
         trigger,
         action: "summarise_day".to_string(),
         prompt_id: Some("day-context".to_string()),
-        prompt_sha256: Some(ledger::sha256_of(template.as_bytes())),
+        prompt_sha256: Some(prompt_sha256.clone()),
         engine: Some(p.summary_agent.label.clone()),
         inputs,
         output: None,
@@ -330,7 +331,12 @@ pub fn summarise_day(
         return Err(format!("{invalid}; {note}"));
     }
 
-    summarise::write_summary(p.folder, date, &output)
+    let frontmatter = summarise::Frontmatter {
+        date,
+        generated_by: &p.summary_agent.label,
+        prompt_sha256: &prompt_sha256,
+    };
+    summarise::write_summary(p.folder, &frontmatter, &output)
         .map_err(|e| format!("the summary could not be written: {e}"))?;
     entry.disposition = ledger::Disposition::Accepted;
     record_in_ledger(p.folder, &entry);
@@ -1464,7 +1470,7 @@ mod tests {
         let error =
             summarise_day(&p, day(2026, 8, 28), crate::ledger::Trigger::Schedule).unwrap_err();
 
-        assert!(error.contains("frontmatter"), "error was {error:?}");
+        assert!(error.contains("no sections"), "error was {error:?}");
         assert!(!crate::summarise::summary_path(folder.path(), day(2026, 8, 28)).exists());
         assert!(rejects.path().join("2026-08-28.md").exists());
 
