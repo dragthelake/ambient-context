@@ -18,6 +18,15 @@
   draws authentication and keychain dialogs) join the built-in excluded
   applications, so their windows are dropped before anything is written.
 
+### Summaries
+
+- **A day summary is no longer rejected over its frontmatter.** Models
+  sometimes left the frontmatter block unclosed, and the validator
+  discarded an otherwise good summary, which left the day pending for the
+  scheduled backfill. The app now writes the frontmatter itself (date,
+  type, the agent that generated it and the prompt's hash) and drops
+  whatever the model wrote there, closed or not.
+
 ### Menu bar
 
 - **Opening the app again shows the main window.** Launching Ambient

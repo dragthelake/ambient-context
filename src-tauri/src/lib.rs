@@ -1958,14 +1958,18 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|_app, event| {
+        .run(|app, event| match event {
             // Closing the setup window must not quit a menu bar app. A
             // window-close exit request carries no code; the Quit menu item
             // calls app.exit(0), which does, and passes through.
-            if let tauri::RunEvent::ExitRequested { code, api, .. } = event {
-                if code.is_none() {
-                    api.prevent_exit();
-                }
-            }
+            tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } => api.prevent_exit(),
+            // Opening the app again from Finder, Spotlight or Launchpad. The
+            // menu bar icon can be hidden by the system (macOS 26 lets users
+            // switch it off per app), so this is the fallback way in.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => open_main_window(app),
+            _ => {}
         });
 }
