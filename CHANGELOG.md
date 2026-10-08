@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Menu bar
+
+- **Opening the app again shows the main window.** Launching Ambient
+  Context from Finder, Spotlight or Launchpad while it is already running
+  opens the main window. On macOS 26 the menu bar icon can be hidden in
+  System Settings → Menu Bar, and this is the way back in when it is.
+
 ## 1.1.3
 
 Fixes daily schedule settings reverting instead of saving.
