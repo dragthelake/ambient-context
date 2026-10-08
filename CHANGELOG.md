@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.1.4
+
+Keeps Chinese and Japanese text, never reads Apple Passwords, stops
+rejecting summaries over their frontmatter, and opens the main window
+when the app is opened again.
 
 ### Capture
 
