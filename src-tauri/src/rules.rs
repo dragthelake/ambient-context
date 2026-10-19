@@ -146,7 +146,7 @@ pub fn built_ins() -> Vec<BuiltIn> {
         BuiltIn {
             id: "builtin:secret-patterns".to_string(),
             description:
-                "Keys, tokens, bearer headers, labelled secrets and card-shaped numbers are replaced with [redacted]."
+                "Keys, tokens, bearer headers, JWTs, private-key headers, passwords in connection strings, labelled secrets and card-shaped numbers are replaced with [redacted]."
                     .to_string(),
         },
         BuiltIn {

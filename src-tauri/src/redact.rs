@@ -62,6 +62,24 @@ fn patterns() -> &'static [Regex] {
             // Labelled secrets: api_key = ..., token: ..., password=...
             Regex::new(r"(?i)\b(?:api[_-]?key|secret|token|password|passwd)\b\s*[:=]\s*\S+")
                 .unwrap(),
+            // Vendor tokens, from the gitleaks rule set: GitHub, GitLab, Slack, npm
+            Regex::new(r"\b(?:gh[pousr]_[0-9a-zA-Z]{36}|github_pat_\w{82}|glpat-[\w-]{20})")
+                .unwrap(),
+            Regex::new(r"(?i)\b(?:xox[abeoprs]-[0-9a-z-]{10,}|xapp-\d-[a-z0-9]+-\d+-[a-z0-9]+)")
+                .unwrap(),
+            Regex::new(r"\bnpm_[A-Za-z0-9]{36}\b").unwrap(),
+            // JWT: three dot-separated base64url parts, the first two starting `ey`
+            Regex::new(r"\bey[A-Za-z0-9]{17,}\.ey[A-Za-z0-9/_\-]{17,}\.[A-Za-z0-9/_\-]{10,}")
+                .unwrap(),
+            // PEM private keys. Lines are redacted one at a time, so a key
+            // spread over many lines loses its header here and its body is
+            // only caught when the whole key sits on one line.
+            Regex::new(
+                r"-----BEGIN[ A-Z0-9_-]*PRIVATE KEY[ A-Z]*-----(?:.*?-----END[ A-Z0-9_-]*PRIVATE KEY[ A-Z]*-----)?",
+            )
+            .unwrap(),
+            // Credentials in a URL's userinfo: postgres://user:pass@host
+            Regex::new(r"(?i)\b[a-z][a-z0-9+.\-]*://[^\s/:@]*:[^\s/@]+@").unwrap(),
             // Card-shaped digit runs, 13 to 19 digits with optional separators
             Regex::new(r"\b(?:\d[ -]?){13,19}\b").unwrap(),
         ]
@@ -210,6 +228,77 @@ mod tests {
     fn redacts_labelled_secrets() {
         let out = redact_line("api_key = hunter2hunter2hunter2");
         assert!(!out.contains("hunter2hunter2hunter2"));
+    }
+
+    #[test]
+    fn redacts_the_password_in_a_connection_uri() {
+        for uri in [
+            "postgres://app:s3cretPw@db.internal:5432/prod",
+            "mongodb+srv://admin:p%40ss@cluster0.example.net/test",
+            "redis://:onlypassword@cache.local:6379",
+            "https://user:hunter2@example.com/path",
+        ] {
+            let out = redact_line(&format!("DATABASE_URL={uri}"));
+            assert!(
+                !out.contains("s3cretPw")
+                    && !out.contains("p%40ss")
+                    && !out.contains("onlypassword")
+                    && !out.contains("hunter2"),
+                "{out}"
+            );
+        }
+    }
+
+    #[test]
+    fn keeps_the_host_of_a_redacted_connection_uri() {
+        let out = redact_line("see postgres://app:s3cretPw@db.internal:5432/prod");
+        assert!(out.contains("db.internal:5432/prod"), "{out}");
+    }
+
+    #[test]
+    fn leaves_urls_without_credentials_alone() {
+        let line = "https://example.com:8080/a:b@c and ssh://git@github.com/x/y";
+        assert_eq!(redact_line(line), line);
+    }
+
+    #[test]
+    fn redacts_vendor_tokens_gitleaks_knows() {
+        let cases = [
+            ("ghp_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+            ("gho_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+            ("ghs_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+            ("github_pat_", "11ABCDEFG0abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789"),
+            ("glpat-", "abcdefghij0123456789"),
+            ("xoxb-", "1234567890123-1234567890123-abcdEFGH1234"),
+            ("xoxp-", "1234567890-1234567890-1234567890-abcdef0123456789abcdef0123456789"),
+            ("xapp-", "1-A0123456789-1234567890-abcdef0123456789"),
+            ("npm_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+        ];
+        for (prefix, body) in cases {
+            let out = redact_line(&format!("token is {prefix}{body} ok"));
+            assert!(!out.contains(body), "{prefix}: {out}");
+        }
+    }
+
+    #[test]
+    fn redacts_a_jwt() {
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let out = redact_line(&format!("Authorization header {jwt}"));
+        assert!(!out.contains("eyJhbGci") && !out.contains("SflKxw"), "{out}");
+    }
+
+    #[test]
+    fn redacts_a_private_key_header_and_inline_body() {
+        let out = redact_line("-----BEGIN RSA PRIVATE KEY-----");
+        assert_eq!(out, "[redacted]");
+        let out = redact_line("-----BEGIN PRIVATE KEY-----MIIEvQIBADANBgkqhkiG9w0BAQEFAASC-----END PRIVATE KEY-----");
+        assert!(!out.contains("MIIEvQ"), "{out}");
+    }
+
+    #[test]
+    fn short_lookalikes_are_left_alone() {
+        let line = "ghp_ is a prefix, npm_config and eyJ are fine, xoxb-1 too";
+        assert_eq!(redact_line(line), line);
     }
 
     #[test]

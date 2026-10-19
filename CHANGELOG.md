@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Capture
+
+- **More secret shapes are redacted before a line is written.** The
+  password in a URL's `user:password@` part (a database connection string
+  was captured in the clear), GitHub, GitLab, Slack and npm tokens, JWTs,
+  and the header of a PEM private key are now replaced with `[redacted]`.
+  The vendor patterns come from the gitleaks rule set. A key spread over
+  several lines still keeps its body lines, because redaction works one
+  line at a time.
+
 ## 1.1.5
 
 Accepts a figure followed by Chinese or Japanese text as evidence, and

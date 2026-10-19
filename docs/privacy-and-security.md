@@ -84,11 +84,21 @@ normal block.
 
 ### Before lines are written
 
-Built-in regex patterns replace recognised credential shapes, API-style
-keys, bearer tokens, labelled `password=` / `api_key=` forms, and
-card-shaped digit runs with `[redacted]`. You can add extra patterns in
-Settings. Patterns that fail to compile are ignored so a typo cannot stop
-capture.
+Built-in regex patterns replace the following with `[redacted]`:
+
+- AWS access key ids, provider-style `sk-` / `pk_` / `rk_` keys, and
+  bearer tokens
+- GitHub (`ghp_`, `github_pat_`, ...), GitLab (`glpat-`), Slack (`xox*-`,
+  `xapp-`) and npm (`npm_`) tokens, taken from the gitleaks rule set
+- JWTs and the header of a PEM private key
+- the `user:password@` part of a URL, such as a database connection string
+- labelled `password=` / `api_key=` forms and card-shaped digit runs
+
+Redaction runs one line at a time. A private key spread over several lines
+loses its `BEGIN` line, but its base64 body lines are not recognised.
+
+You can add extra patterns in Settings. Patterns that fail to compile are
+ignored so a typo cannot stop capture.
 
 Website visits are recorded as URL rows without page bodies. Message
 surfaces are routed to `messages.md` with chrome pruned; that is for
@@ -134,7 +144,7 @@ Only enable clients you trust on that machine.
 | Focused window only; nothing while screen locked | Structural + platform | Depends on macOS frontmost and lock reporting |
 | Secure fields skipped at AX walk | Structural | Depends on apps exposing `AXSecureTextField` correctly |
 | Password managers / private titles dropped | Best-effort heuristic | Name and title substring lists; unknown apps and normal browser windows are not covered |
-| Pattern redaction of common secrets | Best-effort heuristic | Regexes miss novel formats; user extras help |
+| Pattern redaction of common secrets | Tested behaviour for the listed formats; best-effort otherwise | Unlisted vendors, multi-line keys and secrets with no fixed shape pass through; user extras help |
 | No Ambient Context upload of the record | Structural | Updater and user-opened links are separate; synced folders and agent CLIs are yours |
 | Own window headings-only; own day files skipped | Tested behaviour | Measured self-capture regression drove the rule |
 
@@ -144,6 +154,8 @@ Only enable clients you trust on that machine.
   captured like any other page or message surface.
 - Apps that put secrets in ordinary text fields, or that mis-label secure
   fields, bypass the strongest control.
+- Multi-line secrets (PEM key bodies) and secrets with no recognisable
+  prefix, such as a bare password in a free-text field, are not detected.
 - Redaction does not remove secrets from `file:` / `url:` references when
   the path or query string itself is sensitive.
 - Summaries and KB files can restate content that already passed into
