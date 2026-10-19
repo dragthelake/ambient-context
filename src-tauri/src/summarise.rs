@@ -37,7 +37,7 @@ impl std::fmt::Display for Invalid {
                 write!(f, "the summary cites no time ranges from the day file")
             }
             Invalid::CitationOutsideTimeline(citation) => {
-                write!(f, "{citation} is outside every captured block")
+                write!(f, "{citation} is outside the recorded day")
             }
             Invalid::UnsupportedFigure(figure) => {
                 write!(

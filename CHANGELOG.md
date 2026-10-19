@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Ingest
+
+- **A time citation is checked against the recorded day, not each block.**
+  A citation had to start and end inside a captured block. The agent
+  summarises an activity that runs all day (a feed, a bot) as one wide
+  range and writes its ends from memory, so an end that landed in a gap
+  between blocks failed the whole day, whatever the range said. The check
+  now asks whether each end falls between the first block's start and the
+  last block's end, which still rejects a time the day never recorded. It
+  covers the summary check too, and the error now reads "outside the
+  recorded day".
+
 ## 1.1.5
 
 Accepts a figure followed by Chinese or Japanese text as evidence, and

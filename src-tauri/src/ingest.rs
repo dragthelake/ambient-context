@@ -169,7 +169,7 @@ impl std::fmt::Display for Invalid {
                 write!(f, "{file}: a line carries no time range: {line:?}")
             }
             Invalid::CitationOutsideTimeline { file, citation } => {
-                write!(f, "{file}: {citation} is outside every captured block")
+                write!(f, "{file}: {citation} is outside the recorded day")
             }
             Invalid::TooLong { file, lines, max } => {
                 write!(f, "{file} is {lines} lines, over the {max} line budget")
