@@ -180,7 +180,29 @@ impl std::fmt::Display for Invalid {
 
 fn citation() -> &'static Regex {
     static CITATION: OnceLock<Regex> = OnceLock::new();
-    CITATION.get_or_init(|| Regex::new(r"\b(\d{2}):(\d{2})[-\x{2013}](\d{2}):(\d{2})\b").unwrap())
+    // No `\b`: it is Unicode-aware, so a range written straight after or
+    // before CJK text ("と19:16-19:52に") would not count as a citation.
+    CITATION.get_or_init(|| Regex::new(r"(\d{2}):(\d{2})[-\x{2013}](\d{2}):(\d{2})").unwrap())
+}
+
+/// A heading for a one-minute block is `08:46–08:46`, and models copy it as
+/// `08:46`. Taken as a range of zero length, but only where no range is given.
+fn single_time() -> &'static Regex {
+    static TIME: OnceLock<Regex> = OnceLock::new();
+    TIME.get_or_init(|| Regex::new(r"(\d{2}):(\d{2})").unwrap())
+}
+
+/// The citation of a line as `(text, start, end)` minutes. Lines end with
+/// their citation, so the last time is the one that counts: an earlier one is
+/// part of what the line says ("approved the 10/19 17:30-18:30 slot").
+fn line_citation(line: &str) -> Option<(String, u32, u32)> {
+    let minutes = |h: &str, m: &str| h.parse::<u32>().unwrap_or(0) * 60 + m.parse::<u32>().unwrap_or(0);
+    if let Some(c) = citation().captures_iter(line).last() {
+        return Some((c[0].to_string(), minutes(&c[1], &c[2]), minutes(&c[3], &c[4])));
+    }
+    let c = single_time().captures_iter(line).last()?;
+    let at = minutes(&c[1], &c[2]);
+    Some((c[0].to_string(), at, at))
 }
 
 pub fn validate(call: Call, split: &Split, spans: &[(u32, u32)]) -> Result<(), Invalid> {
@@ -220,18 +242,16 @@ pub fn validate(call: Call, split: &Split, spans: &[(u32, u32)]) -> Result<(), I
             if t.is_empty() || t.starts_with("## ") || t == NOTHING {
                 continue;
             }
-            let Some(caps) = citation().captures(t) else {
+            let Some((text, start, end)) = line_citation(t) else {
                 return Err(Invalid::NoCitation {
                     file: (*expected).to_string(),
                     line: t.chars().take(80).collect(),
                 });
             };
-            let n = |i: usize| caps[i].parse::<u32>().unwrap_or(0);
-            let (start, end) = (n(1) * 60 + n(2), n(3) * 60 + n(4));
             if !inside(start, spans) || !inside(end, spans) {
                 return Err(Invalid::CitationOutsideTimeline {
                     file: (*expected).to_string(),
-                    citation: caps[0].to_string(),
+                    citation: text,
                 });
             }
         }
@@ -600,6 +620,34 @@ mod tests {
         assert!(matches!(
             validate(Call::Messages, &split_output(&text), &spans()).unwrap_err(),
             Invalid::NoCitation { file, .. } if file == "commitments.md"
+        ));
+    }
+
+    #[test]
+    fn a_range_next_to_cjk_text_counts_as_a_citation() {
+        let text = GOOD_MESSAGES.replace("09:48-09:59", "と09:48-09:59に");
+        validate(Call::Messages, &split_output(&text), &spans()).unwrap();
+    }
+
+    #[test]
+    fn a_single_time_inside_a_block_is_a_citation_and_outside_one_is_not() {
+        let text = GOOD_MESSAGES.replace("09:48-09:59", "09:48。");
+        validate(Call::Messages, &split_output(&text), &spans()).unwrap();
+        let text = GOOD_MESSAGES.replace("09:48-09:59", "14:00。");
+        assert!(matches!(
+            validate(Call::Messages, &split_output(&text), &spans()).unwrap_err(),
+            Invalid::CitationOutsideTimeline { .. }
+        ));
+    }
+
+    #[test]
+    fn the_last_range_on_a_line_is_its_citation() {
+        let text = GOOD_MESSAGES.replace("09:48-09:59", "booked 14:00-14:30 next week 09:48-09:59");
+        validate(Call::Messages, &split_output(&text), &spans()).unwrap();
+        let text = GOOD_MESSAGES.replace("09:48-09:59", "booked 09:48-09:59 next week 14:00-14:30");
+        assert!(matches!(
+            validate(Call::Messages, &split_output(&text), &spans()).unwrap_err(),
+            Invalid::CitationOutsideTimeline { .. }
         ));
     }
 

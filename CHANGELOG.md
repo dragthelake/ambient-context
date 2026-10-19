@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Ingest
+
+- **A time citation is read the way the prompt asks for it.** Three
+  readings rejected an otherwise good output, and a rejected call fails the
+  whole day. A range written directly against Japanese text
+  (`と19:16-19:52に`) was not found, because `\b` is Unicode-aware and kana
+  count as word characters. A one-minute heading such as `08:46-08:46` was
+  copied as `08:46` and rejected as having no range; a single time inside a
+  captured block is now accepted as a range of zero length. And a line
+  with several times was checked on its first, so a time that is part of
+  the claim ("approved the 10/19 17:30-18:30 slot", cited `08:24-08:27`)
+  was checked instead of the citation; the last time on the line, where
+  the prompt puts the citation, is the one checked. The ingest prompts now
+  say the same.
+
 ## 1.1.5
 
 Accepts a figure followed by Chinese or Japanese text as evidence, and
